@@ -1,20 +1,20 @@
 # Spacer
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Spacer` est une feuille de layout de taille fixe et sans paint. Source : `Spacer` / `SpacerComponent` dans [layout_builders.inc](../include/nativeui/detail/layout_builders.inc) et [layout_components.inc](../include/nativeui/detail/layout_components.inc).
+`Spacer` is a fixed-size layout leaf with no painting. Source: `Spacer` / `SpacerComponent` in [layout_builders.inc](../include/nativeui/detail/layout_builders.inc) and [layout_components.inc](../include/nativeui/detail/layout_components.inc).
 
-Pas de famille autonome nécessaire à porter de MyGo : l’équivalent se compose par `Box` et ses contraintes. Ici le composant NativeUI supplémentaire reste public.
+No independent family needs to be ported from MyGo: the equivalent is composed through `Box` and its constraints. This additional NativeUI component remains public.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante :
+Existing API:
 
 ```cpp
 explicit Spacer(float height);
@@ -23,81 +23,81 @@ explicit Spacer(Size size);
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 auto column = ui::Column{ui::Label{"A"}, ui::Spacer{0.0f, 12.0f}, ui::Label{"B"}};
 ```
 
-`Spacer(float)` signifie hauteur, largeur zéro. Préserver `SpacerComponent(Size)`.
+`Spacer(float)` means height, with zero width. Preserve `SpacerComponent(Size)`.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-La taille est copiée à la consommation du builder. Aucun enfant, binding, callback ou animation. Le spacer n’emploie pas d’état global et n’acquiert aucune ressource.
+Size is copied when the builder is consumed. No child, binding, callback or animation. The spacer uses no global state and acquires no resources.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun focus, hit target ou capture. Il ne réagit pas au pointeur, à la molette ni au clavier et ne déclenche ni validation ni annulation. Son espace n’empêche pas le parent de recevoir les événements.
+No focus, hit target or capture. It does not react to pointer, wheel or keyboard input and triggers neither confirmation nor cancellation. Its space does not prevent the parent from receiving events.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Minimum et préférée sont la taille assainie : chaque axe négatif ou non fini devient zéro. Le parent conserve son autorité sur les bounds attribués. Une largeur/hauteur zéro reste légale. `Flex{Spacer{...}}` peut servir d’espace extensible via les poids du wrapper.
+Minimum and preferred size are the sanitized size: each negative or non-finite axis becomes zero. The parent retains authority over the allocated bounds. Zero width/height remains legal. `Flex{Spacer{...}}` can provide expandable space through the wrapper weights.
 
-- Ne pas utiliser la présence de pixels comme critère de taille intrinsèque.
-- Le spacer de largeur zéro dans Row ne réserve que le gap normal entre enfants.
-- Dans Column, une hauteur zéro reste un enfant logique et suit le comptage des gaps actuel.
-- Les contraintes externes n’écrivent pas une nouvelle Size dans la recette.
-- Si l’application désire retirer les gaps, elle utilise Collapsed/If au lieu d’un spacer invisible.
+- Do not use the presence of pixels as the criterion for intrinsic size.
+- A zero-width spacer in Row reserves only the normal gap between children.
+- In Column, zero height still represents a logical child and follows the current gap count.
+- External constraints do not write a new Size into the recipe.
+- An application that wants to remove gaps uses Collapsed/If instead of an invisible spacer.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Aucun pixel peint. Une modification de taille par reconstruction demande layout ; aucun style, focus ring ni state hover. Ne pas peindre le fond du thème à la place du spacer.
+No pixels are painted. Changing size through a rebuild requests layout; no style, focus ring or hover state. Do not paint the theme background in place of the spacer.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Rôle `None`, sans enfant ; aucune entrée sémantique exposée. L’espace décoratif ne doit pas être annoncé comme texte vide ou séparateur navigable.
+Role `None`, with no child; no semantic entry is exposed. Decorative space must not be announced as empty text or a navigable separator.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Construction et démontage sans effets utilisateur. Une exception d’allocation avant publication de Spec ne laisse rien enregistré. Les cycles créer/détruire et deux spacers n’ont aucune dépendance croisée.
+Construction and unmounting have no user-visible effects. An allocation exception before Spec publication leaves nothing registered. Create/destroy cycles and two spacers have no cross-dependencies.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend des types `Size` et `Component`. Couvrir toutes les surcharges, contraintes réduites et valeurs non finies ; aucune dépendance sur Skia, timers ou plateformes.
+Depends on the `Size` and `Component` types. Cover all overloads, reduced constraints and non-finite values; no dependency on Skia, timers or platforms.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/spacer.hpp` et `src/spacer.cpp`.
+Target: `include/nativeui/spacer.hpp` and `src/spacer.cpp`.
 
-Conserver les trois surcharges et `SpacerComponent` public. `spacer.cpp` contient les opérations de mesure/minimum/paint et assainissement ; `layout.hpp` réexporte le header individuel.
+Preserve all three overloads and the public `SpacerComponent`. `spacer.cpp` contains measurement/minimum/paint operations and sanitization; `layout.hpp` re-exports the individual header.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `spacer_height_overload` : `(12)` vaut `(0,12)`.
-- `spacer_size_overload` : Size et deux floats équivalents.
-- `spacer_sanitization` : axe négatif/NaN/inf ramené indépendamment à zéro.
-- `spacer_in_flex` : allocation par poids sans changement du minimum.
-- `spacer_no_input_semantics` : aucun focus/hit target/nœud sémantique.
-- `spacer_headless` : pixels inchangés après paint.
+- `spacer_height_overload`: `(12)` equals `(0,12)`.
+- `spacer_size_overload`: Size and two floats are equivalent.
+- `spacer_sanitization`: negative/NaN/inf axes are independently reduced to zero.
+- `spacer_in_flex`: allocation by weight without changing the minimum.
+- `spacer_no_input_semantics`: no focus/hit target/semantic node.
+- `spacer_headless`: pixels unchanged after paint.
 
-Créer l’exemple public futur `examples/features/spacer.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/spacer.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

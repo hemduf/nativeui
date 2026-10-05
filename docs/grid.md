@@ -1,20 +1,20 @@
 # Grid
 
-Statut : **existant à enrichir**.
+Status: **existing — enhancements required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Grid` existe avec pistes Fixed/Auto/Flex et placement séquentiel ligne par ligne. Sources : [layout_model.inc](../include/nativeui/detail/layout_model.inc), `Track`, `GridTracks` ; [layout_components.inc](../include/nativeui/detail/layout_components.inc), `GridComponent` ; [layout_builders.inc](../include/nativeui/detail/layout_builders.inc).
+`Grid` exists with Fixed/Auto/Flex tracks and sequential placement row by row. Sources: [layout_model.inc](../include/nativeui/detail/layout_model.inc), `Track`, `GridTracks`; [layout_components.inc](../include/nativeui/detail/layout_components.inc), `GridComponent`; [layout_builders.inc](../include/nativeui/detail/layout_builders.inc).
 
-MyGo `ui/grid.go` : `Grid`, `ColumnStart`, `RowStart`, `ColumnSpan`, `RowSpan`, `gridPlace`, `sizeTracks`. Les écarts à combler sont le placement explicite et les cellules fusionnées ; le layout reste distinct de [GridView](grid_view.md).
+MyGo `ui/grid.go`: `Grid`, `ColumnStart`, `RowStart`, `ColumnSpan`, `RowSpan`, `gridPlace`, `sizeTracks`. The gaps to address are explicit placement and merged cells; layout remains separate from [GridView](grid_view.md).
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante à conserver :
+Existing API to preserve:
 
 ```cpp
 template<class... Children> Grid(GridTracks tracks, Children&&... children);
@@ -24,84 +24,84 @@ Grid&& row_gap(float value) &&;
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 auto grid = ui::Grid{
     ui::GridTracks{.columns={ui::Track::fixed(100.0f), ui::Track::flex(1.0f)},
                    .rows={ui::Track::auto_size()}},
-    ui::Label{"Nom"}, ui::Label{"Valeur"}}.gap(8.0f);
+    ui::Label{"Name"}, ui::Label{"Value"}}.gap(8.0f);
 ```
 
-Extension cible : `GridCell{std::size_t row, column, row_span=1, column_span=1}` et `template<class Child> Grid&& cell(GridCell, Child&&) &&`. Indices zéro-based ; contenu constructeur continue en auto-placement. `Grid(GridTracks)` accepte zéro enfant puis `.cell`.
+Target extension: `GridCell{std::size_t row, column, row_span=1, column_span=1}` and `template<class Child> Grid&& cell(GridCell, Child&&) &&`. Indices are zero-based; constructor content continues to use auto-placement. `Grid(GridTracks)` accepts zero children followed by `.cell`.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Pistes, placements et Spec sont possédés. Aucun binding de sélection ni callback. Une cellule ne référence jamais directement un nœud Tree. Valider les placements avant consommation ; l’ordre de Spec reste l’ordre logique même si les positions explicites diffèrent.
+Tracks, placements and Spec objects are owned. No selection binding or callback. A cell never directly references a Tree node. Validate placements before consumption; Spec order remains the logical order even when explicit positions differ.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun focus/capture propre. Tab suit la composition ; le pointeur utilise les bounds enfants. Le layout ne propose pas de sélection de cellules ni de navigation par flèches, comportements de TableView/GridView. Les gestures et validations restent dans les contrôles enfants.
+No focus/capture of its own. Tab follows composition order; the pointer uses child bounds. The layout does not provide cell selection or arrow navigation, which belong to TableView/GridView. Gestures and confirmation remain in the child controls.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-- Fixed garde l’extent assaini ; Auto suit l’intrinsèque ; Flex distribue l’espace libre.
-- Colonnes vides deviennent une Auto ; compléter les lignes requises par Auto.
-- Revendiquer les cellules explicites avant auto-placement ; auto-placement row-major dans les premières cases libres sans densification rétroactive.
-- Span zéro, overflow size_t, recouvrement explicite ou extent non représentable : `invalid_argument` avant publication.
-- Contribution intrinsèque d’un span répartie sur Auto/Flex après soustraction des gaps, sans modifier Fixed.
-- Déficit : réduction jusqu’aux minima puis débordement explicite, sans clip automatique.
-- Passes de mesure bornées et publication unique ; pas de boucle de convergence non déterministe.
+- Fixed retains the sanitized extent; Auto follows intrinsic size; Flex distributes free space.
+- An empty column list becomes a single Auto track; append Auto tracks for required rows.
+- Claim explicit cells before auto-placement; auto-placement proceeds in row-major order through the first free cells, without retroactive densification.
+- A zero span, size_t overflow, explicit overlap or unrepresentable extent causes `invalid_argument` before publication.
+- Distribute a span’s intrinsic contribution across Auto/Flex tracks after subtracting gaps, without changing Fixed tracks.
+- Deficit: reduce sizes down to their minima, then allow explicit overflow without automatic clipping.
+- Bounded measurement passes and a single publication; no nondeterministic convergence loop.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Aucun paint. Pistes/spans modifiés demandent layout ; la couleur enfant demande paint. Les styles descendants influencent les pistes via leurs métriques. Ne pas ajouter lignes de tableau ni sélection au Grid.
+No painting. Track/span changes request layout; child color changes request paint. Descendant styles affect tracks through their metrics. Do not add table lines or selection to Grid.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Rôle `None` ; enfants dans l’ordre de composition. La position 2D ne crée pas une sémantique Table. Les spans ne créent aucun descendant accessible fantôme ni double annonce.
+Role `None`; children follow composition order. The 2D position does not create Table semantics. Spans create no phantom accessible descendant or duplicate announcement.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer occupation, pistes et allocations avant publier placements. Une erreur conserve la dernière génération cohérente. Une mesure qui lève ne laisse pas une piste définitivement marquée « mesurée » ; une passe suivante peut récupérer.
+Prepare occupancy, tracks and allocations before publishing placements. A failure preserves the last coherent generation. A throwing measurement must not leave a track permanently marked “measured”; a subsequent pass can recover.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Allocation de pistes/contraintes existantes. Tester vide, rows déclarées insuffisantes, spans au-delà des pistes initiales, grands indices, poids zéro, fenêtre réduite. Le nombre d’enfants est distinct du nombre de cellules occupées.
+Uses existing track/constraint allocation. Test empty content, insufficient declared rows, spans beyond the initial tracks, large indices, zero weights and a reduced window size. The number of children differs from the number of occupied cells.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/grid.hpp` et `src/grid.cpp`.
+Target: `include/nativeui/grid.hpp` and `src/grid.cpp`.
 
-Préserver `GridComponent`, `Track`, `TrackType`, `GridTracks` par déclaration unique/réexports adaptés ; ne pas dupliquer les modèles entre headers. `grid.cpp` porte placement et sizing des spans. `layout.hpp`, anciennes signatures/gaps float et auto-placement sans spans restent compatibles.
+Preserve `GridComponent`, `Track`, `TrackType` and `GridTracks` through single declarations and appropriate re-exports; do not duplicate models across headers. `grid.cpp` contains placement and span sizing. `layout.hpp`, historical signatures/float gaps and auto-placement without spans remain compatible.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `grid_legacy_tracks` : conserver les scénarios `grid_layout_tests`.
-- `grid_span_intrinsic` : span sur Fixed/Auto/Flex avec minima.
-- `grid_auto_occupied` : ignorer les cases explicitement occupées.
-- `grid_overlap_overflow` : refuser validation sans demi-commit.
-- `grid_empty_resize` : empty/zero bounds puis resize positif.
-- `grid_span_fault` : allocation/mesure qui lève puis génération valide.
+- `grid_legacy_tracks`: preserve the `grid_layout_tests` scenarios.
+- `grid_span_intrinsic`: spans across Fixed/Auto/Flex with minima.
+- `grid_auto_occupied`: skip explicitly occupied cells.
+- `grid_overlap_overflow`: reject validation without a partial commit.
+- `grid_empty_resize`: empty/zero bounds followed by a positive resize.
+- `grid_span_fault`: throwing allocation/measurement followed by a valid generation.
 
-Créer l’exemple public futur `examples/features/grid.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/grid.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

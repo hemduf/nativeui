@@ -9,7 +9,7 @@ struct NumberInputStyle {
   StepperStyle stepper;
   double gap{4.0};
   std::optional<Color> invalid_color;
-  std::string invalid_message{"Valeur invalide"};
+  std::string invalid_message{"Invalid value"};
 };
 class NumberInput {
 public:

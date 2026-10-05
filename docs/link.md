@@ -1,27 +1,22 @@
 # Link
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Présenter un texte qui déclenche une navigation applicative. Le composant n’effectue aucune
-ouverture de navigateur ni interprétation automatique de route.
+Present text that triggers application navigation. The component does not open a browser or automatically interpret routes.
 
-NativeUI a TextService et Button, mais aucun Link public dans
-[widgets.hpp](../include/nativeui/widgets.hpp). Réutiliser les fondations de texte et d’activation
-plutôt que porter le moteur MyGo.
+NativeUI has TextService and Button but no public Link in [widgets.hpp](../include/nativeui/widgets.hpp). Reuse text and activation foundations rather than porting the MyGo engine.
 
-MyGo : `ui/widgets.go`, fonction `Link` ; elle ouvre une URL ou pousse un chemin dans Router,
-souligne au survol et s’intègre au texte enrichi. Cible NativeUI : destination possédée et callback
-injecté ; l’application décide URL, route et validation.
+MyGo: `ui/widgets.go`, function `Link`; it opens a URL or pushes a path into Router, underlines on hover, and integrates into rich text. NativeUI target: owned destination and an injected callback; the application decides the URL, route, and validation.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class Link {
@@ -34,154 +29,106 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
-auto help = ui::Link("Aide", "/aide", [](const std::string&) {}).spec();
+auto help = ui::Link("Help", "/help", [](const std::string&) {}).spec();
 ```
 
-LinkStyle cible contient TextStyle, couleurs normal/hovered/disabled, soulignement au repos et au
-survol, métrique du focus. wrap(false) est la valeur par défaut ; aucun slot Theme nouveau n’est
-présumé.
+Target LinkStyle contains TextStyle, normal/hovered/disabled colors, underlining at rest and on hover, and a focus metric. wrap(false) is the default; no new Theme slot is assumed.
 
-Pour une portée dans RichText, le moteur de runs doit consommer destination et action équivalentes ;
-cette page ne demande pas qu’un composant retenu indépendant soit installé à chaque mot.
+For a span in RichText, the run engine must consume equivalent destination and action data; this page does not require a separate retained component for each word.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Texte, destination, callback et style sont copiés/déplacés dans la Spec. Survol, capture et focus
-sont locaux ; aucune adresse de texte temporaire n’est conservée.
+Text, destination, callback, and style are copied/moved into the Spec. Hover, capture, and focus are local; no address of temporary text is retained.
 
-Changer de destination via reconstruction compatible met à jour le callback au checkpoint. Une
-interaction déjà armée est annulée si son identité de lien est remplacée.
+Changing destination through compatible reconstruction updates the callback at the checkpoint. An already armed interaction is cancelled if its link identity is replaced.
 
-Le composant ne conserve pas d’historique et n’observe pas de route globale. Le callback reçoit un
-instantané de destination, même si l’action reconstruit la page.
+The component keeps no history and observes no global route. The callback receives a destination snapshot even if the action rebuilds the page.
 
 ## 4. Interactions
 
-Clic principal : activation au relâchement à l’intérieur après capture. Sortie ou PointerCancel
-annulent ; la molette remonte au parent.
+Primary click: activate on release inside after capture. Leaving bounds or PointerCancel cancel; the wheel bubbles to the parent.
 
-Tab peut donner le focus ; Entrée active au premier KeyDown, répétitions supprimées jusqu’à KeyUp.
-Espace utilise l’activation au relâchement pour rester utilisable au clavier, sans défilement
-concurrent.
+Tab can assign focus; Enter activates on the first KeyDown, with repeats suppressed until KeyUp. Space uses activation on release to remain keyboard-accessible without concurrent scrolling.
 
-Disabled rend l’action indisponible ; ReadOnly n’interdit pas une navigation qui ne modifie pas la
-valeur du lien. Aucun menu URL, téléchargement, visite automatique ou gesture système n’est ajouté.
+Disabled makes the action unavailable; ReadOnly does not prohibit navigation that leaves the link's value unchanged. No URL menu, download, automatic visit, or system gesture is added.
 
-La sélection de texte appartient à RichText ; Link autonome constitue une zone d’action et ne
-sélectionne pas son label au glissement.
+Text selection belongs to RichText; standalone Link is an action region and does not select its label on drag.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Sans wrap, largeur intrinsèque du texte et hauteur de ligne, avec aire du ring. Avec wrap, mesurer
-via TextService sous la largeur allouée, sans convertir les coordonnées logiques en pixels dans le
-widget.
+Without wrap, intrinsic text width and line height, including ring space. With wrap, measure through TextService within the allocated width, without converting logical coordinates to pixels in the widget.
 
-Un parent étroit clippe ou répartit en lignes selon wrap. Le hit-test suit la boîte allouée du
-composant ; les fragments de RichText ont leur propre géométrie dans le moteur de runs.
+A narrow parent clips or wraps according to wrap. Hit testing follows the component's allocated box; RichText fragments have their own geometry in the run engine.
 
-Modification de police, de texte ou de largeur sous wrap invalide layout ; destination seule ne
-change pas la géométrie.
+Changing font, text, or width with wrap enabled invalidates layout; destination alone does not change geometry.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Couleur d’action issue du thème et soulignement au survol ; ring visible au clavier. Un état visité
-n’est pas implicitement enregistré : une application peut donner un style adapté.
+Theme action color and underline on hover; visible ring for keyboard focus. Visited state is not implicitly recorded: an application may provide a suitable style.
 
-Le trait de soulignement est peint avec les métriques de texte, sans remplacer le contenu par un
-bouton rectangulaire. Couleur/hover ne relancent que paint.
+Paint the underline using text metrics, without replacing content with a rectangular button. Color/hover trigger paint alone.
 
-Pas de chargement d’icônes ou ouverture réseau dans paint ; le callback intervient uniquement lors
-d’une activation complète.
+No icon loading or network opening in paint; invoke the callback only on completed activation.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-SemanticRole ne contient actuellement pas Link. Utiliser Custom avec nom, description destination et
-action Activate ; ajouter un rôle Link est une évolution séparée du modèle sémantique.
+SemanticRole does not currently contain Link. Use Custom with a name, destination description, and Activate action; adding a Link role is a separate semantic-model evolution.
 
-La destination n’est pas le nom : un label “Aide” et sa cible doivent être exposés séparément. Un
-lien sans callback ou destination vide garde du texte mais n’annonce pas Activate.
+Destination is not the name: a “Help” label and its target must be exposed separately. A link without a callback or with an empty destination keeps its text but does not advertise Activate.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Copier destination et callback, désarmer l’activation puis appeler l’application. Si navigate lève,
-conserver le lien utilisable ; aucune navigation n’est considérée rejouable.
+Copy destination and callback, disarm activation, then call the application. If navigate throws, keep the link usable; no navigation is considered replayable.
 
-Retrait du lien pendant un appui ou reconstruction d’un RichText annule le geste ; un lien de même
-texte ne récupère pas une identité périmée.
+Removing the link during a press or reconstructing a RichText cancels the gesture; a link with the same text does not inherit a stale identity.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : TextService, Button/PressActivationState, disponibilité et focus communs ; RichText
-utilise seulement le contrat de navigation.
+Dependencies: TextService, Button/PressActivationState, shared availability and focus; RichText uses only the navigation contract.
 
-Destination vide ou callback vide : aucune activation navigante, pas d’exception. Les caractères de
-destination sont opaques au toolkit ; filtrage des schemes, permissions et URI relatives
-appartiennent à l’application.
+Empty destination or callback: no navigation activation, no exception. Destination characters are opaque to the toolkit; scheme filtering, permissions, and relative URIs belong to the application.
 
-Des libellés identiques vers plusieurs destinations doivent rester des instances distinctes. Aucun
-global “dernier lien visité” ni Router MyGo porté.
+Identical labels pointing to different destinations must remain separate instances. No global “last visited link” or ported MyGo Router.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/link.hpp` et `src/link.cpp`. Le header expose les déclarations publiques
-et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable noyau retenu,
-interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/link.hpp` and `src/link.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-LinkStyle et NavigateCallback restent dans le couple Link. Le code du callback injecté ne pénètre
-pas la couche platform ; l’adaptateur d’ouverture d’URL reste extérieur.
+LinkStyle and NavigateCallback remain in the Link file pair. Injected callback code does not enter the platform layer; the URL-opening adapter remains external.
 
-Inscrire `src/link.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/link.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`link_destination` : callback reçoit exactement la destination possédée ; label distinct.
+`link_destination`: the callback receives exactly the owned destination; the label is distinct.
 
-`link_keyboard` : Entrée et Espace activent une fois ; Tab et molette restent conformes au groupe.
+`link_keyboard`: Enter and Space activate once; Tab and wheel follow the group contract.
 
-`link_cancel_replace` : PointerCancel et remplacement de destination armée annulent sans mauvaise
-navigation.
+`link_cancel_replace`: PointerCancel and replacement of an armed destination cancel without incorrect navigation.
 
-`link_wrap` : texte long et multi-octets garde mesure, clipping et focus sous resize.
+`link_wrap`: long, multibyte text preserves measurement, clipping, and focus during resizing.
 
-`link_navigate_throw` : callback lève ou retire son sous-arbre ; captures et prochaine action
-récupèrent.
+`link_navigate_throw`: a callback throws or removes its subtree; captures and the next action recover.
 
-Ajouter `examples/features/link.cpp`, compilable par le consommateur public, avec mode `--self-test`
-vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/link.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

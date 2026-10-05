@@ -1,25 +1,22 @@
 # ToggleGroup
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Regrouper des actions indépendantes en segments joints : gras/italique/souligné. Le groupe est un
-arrêt de Tab et une unité visuelle, sans état de sélection exclusif.
+Group independent actions into joined segments: bold/italic/underline. The group is a Tab stop and a visual unit, without exclusive selection state.
 
-NativeUI fournit Row, RadioGroup et les services de focus, mais pas ce conteneur. Lire les contrats
-de [widgets.hpp](../include/nativeui/widgets.hpp) et [focus.hpp](../include/nativeui/focus.hpp).
+NativeUI provides Row, RadioGroup, and focus services but no such container. Read the contracts in [widgets.hpp](../include/nativeui/widgets.hpp) and [focus.hpp](../include/nativeui/focus.hpp).
 
-MyGo : `ui/toggle.go`, `ToggleGroup`, `segmentTrack`. Le contexte temporaire de style MyGo est
-remplacé par une portée retenue par instance.
+MyGo: `ui/toggle.go`, `ToggleGroup`, `segmentTrack`. MyGo's temporary style context is replaced by a per-instance retained scope.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class ToggleGroup {
@@ -30,7 +27,7 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<bool> bold{false};
@@ -41,154 +38,102 @@ items.push_back(ui::ToggleButton("I", italic).spec());
 auto group = ui::ToggleGroup("Style", std::move(items)).spec();
 ```
 
-ToggleGroupStyle cible : padding de track, gap, radius, fill/border et patches segmentés pour
-Button/ToggleButton. La propagation du style utilise une portée locale ; elle n’exige aucun nouveau
-slot global Theme.
+Target ToggleGroupStyle: track padding, gap, radius, fill/border, and segmented patches for Button/ToggleButton. Style propagation uses a local scope; it requires no new global Theme slot.
 
-controls sont des Specs possédées : Button et ToggleButton sont les contrôles principaux ; contenus
-non interactifs admis comme décor, contrôles imbriqués conservent leur propre gestion de focus.
+controls are owned Specs: Button and ToggleButton are the primary controls; non-interactive content is allowed as decoration, and nested controls keep their own focus management.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le groupe n’a pas de Binding de sélection ; chaque ToggleButton détient son bool. Le groupe garde
-uniquement une identité du dernier enfant focusable actif pour roving Tab.
+The group has no selection Binding; each ToggleButton holds its bool. The group keeps only the identity of the last active focusable child for roving Tab.
 
-Les Specs et le label sont possédés. Le vector controls est immuable dans la génération montée ;
-remplacer la Spec crée une nouvelle génération et annule anciennes actions/focus. Les identités
-retenues servent aux enfants de cette génération ; ne pas identifier le contrôle actif par son label
-“B”.
+Specs and label are owned. The controls vector is immutable in a mounted generation; replacing Spec creates a new generation and cancels old actions/focus. Retained identities serve that generation's children; do not identify the active control by its “B” label.
 
-Retirer le contrôle actif déplace la cible roving vers le prochain disponible, puis précédent ;
-groupe vide ne demande pas le focus et ne publie aucune valeur.
+Removing the active control moves the roving target to the next available control, then the previous; an empty group requests no focus and publishes no value.
 
 ## 4. Interactions
 
-Tab entre sur le dernier contrôle disponible actif, ou le premier au premier accès ; un seul arrêt.
-Shift+Tab sort selon le runtime.
+Tab enters at the last available active control, or the first on initial access; a single stop. Shift+Tab exits according to the runtime.
 
-Gauche/Droite et Haut/Bas passent au contrôle focusable suivant/précédent, avec bouclage ; Home/End
-choisissent premier/dernier. Disabled et invisibles sont sautés.
+Left/Right and Up/Down move to the next/previous focusable control, wrapping; Home/End choose first/last. Skip disabled and invisible controls.
 
-Flèches ne basculent pas les bools ; Espace/Entrée et clic sont délégués au contrôle. Molette et
-capture d’un drag extérieur ne sont pas consommées par le groupe.
+Arrows do not toggle bools; Space/Enter and clicks are delegated to the control. The group does not consume the wheel or capture an external drag.
 
-Un TextInput incorporé conserve ses touches d’édition : ne détourner que les commandes de navigation
-de groupe non prises par l’enfant. ReadOnly est propagé aux contrôles de valeur.
+An embedded TextInput retains its editing keys: intercept only group-navigation commands not handled by the child. Propagate ReadOnly to value controls.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Row horizontal, segments à hauteur étirée commune ; largeur intrinsèque somme des enfants, gaps et
-padding du track. Sous contrainte trop étroite, clipper ou laisser le parent scroll, sans cacher
-silencieusement un contrôle.
+Horizontal Row, with segments stretched to a common height; intrinsic width is the sum of children, gaps, and track padding. Under narrow constraints, clip or let the parent scroll without silently hiding a control.
 
-Le groupe ne crée pas d’overflow menu : cette politique appartient à Toolbar. Les dimensions restent
-logiques ; largeur des segments peut différer selon leurs labels.
+The group creates no overflow menu: that policy belongs to Toolbar. Dimensions remain logical; segment widths may differ according to their labels.
 
-Style de track modifiant padding/gap/typographie demande layout ; changement de sélection d’un
-enfant ne remesure le groupe que si ses métriques changent.
+Track style changes affecting padding/gap/typography require layout; a child's selection change remeasures the group only if its metrics change.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Track discret, bordure extérieure commune ; segments visuellement joints et selected en relief
-local. La portée de style ne traverse pas les limites d’un autre ToggleGroup.
+Subtle track with a shared outer border; visually joined segments and local selected relief. Style scope does not cross another ToggleGroup's boundary.
 
-Focus visible sur le contrôle actif, pas un second ring ambigu autour du groupe entier. L’état
-disabled d’un enfant ne désactive pas automatiquement les voisins.
+Visible focus on the active control, rather than a second ambiguous ring around the whole group. A disabled child does not automatically disable its neighbors.
 
-Invalidation enfant remonte via les services retenus ; ne pas reconstruire tous les segments pour un
-bool modifié.
+Child invalidation propagates through retained services; do not rebuild every segment for a changed bool.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Group nommé par label ; chaque Button/ToggleButton publie son action et sa valeur. Aucun
-rôle RadioGroup ni selected unique, puisque plusieurs pressés sont permis.
+Target: Group named by label; each Button/ToggleButton publishes its action and value. No RadioGroup role or unique selected state, because multiple pressed values are allowed.
 
-L’ordre des enfants du snapshot correspond à l’ordre visuel. Les éléments décoratifs ne deviennent
-pas des arrêts ou actions.
+Snapshot child order matches visual order. Decorative elements do not become stops or actions.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Inscrire et retirer les participants au focus de manière RAII ; disparition d’un segment armé annule
-son capture avant mise à jour roving.
+Register and remove focus participants with RAII; disappearance of an armed segment cancels its capture before updating roving focus.
 
-Une action d’enfant peut supprimer le groupe ; le groupe ne demande plus le focus après callback
-sans revérifier l’identité du propriétaire. Échec de montage d’un enfant ne publie pas une liste
-partielle.
+A child action may remove the group; the group must not request focus after a callback without rechecking owner identity. Child mounting failure does not publish a partial list.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [row](row.md), [focus_scope](focus_scope.md), [style_scope](style_scope.md),
-[button](button.md), [toggle_button](toggle_button.md). Réutiliser le focus commun, aucun service
-parallèle.
+Dependencies: [row](row.md), [focus_scope](focus_scope.md), [style_scope](style_scope.md), [button](button.md), [toggle_button](toggle_button.md). Reuse shared focus; no parallel service.
 
-Tous les enfants disabled : groupe non navigable ; retour enabled rétablit première cible. Deux
-groupes avec labels identiques gardent focus et styles isolés.
+All children disabled: group is not navigable; enabling restores the first target. Two groups with identical labels keep focus and styles isolated.
 
-Ne pas ajouter d’exclusivité ni de callback aggregate Changed : les bools indépendants et leurs
-observers sont suffisants.
+Do not add exclusivity or an aggregate Changed callback: independent bools and their observers suffice.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/toggle_group.hpp` et `src/toggle_group.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/toggle_group.hpp` and `src/toggle_group.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Les adaptateurs éventuels de construction variadique restent dans le header ; le .cpp porte
-arrangement horizontal, portée visuelle et contrat de participation au focus.
+Any variadic construction adapters remain in the header; the .cpp contains horizontal arrangement, visual scope, and the focus-participation contract.
 
-Inscrire `src/toggle_group.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/toggle_group.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`toggle_group_roving` : un seul Tab stop et bouclage flèches/Home/End ; disabled sautés.
+`toggle_group_roving`: one Tab stop and wrapping arrows/Home/End; skip disabled controls.
 
-`toggle_group_values` : navigation ne modifie aucun bool ; activation d’un segment ne touche pas les
-autres.
+`toggle_group_values`: navigation changes no bool; activating one segment leaves the others untouched.
 
-`toggle_group_remove_focus` : retrait du segment courant choisit cible valide et annule un geste
-armé.
+`toggle_group_remove_focus`: removing the current segment chooses a valid target and cancels an armed gesture.
 
-`toggle_group_style_scope` : présentation segmentée reste localisée ; bouton extérieur conserve son
-style.
+`toggle_group_style_scope`: segmented presentation remains local; an external button keeps its style.
 
-`toggle_group_empty_resize` : groupe vide/all disabled et réduction de largeur gardent
-focus/clipping cohérents.
+`toggle_group_empty_resize`: empty/all-disabled group and reduced width keep focus/clipping consistent.
 
-`toggle_group_child_throw` : échec mount/callback remet état focus/portée en état récupérable.
+`toggle_group_child_throw`: mount/callback failure restores focus/scope to a recoverable state.
 
-Ajouter `examples/features/toggle_group.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/toggle_group.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

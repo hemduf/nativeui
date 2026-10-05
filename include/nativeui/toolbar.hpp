@@ -13,7 +13,7 @@ struct ToolbarItem {
 };
 struct ToolbarStyle {
   float padding{4}, gap{4}, minimum_height{40};
-  std::string overflow_label{"Plus"};
+  std::string overflow_label{"More"};
   ButtonStyle controls;
   ComboBoxStyle overflow_button;
   MenuItemStyle overflow_items;

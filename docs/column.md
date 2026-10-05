@@ -1,20 +1,20 @@
 # Column
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Column` empile verticalement les enfants avec padding uniforme, alignement horizontal et facteurs flex. Sources : [layout_builders.inc](../include/nativeui/detail/layout_builders.inc), [layout_components.inc](../include/nativeui/detail/layout_components.inc), `ColumnComponent`.
+`Column` stacks children vertically with uniform padding, horizontal alignment and flex factors. Sources: [layout_builders.inc](../include/nativeui/detail/layout_builders.inc), [layout_components.inc](../include/nativeui/detail/layout_components.inc), `ColumnComponent`.
 
-Référence MyGo : `ui/layout.go`, `flexLayout` et `justifyOffsets`. MyGo combine davantage de propriétés de boîte ; l’extraction NativeUI conserve ses valeurs historiques explicites.
+MyGo reference: `ui/layout.go`, `flexLayout` and `justifyOffsets`. MyGo combines more box properties; the NativeUI extraction preserves its explicit historical values.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante :
+Existing API:
 
 ```cpp
 template<class... Children> explicit Column(Children&&... children);
@@ -25,85 +25,85 @@ Column&& justify(Justify value) &&;
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
-auto column = ui::Column{ui::Label{"Titre"}, ui::Label{"Contenu"}}
+auto column = ui::Column{ui::Label{"Title"}, ui::Label{"Content"}}
     .padding(12.0f).gap(6.0f).align(ui::Align::Stretch);
 ```
 
-Valeurs actuelles : gap `16`, padding `24`, Start/Start. `ColumnComponent(float gap, float padding, Align, Justify)` reste public.
+Current values: gap `16`, padding `24`, Start/Start. `ColumnComponent(float gap, float padding, Align, Justify)` remains public.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-- Aucun état applicatif propre ; `Spec` et ordre des enfants sont possédés.
-- Les métriques préférées et minima dérivent des enfants à chaque passe acceptée.
-- Le padding appartient à cette instance et n’est pas un override de thème global.
-- Les changements de données descendants demandent une mesure, sans notification utilisateur du conteneur.
+- No application state of its own; `Spec` objects and child order are owned.
+- Preferred metrics and minima are derived from children on each accepted pass.
+- Padding belongs to this instance and is not a global theme override.
+- Changes to descendant data request measurement without a user notification from the container.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Le conteneur ne prend ni focus, ni capture, ni molette. Les champs gardent leurs interactions, gestes et validation. Tab suit l’ordre de construction. Hidden/Collapsed affectent l’éligibilité via le runtime ; `Column` ne synthétise pas d’annulation supplémentaire.
+The container does not take focus, capture or wheel input. Fields retain their interactions, gestures and confirmation behavior. Tab follows construction order. Hidden/Collapsed affect eligibility through the runtime; `Column` does not synthesize an additional cancellation.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-- Largeur préférée : maximum des largeurs enfants + deux paddings.
-- Hauteur : somme des hauteurs + N−1 gaps + deux paddings ; vide conserve deux paddings.
-- Les contraintes sont inset du padding ; axe Y libre pour la mesure intrinsèque.
-- Le placement Y reçoit les facteurs flex, X reçoit `Align`.
-- `SpaceBetween` distribue l’excédent après padding et gaps.
-- Padding/gap non finis ou négatifs deviennent zéro. La zone intérieure ne devient jamais négative.
-- Pas de scroll ou clipping implicite ; employer [ScrollView](scroll_view.md) si le contenu dépasse.
+- Preferred width: the maximum child width + padding on both sides.
+- Height: the sum of heights + N−1 gaps + padding on both sides; an empty column retains both padding amounts.
+- Constraints are inset by the padding; the Y axis is unbounded for intrinsic measurement.
+- Y placement receives flex factors, while X placement receives `Align`.
+- `SpaceBetween` distributes the surplus after padding and gaps.
+- Non-finite or negative padding/gap values become zero. The inner area never becomes negative.
+- No implicit scrolling or clipping; use [ScrollView](scroll_view.md) when content overflows.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Aucun paint autonome. Un changement de métriques fait invalider layout et zones déplacées ; couleur d’un seul enfant demande seulement son paint. `StyleScope` hérite vers les descendants mais ne remplace pas padding/gap explicites de `Column`.
+No independent painting. A metric change invalidates layout and moved regions; a color change in a single child requests only that child’s paint. `StyleScope` is inherited by descendants but does not replace explicit `Column` padding/gap values.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Rôle `None`, sans arrêt de focus et sans action. L’ordre sémantique est celui des enfants ; la justification ne le réordonne pas. Un label au-dessus d’un champ n’établit pas à lui seul une relation sémantique : employer [Field](field.md).
+Role `None`, with no focus stop or action. Semantic order follows child order; justification does not reorder it. A label above a field does not establish a semantic relationship on its own: use [Field](field.md).
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Mesurer puis publier les placements par transaction de Tree. Une exception dans un enfant préserve le dernier layout cohérent ; la passe suivante recalcule l’ensemble. Le conteneur ne garde ni `ChildMetrics&`, ni invalidateur capturant un enfant après la passe.
+Measure and then publish placements through a Tree transaction. An exception in a child preserves the last coherent layout; the next pass recalculates everything. The container retains neither `ChildMetrics&` nor an invalidator capturing a child after the pass.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutilise layout flex commun ; ne pas porter tout le moteur de boîte MyGo. Cas à couvrir : empty, un enfant collapsed, padding supérieur aux bounds, minimum supérieur à disponible, enfants flex à poids zéro, resize en cours de focus.
+Reuses the shared flex layout; do not port the entire MyGo box engine. Cases to cover: empty content, one collapsed child, padding greater than the bounds, a minimum greater than the available space, flex children with zero weight and resizing while focus is active.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/column.hpp` et `src/column.cpp`.
+Target: `include/nativeui/column.hpp` and `src/column.cpp`.
 
-Déplacer `ColumnComponent` et ses fonctions dans `column.cpp`, maintenir les déclarations publiques. `layout.hpp` devient un include compatible vers les headers individuels. `Column::padding(float)` demeure même si [Padding](padding.md) existe séparément.
+Move `ColumnComponent` and its functions into `column.cpp`, maintaining the public declarations. `layout.hpp` becomes a compatible include for the individual headers. `Column::padding(float)` remains available even though [Padding](padding.md) exists separately.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `column_padding_intrinsic` : minimum/préférée avec vide et enfants multiples.
-- `column_cross_stretch` : largeur bornée, Start/Center/End/Stretch.
-- `column_grow_shrink` : allocation verticale et respect des minima.
-- `column_small_bounds` : padding excessif sans largeur/hauteur négative.
-- `column_focus_order` : Tab identique sous toutes justifications.
-- `column_layout_fault` : mesure qui lève puis nouveau resize accepté.
+- `column_padding_intrinsic`: minimum/preferred size with empty content and multiple children.
+- `column_cross_stretch`: constrained width, Start/Center/End/Stretch.
+- `column_grow_shrink`: vertical allocation and respect for minima.
+- `column_small_bounds`: excessive padding without negative width/height.
+- `column_focus_order`: identical Tab order under every justification.
+- `column_layout_fault`: a throwing measurement followed by an accepted resize.
 
-Créer l’exemple public futur `examples/features/column.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/column.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

@@ -1,22 +1,22 @@
 # Spinner
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Indicateur circulaire d’activité de durée inconnue, sans pourcentage et sans interaction. Utile au voisinage d’un Label de statut ou d’un bouton occupé.
+A circular activity indicator of unknown duration, without a percentage or interaction. Useful beside a status Label or busy button.
 
-Absent du toolkit ; primitives arc/path et [animation.hpp](../include/nativeui/animation.hpp) existent, avec AnimationContext et Dispatcher qui calculent les animations sur horloge injectée.
+Absent from the toolkit; arc/path primitives and [animation.hpp](../include/nativeui/animation.hpp) exist, with AnimationContext and Dispatcher calculating animations on an injected clock.
 
-MyGo : `ui/indicators.go`, `Spinner`, douze rayons avec cycle900ms et RoleProgress inconnu. Cible reprend ce rythme et l’animation interrompable, sans appeler AnimationFrame dans une boucle Go importée.
+MyGo: `ui/indicators.go`, `Spinner`, twelve spokes with a 900 ms cycle and unknown RoleProgress. The target adopts this rhythm and interruptible animation without invoking AnimationFrame in an imported Go loop.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class Spinner {
@@ -31,99 +31,99 @@ public:
 };
 ```
 
-Défauts : active=true si Binding absent, taille18 DIP, cycle900ms, douze rayons. SpinnerStyle contient color/thickness_ratio et taille optionnelle ; `.size` explicite prime sur taille de style. Nombres nouveaux double.
+Defaults: active=true when Binding is absent, size 18 DIP, 900 ms cycle, twelve spokes. SpinnerStyle contains color/thickness_ratio and optional size; explicit `.size` takes precedence over style size. New numerics are double.
 
-Exemple cible proposé :
+Proposed target example:
 
 ```cpp
 ui::State<bool> working{true};
-auto busy = ui::Spinner{"Chargement"}
+auto busy = ui::Spinner{"Loading"}
     .active(working)
     .size(18.0)
     .spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Label/style/options possédés ; Binding<bool> optionnel actif est observé RAII, surcharge State convertie immédiatement. Phase et handle d’animation sont propres à l’instance.
+Label/style/options are owned; optional active Binding<bool> is observed through RAII, with State overload converted immediately. Phase and animation handle belong to the instance.
 
-Si Binding source disparaît : invalid=false, get dernière valeur mais activité considérée inactive à la prochaine revalidation ; aucun callback ni notification destruction automatique. Ne pas écrire false dans modèle.
+If the Binding source disappears: `valid()` becomes false, get retains the last value but activity is considered inactive on the next revalidation; no callback or automatic destruction notification. Do not write false to the model.
 
-active=false conserve mesure mais ne dessine pas de rayons ; phase repart de zéro lors d’une nouvelle activation. Aucun on_change/finished ni lien automatique avec un traitement métier.
+active=false preserves measurement but draws no spokes; phase restarts from zero on reactivation. No on_change/finished or automatic relationship with an application process.
 
 ## 4. Interactions
 
-Display-only : pointeur, glissement, molette, clavier, texte et drops Ignored ; non focusable, aucune capture ni validation/annulation.
+Display only: pointer, dragging, wheel, keyboard, text, and drops are Ignored; non-focusable, with no capture or confirmation/cancellation.
 
-Disabled n’autorise aucune action ; applique couleur désactivée et suspend animation tout en gardant un pictogramme statique si actif. ReadOnly ne change pas le sens de busy.
+Disabled permits no action; apply disabled color and suspend animation while retaining a static icon when active. ReadOnly does not change busy semantics.
 
-Quand placé dans Button, le parent gère l’activation ; Spinner n’a aucune zone interactive invisible ni commande d’arrêt.
+When placed inside Button, the parent handles activation; Spinner has no invisible interactive region or stop command.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Préféré/minimum : carré taille choisie ; place plus large centre le spinner sans l’étirer. Diamètre réel = min(largeur,hauteur,taille demandée).
+Preferred/minimum: a square of the chosen size; extra space centers the spinner without stretching it. Actual diameter = min(width,height,requested size).
 
-Rayons aux fractions0,22..0,46 du diamètre, épaisseur0,09 par défaut, bornés à la place. Taille0 produit surface vide sans divisions/wake.
+Spokes span fractions 0.22..0.46 of diameter, with default thickness 0.09, bounded to the allocated space. Size 0 produces an empty surface without divisions/wakes.
 
-Dimensions logiques ; pas de round de diamètres au framebuffer dans le composant. Padding est responsabilité de la composition, aucun espace externe caché.
+Logical dimensions; no framebuffer rounding of diameters inside the component. Padding belongs to composition, with no hidden external space.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Couleur par défaut = muted_text du Theme ; SpinnerStyle override possédé. Douze rayons, fading de lead jusqu’à15% opacity, pas d’opacité du parent réécrite.
+Default color=Theme muted_text; owned SpinnerStyle override. Twelve spokes, fading from the lead down to 15% opacity, without rewriting parent opacity.
 
-Cycle à tween linéaire0→1 avec AnimationContext existant, rearm protégé par token/génération. Phase animée = paint only ; ni layout ni annonce sémantique toutes les16ms.
+Cycle uses a linear 0→1 tween with existing AnimationContext, with token/generation-protected rearming. Animated phase affects paint only; no layout or semantic announcement every 16 ms.
 
-Reduced_motion explicite ou timing absent = dessin statique à phase0 pour actif. Caché/collapsé/démonté cesse tout wake ; retour visible redémarre zéro. Aucune préférence OS réputée livrée dans cette option.
+Explicit reduced_motion or absent timing means static phase 0 drawing while active. Hidden/collapsed/unmounted stops all wakes; becoming visible restarts from zero. This option does not claim a delivered OS preference.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : ProgressBar avec nom label, aucune numeric_value/range pour une activité inconnue et aucune action. Inactif est omis comme indicateur d’activité plutôt que annoncé terminé.
+Target contract: ProgressBar with label name, no numeric_value/range for unknown activity, and no action. Inactive is omitted as an activity indicator rather than announced as completed.
 
-Spinner décoratif d’un Button peut être exclu par composition, Button décrit son état applicatif séparément. Ne pas doubler lecture du Label voisin.
+A decorative Spinner in Button may be excluded by composition; Button describes its application state separately. Do not duplicate reading of a neighboring Label.
 
-Rôle/hooks disponibles, publication cible testable headless ; ponts T068 différés. Pas d’IME.
+Role/hooks are available, target publication is testable headlessly; T068 bridges are deferred. No IME.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement et contexte/handle d’animation RAII. Montage valide d’abord la taille/options, puis acquiert timing et token ; teardown annule avant de libérer paint target.
+UI/main thread; RAII subscription and animation context/handle. Mounting first validates size/options, then acquires timing and token; teardown cancels before releasing the paint target.
 
-Échec timer/tween armement retire entrée provisoire et garde phase statique. Une future transition inactive→active peut réessayer ; aucun busy guard empoisonné.
+Failed timer/tween arming removes the provisional entry and retains static phase. A future inactive→active transition may retry; no poisoned busy guard.
 
-Completion interne de cycle vérifie vie/génération avant rearm ; callback stale après Hidden/démonté no-op, jamais joué synchroniquement si enqueue échoue. Destruction no-throw et callback-silent.
+Internal cycle completion checks lifetime/generation before rearming; a stale callback after Hidden/unmounting is a no-op, never run synchronously if enqueue fails. Destruction is no-throw and invokes no callbacks.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutilise AnimationContext/DispatcherProvider et Theme. Pas de service timer concurrent, thread ou horloge murale commune ; clock de l’animation existante assure tests manuels.
+Reuses AnimationContext/DispatcherProvider and Theme. No concurrent timer service, thread, or shared wall clock; the existing animation clock supports manual tests.
 
-size non fini ou négatif = invalid_argument ; zéro valide. thickness_ratio non fini/non positif ou >0,5 = invalid_argument avant publication. Label vide autorisé pour décoration.
+Non-finite or negative size causes invalid_argument; zero is valid. Non-finite/non-positive thickness_ratio or >0.5 causes invalid_argument before publication. Empty label allowed for decoration.
 
-Active change pendant cycle annule exactement ce cycle et ses futures reprises. Deux Spinner se partagent éventuellement Dispatcher owner mais pas phases/options/tokens.
+Active changes during a cycle cancel exactly that cycle and its future restarts. Two Spinners may share a Dispatcher owner but not phases/options/tokens.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/spinner.hpp` et `src/spinner.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/spinner.hpp` and `src/spinner.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : AnimationContext/Painter/Theme existants. SpinnerStyle reste dans le parent ; noyau mesure/rayons/subscription/cycle dans spinner.cpp, sans inline scheduler ou nouvelle API native.
+Source to extract or reuse: existing AnimationContext/Painter/Theme. SpinnerStyle stays with the parent; measurement/spokes/subscription/cycle core in spinner.cpp, without an inline scheduler or new native API.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `spinner_cycle` : douze rayons et cycle900ms suivent horloge manuelle.
-- `spinner_active_lifetime` : active false et destruction source suspendent au prochain accès sans writeback.
-- `spinner_reduced_static` : reduced motion et dispatcher indisponible donnent phase statique.
-- `spinner_zero_hidden` : taille zéro/Hidden/Collapsed arrêtent wake et conservent place prévue.
-- `spinner_timer_fault` : armement refusé ou exception permet prochaine transition.
-- `spinner_multi_instance` : phases/couleurs/timers teardown ne touchent pas une autre UI.
+- `spinner_cycle`: twelve spokes and a 900 ms cycle follow the manual clock.
+- `spinner_active_lifetime`: active false and source destruction suspend at the next access without writeback.
+- `spinner_reduced_static`: reduced motion and unavailable dispatcher produce static phase.
+- `spinner_zero_hidden`: zero size/Hidden/Collapsed stop wakes and preserve intended space.
+- `spinner_timer_fault`: rejected arming or an exception permits the next transition.
+- `spinner_multi_instance`: phases/colors/timer teardown do not affect another UI.
 
-Créer `examples/features/spinner.cpp` et la cible `nativeui_example_spinner`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/spinner.cpp` and target `nativeui_example_spinner`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

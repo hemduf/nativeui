@@ -1,28 +1,28 @@
 # TextArea
 
-Statut : **existant à enrichir**.
+Status: **existing — enhancements required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Saisir plusieurs lignes, garder curseur et sélection visible dans un viewport local. TextArea est un
-éditeur de texte brut, pas RichText ni FindBar.
+Enter multiple lines and keep the cursor and selection visible in a local viewport. TextArea is a
+plain text editor, rather than RichText or FindBar.
 
-NativeUI : [widgets_text_area.inc](../include/nativeui/detail/widgets_text_area.inc),
-TextAreaComponent public ; builder
-[widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), TextEditModel multilignes
-et TextAreaStyle.
+NativeUI: [widgets_text_area.inc](../include/nativeui/detail/widgets_text_area.inc), public
+TextAreaComponent; builder in
+[widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), multiline TextEditModel,
+and TextAreaStyle.
 
-MyGo : `ui/editor.go`, `TextArea`, `textInput` ; `ui/base.go`, `TextAreaBase`. L’édition multiline
-est déjà portée ; enrichissement requis pour noyau séparé, sémantique et callbacks lifetime
-robustes.
+MyGo: `ui/editor.go`, `TextArea`, `textInput`; `ui/base.go`, `TextAreaBase`. Multiline editing has
+already been ported; enhancements are required for a separate core, semantics, and robust callback
+lifetimes.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Preserve the current API; the following declarations are in `namespace ui`.
 
 ```cpp
 TextArea(std::string label, Binding<std::string> state);
@@ -33,183 +33,175 @@ TextArea&& style(TextAreaStyle value) &&;
 Spec spec() &&;
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
-ui::State<std::string> notes{"Première ligne\nSeconde ligne"};
-auto editor = ui::TextArea("Notes", notes).placeholder("Écrire des notes")
+ui::State<std::string> notes{"First line\nSecond line"};
+auto editor = ui::TextArea("Notes", notes).placeholder("Write notes")
     .max_length(4096).spec();
 ```
 
-Default max_length=0, illimité ; contrairement à TextInput, aucun on_submit public actuellement.
-Entrée insère une nouvelle ligne, sans callback de validation implicite.
+The default max_length is 0, meaning unlimited; unlike TextInput, there is currently no public
+on_submit. Enter inserts a new line without an implicit validation callback.
 
-Conserver TextAreaComponent public et TextAreaStyle existant. Ne pas ajouter wrapping automatique,
-mise en forme Markdown ou syntax highlighting sous le nom d’extraction.
+Preserve the public TextAreaComponent and existing TextAreaStyle. Do not add automatic wrapping,
+Markdown formatting, or syntax highlighting under the name of extraction.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<string> contient texte brut ; modèle local caret/anchor/history, cache de lignes et
-scroll_x/y. Une modification utilisateur commit live une string complète.
+Binding<string> contains plain text; the local model holds caret/anchor/history, a line cache, and
+scroll_x/y. A user change commits a complete string live.
 
-Observation externe différente remplace modèle, rebuild_lines et remet scrolls/historique comme
-source actuelle. Une valeur identique ne casse pas le caret.
+A different external observation replaces the model, runs rebuild_lines, and resets scrolling and
+history as in the current source. An identical value does not disrupt the caret.
 
-focus_snapshot fixé à l’entrée, Escape peut restaurer ce snapshot avec une écriture Binding ; aucune
-validation soumission par Enter. Préserver cette politique historique, y compris après remplacement
-externe.
+focus_snapshot is set on entry; Escape can restore this snapshot with a Binding write; Enter does
+not validate submission. Preserve this historical policy, including after external replacement.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Clic/double/triple clic et drag sélection suivent le texte multilignes. Up/Down conservent la
-colonne préférée ; Left/Right caractère/mot, Home/End début/fin de ligne, modifier primaire
-début/fin document.
+Click/double-click/triple-click and selection dragging follow multiline text. Up/Down retain the
+preferred column; Left/Right move by character/word, Home/End to line start/end, and the primary
+modifier to document start/end.
 
-Enter insère LF ; insertion/paste normalisent CR ou CRLF vers LF, préservent LF/Tab et retirent
-autres contrôles. Copy/Cut/Paste/SelectAll/Undo/Redo communs.
+Enter inserts LF; insertion/paste normalize CR or CRLF to LF, preserve LF/Tab, and remove other
+controls. Copy/Cut/Paste/SelectAll/Undo/Redo are shared.
 
-Shift étend sur plusieurs lignes ; Backspace/Delete traversent les séparateurs. Escape restaure
-snapshot. ReadOnly garde sélection/copie et navigation, bloque modifications.
+Shift extends selection across lines; Backspace/Delete cross separators. Escape restores the
+snapshot. ReadOnly retains selection/copying and navigation while blocking modifications.
 
-La source actuelle ignore PointerWheel. Cible d’enrichissement : molette fait défiler viewport local
-vertical, Shift horizontal, sans modifier Binding/caret ; à une borne sans mouvement l’événement
-remonte au parent. Cette extension est documentée distinctement de l’extraction.
+The current source ignores PointerWheel. Target enhancement: the wheel scrolls the local viewport
+vertically, or horizontally with Shift, without changing Binding/caret; at a boundary with no
+movement the event bubbles to the parent. This extension is documented separately from extraction.
 
-Composition headless Start/Update/Commit/Cancel et déduplication du commit sont présents ;
-intégration native preedit/candidate reste un contrat plateforme à vérifier séparément, selon DESIGN
-§17.4.
+Headless Composition Start/Update/Commit/Cancel and commit deduplication are present; native
+preedit/candidate integration remains a platform contract to verify separately under DESIGN §17.4.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure préférée fixe issue control_width/control_height de TextAreaStyle. Layout line-aware et
-clipping du viewport local ; longues lignes défilent horizontalement, pas un soft-wrap implicite.
+Fixed preferred size comes from TextAreaStyle control_width/control_height. Line-aware layout and
+local viewport clipping; long lines scroll horizontally without implicit soft wrapping.
 
-rebuild_lines produit lignes et offsets cohérents sur CRLF normalisé ; tenir le caret visible après
-déplacement vertical, sélection et resize.
+rebuild_lines produces consistent lines and offsets after CRLF normalization; keep the caret
+visible after vertical movement, selection, and resize.
 
-Texte, selection cross-line, caret et placeholder utilisent la même police TextService en
-coordonnées logiques ; mesure/rendu malformed suivent réparation commune.
+Text, cross-line selection, caret, and placeholder use the same TextService font in logical
+coordinates; malformed measurement/rendering use the common repair path.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-TextAreaStyle définit fonts, fill/border, selection/caret et composition underline. Fond et ring
-communs, une seule cible focus pour le viewport.
+TextAreaStyle defines fonts, fill/border, selection/caret, and composition underline. Shared
+background and ring, with a single focus target for the viewport.
 
-Le cache de lignes est invalidé par modification texte ou métriques de police ;
-valeur/caret/selection paint, dimensions/style métrique layout.
+Text changes or font metrics invalidate the line cache; value/caret/selection require painting,
+while dimensions/style metrics require layout.
 
-Tick caret uniquement quand focus/visible ; pas de boucle même si unfocused. Une erreur de paint
-maintient le stack clip équilibré et laisse la dernière frame commise.
+Caret ticking occurs only while focused/visible; no loop runs while unfocused. A paint error keeps
+the clip stack balanced and leaves the last committed frame intact.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : TextArea, name=label, text_value texte brut, read_only/enabled et Focus/SetValue si permis.
-La structure lignes n’est pas N champs textuels accessibles.
+Target: TextArea, name=label, plain text text_value, read_only/enabled, and Focus/SetValue if allowed.
+The line structure does not become N accessible text fields.
 
-Aucun override semantics actuel dans le noyau étudié ; model de sélection et APIs natives text range
-ne sont pas revendiqués comme réalisés.
+The studied core currently has no semantics override; a selection model and native text range APIs
+are not claimed as implemented.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Abonnement actuel capture this ; extraction utilise runtime/token détaché et garde l’observation
-inopérante après retrait durant un passage.
+The current subscription captures this; extraction uses a detached runtime/token and keeps the
+observation inert after removal during a pass.
 
-Cache de lignes et texte sont préparés avant publication cohérente. Échec allocation/rebuild ne
-publie pas un caret pointant dans un ancien buffer avec nouvelle string.
+Prepare the line cache and text before consistent publication. Allocation/rebuild failure must not
+publish a caret pointing into an old buffer with a new string.
 
-Clipboard différé porte génération/weak token ; après retrait, changement ReadOnly ou invalid
-Binding, ignorer la réponse. Démonter termine drag, composition et text input sans commit
-destructeur.
+Deferred clipboard delivery carries a generation/weak token; ignore the response after removal,
+a switch to ReadOnly, or an invalid Binding. Unmounting ends dragging, composition, and text input
+without a destructive commit.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), TextEditModel, TextService, clipboard, ThemeBinding et
-focus. RichText/FindBar sont des composants séparés.
+Dependencies: [TextInput](text_input.md), TextEditModel, TextService, clipboard, ThemeBinding, and
+focus. RichText/FindBar are separate components.
 
-Vide, ligne finale vide, ligne très longue, nombreuses lignes, emojis/malformed, maximum atteint sur
-collage multiline et remplacement externe pendant drag doivent rester déterministes.
+Empty text, a trailing empty line, a very long line, many lines, emojis/malformed text, reaching the
+maximum on multiline paste, and external replacement during dragging must remain deterministic.
 
-Pas de filesystem IO, édition de document système ni callbacks audio. L’application calcule la
-recherche et l’enregistrement.
+No filesystem I/O, system document editing, or audio callbacks. The application computes search
+results and handles saving.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/text_area.hpp` et `src/text_area.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/text_area.hpp` and `src/text_area.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-Déclarations TextArea et TextAreaComponent restent publiques dans text_area.hpp ; text_area.cpp
-porte modèle retenu, cache de lignes, scrolling, handlers et peinture.
+TextArea and TextAreaComponent declarations remain public in text_area.hpp; text_area.cpp contains
+the retained model, line cache, scrolling, handlers, and painting.
 
-Préserver text_area_style.hpp et les includes collectifs ; les helpers d’édition partagés restent
-privés ou dans text_edit.hpp actuel sans dupliquer le moteur.
+Preserve text_area_style.hpp and aggregate includes; shared editing helpers remain private or in
+the current text_edit.hpp without duplicating the engine.
 
-Inscrire `src/text_area.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/text_area.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`text_area_line_normalize` : CR/CRLF vers LF ; Tab préservé ; Enter insère LF et aucun submit.
+`text_area_line_normalize`: CR/CRLF become LF; Tab is preserved; Enter inserts LF without submit.
 
-`text_area_vertical_selection` : Up/Down conservent colonne, Home/End ligne/document et Shift
-sélection cross-line.
+`text_area_vertical_selection`: Up/Down retain the column, Home/End navigate line/document, and
+Shift selects across lines.
 
-`text_area_history_escape` : undo/redo et focus snapshot restaurent les textes attendus.
+`text_area_history_escape`: undo/redo and the focus snapshot restore the expected text.
 
-`text_area_viewport` : caret visible avec lignes longues/resize ; peinture selection équilibrée et
-clippée.
+`text_area_viewport`: caret visibility with long lines/resize; balanced, clipped selection painting.
 
-`text_area_composition_clipboard` : synthetic composition sans double commit ; stale clipboard
-rejeté.
+`text_area_composition_clipboard`: synthetic composition without duplicate commit; stale clipboard
+responses rejected.
 
-`text_area_replace_throw` : observateur, rebuild et paint en échec récupèrent sans cache/texte
-partiel.
+`text_area_replace_throw`: failures in an observer, rebuild, or paint recover without partial
+cache/text.
 
-`text_area_public_component` : anciennes signatures et TextAreaComponent direct restent compilables.
+`text_area_public_component`: old signatures and direct TextAreaComponent use still compile.
 
-Ajouter `examples/features/text_area.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/text_area.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

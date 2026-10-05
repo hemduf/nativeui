@@ -1,22 +1,22 @@
 # ImageView
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Composant déclaratif d’image raster ou SVG conservant les couleurs du document, avec fit et mesure intrinsèque. Distinct de la ressource Image et de l’icône monochrome IconView.
+A declarative raster or SVG image component preserving document colors, with fit and intrinsic measurement. Distinct from the Image resource and monochrome IconView.
 
-NativeUI a [Image](../include/nativeui/image.hpp), [SvgIcon](../include/nativeui/svg.hpp), caches et CanvasContext2D.draw_image/draw_svg dans [component_base.hpp](../include/nativeui/component_base.hpp). Aucun ImageView public actuel ; SVG existant utilise centered contain.
+NativeUI has [Image](../include/nativeui/image.hpp), [SvgIcon](../include/nativeui/svg.hpp), caches, and CanvasContext2D.draw_image/draw_svg in [component_base.hpp](../include/nativeui/component_base.hpp). No current public ImageView; existing SVG uses centered contain.
 
-MyGo : `ui/widgets.go`, `ImageSource`, `Image`, `Element.intrinsicSize`, `Element.Fit`. Bitmap ou SVG, taille naturelle en DIP et fit configuré ; Icon est séparé pour teinte. Il faut assembler les ressources préparées sans copier la politique de stockage Go.
+MyGo: `ui/widgets.go`, `ImageSource`, `Image`, `Element.intrinsicSize`, `Element.Fit`. Bitmap or SVG, natural size in DIP, and configured fit; Icon is separate for tinting. Assemble prepared resources without copying Go storage policy.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class ImageView {
@@ -35,102 +35,102 @@ public:
 };
 ```
 
-Défauts : centered Contain, sans size explicite, pixel_scale=1, alt vide et decorative=true. `pixel_scale` convertit seulement taille intrinsèque raster pixels→logique ; pour SVG intrinsic_size est déjà logique et pixel_scale n’a pas d’effet.
+Defaults: centered Contain, no explicit size, pixel_scale=1, empty alt, decorative=true. `pixel_scale` converts only raster intrinsic size from pixels to logical units; SVG intrinsic_size is already logical and pixel_scale has no effect.
 
-Exemple cible proposé :
+Proposed target example:
 
 ```cpp
 ui::Image photo;
 auto view = ui::ImageView{photo}
     .fit(ui::ImageFit::Cover)
     .size({96.0f, 64.0f})
-    .alt("Aperçu du document")
+    .alt("Document preview")
     .decorative(false)
     .spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le composant possède un handle copyable Image/SvgIcon ou un Binding de Source ; State converti au constructeur. Les handles partagent leur backing et ne gardent pas un buffer encodé emprunté.
+The component owns a copyable Image/SvgIcon handle or Source Binding; State converts in the constructor. Handles share backing and retain no borrowed encoded buffer.
 
-Update Source prépare dimensions/snapshot puis publie, invalide layout si taille intrinsèque change et paint/semantics. Une ressource remplacée pendant paint reste en snapshot indépendant jusqu’à la fin du paint courant.
+Source update prepares dimensions/snapshot, then publishes, invalidating layout if intrinsic size changes and paint/semantics. A resource replaced during paint remains in an independent snapshot until current paint ends.
 
-Binding invalide après destruction source conserve dernière ressource lisible, observe inactif sans notification automatique ; pas de setter ni on_change. Charger des bytes et gérer fin async restent à l’application, hors paint.
+Binding invalid after source destruction retains the last readable resource, with inactive observation and no automatic notification; no setter or on_change. Loading bytes and handling async completion remain with the application, outside paint.
 
 ## 4. Interactions
 
-Aucun input, focus, capture, activation ou drag/drop implicite. Pointeur, molette, clavier et texte Ignored ; un Button/Link parent fournit l’interaction éventuelle.
+No implicit input, focus, capture, activation, or drag/drop. Pointer, wheel, keyboard, and text are Ignored; a Button/Link parent provides any interaction.
 
-Aucune validation/annulation. Afficher une photo ne crée pas de menu contextuel ni accès fichier/réseau à la volée.
+No confirmation/cancellation. Displaying a photo creates neither a context menu nor on-demand file/network access.
 
-Ne pas utiliser le rectangle de pixels comme proxy d’un lien. Sémantique image et actions de parent restent séparées.
+Do not use the pixel rectangle as a link proxy. Image semantics and parent actions stay separate.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure naturelle = Image.size()/pixel_scale ou SvgIcon.intrinsic_size ; size explicite donne préféré indiqué en coordonnées logiques. Ne pas assimiler pixels raster au framebuffer DPR.
+Natural measurement=Image.size()/pixel_scale or SvgIcon.intrinsic_size; explicit size gives the specified preferred size in logical coordinates. Do not equate raster pixels with framebuffer DPR.
 
-Fill étire aux bounds, Contain garde ratio et centre avec bandes libres, Cover garde ratio et coupe les côtés dans les bounds. Mesure reste identique entre fit modes ; seul mapping peinture change.
+Fill stretches to bounds, Contain preserves ratio and centers with free bands, Cover preserves ratio and clips sides within bounds. Measurement is identical across fit modes; only paint mapping changes.
 
-SVG requiert extension privée du draw adapter pour Fill/Cover ; ne pas prétendre que le draw_svg actuel les offre. Raster réutilise draw_image. Destination nulle/nonfinie = no-op, clipping équilibre même sur exceptions.
+SVG requires a private draw-adapter extension for Fill/Cover; do not claim current draw_svg provides them. Raster reuses draw_image. Zero/non-finite destination is a no-op, with balanced clipping even on exceptions.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-ImageView conserve couleurs et alpha originaux ; pas de tint, Theme image slot ou checker imposé. Une transparence laisse voir fond composé par l’application.
+ImageView preserves original colors and alpha; no tint, Theme image slot, or imposed checkerboard. Transparency reveals the background composed by the application.
 
-Changement fit/Source = paint ; dimensions/pixel_scale = layout et paint. Pas d’animation SVG ou GIF implied : ressources statiques telles que preparées.
+Changing fit/Source affects paint; dimensions/pixel_scale affect layout and paint. No implied SVG or GIF animation: resources are static as prepared.
 
-Aucun repaint continu ni decode lors de paint. Le rendu resource/backend utilise des scopes RAII de clip/transform pour isoler chaque image de ses frères.
+No continuous repaint or decoding during paint. Resource/backend rendering uses RAII clip/transform scopes to isolate each image from siblings.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-decorative=true : None par défaut. decorative=false : SemanticRole::Image, nom alt, aucune action ; alt sert uniquement à l’accessibilité et n’est pas un fallback texte visible.
+decorative=true: None by default. decorative=false: SemanticRole::Image, alt name, no action; alt serves only accessibility and is not visible fallback text.
 
-Une Image informative doit donner alt non vide ; alt vide autorisé mais documenté comme image sans nom, à détecter par exemple self-test applicatif. Binding changé met à jour resource bounds sans attribuer un nouvel id à chaque frame.
+An informative Image should supply non-empty alt; empty alt is allowed but documented as an unnamed image, to be detected for example by an application self-test. Binding changes update resource bounds without assigning a new id every frame.
 
-Hooks/rôle existent ; ponts T068 différés. Aucun IME ni capacité OCR/native annoncée.
+Hooks/role exist; T068 bridges are deferred. No IME or claimed OCR/native capability.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread pour Binding/composition et préparation resource selon contrats Image/SvgIcon. Handles gardent backing valide même si cache préparateur est vidé.
+UI/main thread for Binding/composition, and resource preparation according to Image/SvgIcon contracts. Handles preserve valid backing even if the preparation cache is cleared.
 
-Snapshot Source acquis avant measure/paint et aucun pointeur raw backend retenu dans le composant. Erreur adapter/render restaure scopes puis propagation C++ après invariants ; aucun retry automatique de callback.
+Acquire Source snapshot before measure/paint, with no raw backend pointer retained in the component. Adapter/render errors restore scopes before C++ propagation after invariants; no automatic callback retry.
 
-Destruction no-throw, subscription RAII, aucune fonction de chargement appelée au démontage. Aucune donnée/resource registry mutable globale nouvelle ; deux UI peuvent afficher handles distincts de mêmes noms.
+Destruction is no-throw, subscription RAII, with no loading function called during unmounting. No new global mutable data/resource registry; two UIs may display distinct handles with the same names.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend des ressources Image/SvgIcon et adapters Painter existants. ResourceProvider/ImageCache/SvgCache sont préparés/possédés par l’application ; le provider doit vivre selon le contrat de son cache, pas celui du widget.
+Depends on Image/SvgIcon resources and existing Painter adapters. ResourceProvider/ImageCache/SvgCache are prepared/owned by the application; provider lifetime follows its cache contract rather than the widget's.
 
-Handle invalide : aucun pixel, naturel {0,0}, size explicite toujours conservée ; pas de decode/réseau fallback. SVG external file/network restent interdits par ressource v1.
+Invalid handle: no pixels, natural {0,0}, explicit size still preserved; no decode/network fallback. External SVG files/network remain forbidden by resource v1.
 
-pixel_scale doit être fini strictement positif ; size explicite composantes finies >=0, sinon invalid_argument. SVG intrinsic invalide est déjà ressource invalide. Source valide→invalide recalcule naturel sans hit area interactive fantôme.
+pixel_scale must be finite and strictly positive; explicit size components finite >=0, otherwise invalid_argument. Invalid SVG intrinsic size already means an invalid resource. Valid→invalid Source recalculates natural size without a phantom interactive hit area.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/image_view.hpp` et `src/image_view.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/image_view.hpp` and `src/image_view.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : image.hpp, svg.hpp et adapters draw_image/draw_svg. Préserver Image/ImageTexture/ImageCache et SvgIcon/SvgCache dans leurs headers historiques. Source variant et ImageView restent dans image_view.hpp ; privée extension SVG fit reste derrière adaptateur backend, sans type Skia dans widget public.
+Source to extract or reuse: image.hpp, svg.hpp, and draw_image/draw_svg adapters. Preserve Image/ImageTexture/ImageCache and SvgIcon/SvgCache in their historical headers. Source variant and ImageView stay in image_view.hpp; private SVG fit extension remains behind the backend adapter without Skia types in the public widget.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `image_view_intrinsic_scale` : taille raster/pixel_scale et SVG logique correspondent à mesure.
-- `image_view_fit_modes` : Fill/Contain/Cover raster et SVG sont bornés et centrés.
-- `image_view_invalid_swap` : resource invalid puis replacement async préparé recalcule sans I/O paint.
-- `image_view_alpha` : transparence originelle et absence de tint respectées.
-- `image_view_cache_lifetime` : vider un cache ne retire pas le backing retenu par une vue.
-- `image_view_clip_fault` : exception de rendu puis image voisine gardent transformations.
-- `image_view_semantics` : decorative/alt donnent rôle et nom attendus.
+- `image_view_intrinsic_scale`: raster size/pixel_scale and logical SVG size match measurement.
+- `image_view_fit_modes`: raster and SVG Fill/Contain/Cover are bounded and centered.
+- `image_view_invalid_swap`: an invalid resource then prepared async replacement recalculates without paint I/O.
+- `image_view_alpha`: original transparency and absence of tint preserved.
+- `image_view_cache_lifetime`: clearing a cache does not remove backing retained by a view.
+- `image_view_clip_fault`: after a rendering exception, a neighboring image preserves transforms.
+- `image_view_semantics`: decorative/alt give the expected role and name.
 
-Créer `examples/features/image_view.cpp` et la cible `nativeui_example_image_view`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/image_view.cpp` and target `nativeui_example_image_view`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

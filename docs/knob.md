@@ -1,114 +1,114 @@
 # Knob
 
-**Statut : existant à enrichir.**
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Contrôle rotatif continu de valeur float pour des interfaces quelconques. Un domaine musical peut l’utiliser ; l’automation et les gestes audio restent dans l’adapter applicatif.
+A continuous rotary float-value control for any interface. A musical application may use it; automation and audio gestures remain in the application adapter.
 
-Présent dans [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), `Knob(label, Binding<float>)` et surcharge State. `KnobComponent` public dans [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc). Il reçoit une plage, un drag vertical et des flèches clavier.
+Available in [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), `Knob(label, Binding<float>)` and a State overload. Public `KnobComponent` in [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc). It accepts a range, vertical dragging, and keyboard arrows.
 
-MyGo n’a pas de Knob autonome dans les 54 familles ; `Slider` de `ui/widgets.go` fournit un comportement continu comparable mais une présentation différente. Préserver l’extension NativeUI.
+MyGo has no standalone Knob among its 54 families; `Slider` in `ui/widgets.go` provides comparable continuous behavior with a different presentation. Preserve the NativeUI extension.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante exacte : `Knob(std::string, Binding<float>)`, `Knob(std::string, State<float>&)`, fluent rvalue `range(float minimum, float maximum)` et `spec() &&`. Aucun `on_change`, formatter ou style n’existe actuellement.
+Exact existing API: `Knob(std::string, Binding<float>)`, `Knob(std::string, State<float>&)`, rvalue fluent `range(float minimum, float maximum)`, and `spec() &&`. No `on_change`, formatter, or style currently exists.
 
-Exemple existant vérifié :
+Verified example using the existing API:
 
 ```cpp
 ui::State<float> amount{0.5f};
-auto control = ui::Knob{"Quantité", amount}
+auto control = ui::Knob{"Amount", amount}
     .range(0.0f, 1.0f)
     .spec();
 ```
 
-La surcharge State est convertie immédiatement en Binding ; après destruction de sa source, valid()==false, get() fournit la dernière valeur, set est ignoré et observe inactif. Aucune notification de destruction automatique ; les événements revalident valid(). Le constructeur public KnobComponent conserve label/Binding/plage ; pas de migration float vers double dans cette extraction.
+The State overload is immediately converted to Binding; after its source is destroyed, valid()==false, get() supplies the last value, set is ignored, and observe is inactive. No automatic destruction notification; events revalidate valid(). The public KnobComponent constructor preserves label/Binding/range; no float-to-double migration in this extraction.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<float> possédé et valeur visuelle locale. Au montage, subscription par instance ; chaque écriture externe actualise la valeur clampée et invalide le rendu.
+Owned Binding<float> and local visual value. Subscribe per instance at mounting; each external write updates the clamped value and invalidates rendering.
 
-Source actuelle : value_ reçoit state_.get() sans clamp au constructeur ; les notifications observe clampent ensuite. L’arc normalise au rendu, mais le texte peut initialement montrer une valeur hors plage. Contrat enrichi : initialisation et updates externes utilisent la même valeur effective clampée, sans writeback ; les mutations utilisateur écrivent une valeur clampée.
+Current source: value_ receives state_.get() without clamping in the constructor; observe notifications clamp afterward. The arc normalizes during rendering, but text may initially show an out-of-range value. Enhanced contract: initialization and external updates use the same clamped effective value without writeback; user mutations write a clamped value.
 
-Le drag conserve sa valeur initiale et le déplacement total. Contrat enrichi : une mise à jour externe pendant drag annule la gesture pour éviter une réécriture depuis ancien point de départ. Les observations confirmant l’écriture attendue du Knob ne comptent pas comme externes ; cette reconnaissance est scoped et restaurée même si set/observer lève, une valeur réentrante différente annule. Tester la distinction lors de l’enrichissement.
+Dragging retains its initial value and total displacement. Enhanced contract: an external update during drag cancels the gesture to avoid rewriting from an old starting point. Observations confirming the Knob's expected write do not count as external; this recognition is scoped and restored even if set/observer throws, and a different reentrant value cancels. Test this distinction during enhancement.
 
 ## 4. Interactions
 
-PointerDown commence DragGesture et capture. Mouvement vertical vers le haut augmente la valeur ; sensibilité actuelle = plage/180 pixels logiques. PointerUp termine et libère.
+PointerDown starts DragGesture and capture. Upward vertical movement increases the value; current sensitivity equals range/180 logical pixels. PointerUp ends the gesture and releases capture.
 
-Flèches gauche/bas décrémentent et droite/haut incrémentent, pas = 1 % de plage ; Shift = 0,2 %. Les autres touches/molette sont Ignored ; pas de reset double clic implicite.
+Left/down arrows decrement and right/up arrows increment, with a step of 1% of the range; Shift uses 0.2%. Other keys/wheel are Ignored; no implicit double-click reset.
 
-ReadOnly consomme les événements mutateurs sans écriture et annule le drag en cours. PointerCancel/désactivation/démontage libèrent la capture et gardent la dernière valeur publiée, sans rollback ni notification ajoutée.
+ReadOnly consumes mutating events without writing and cancels the current drag. PointerCancel/disabling/unmounting release capture and preserve the last published value, without rollback or added notification.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure historique 176 × 182. Le parent peut contraindre ; contrôler clipping et géométrie du knob dans un petit espace sans changer sa taille demandée.
+Historical measurement is 176 × 182. The parent may constrain it; verify clipping and knob geometry in a small space without changing its requested size.
 
-Le rendu actuel réserve titre, arcs et valeur à deux décimales. Garder cette présentation normale comme oracle ; aucune mesure de chaîne ne déclenche une mutation.
+Current rendering reserves space for the title, arcs, and a value with two decimal places. Preserve this normal presentation as an oracle; string measurement never triggers mutation.
 
-Coordonnées logiques ; le DPR appartient au renderer. La normalisation doit rester finie pour toute plage prise en charge, et ne jamais donner NaN à arc/line.
+Logical coordinates; DPR belongs to the renderer. Normalization must remain finite for every supported range and must never pass NaN to arc/line.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Couleurs et géométrie actuelles depuis colors : panel, border, accent, knob et knobInner. Focus remplace la bordure ; pas de KnobStyle existant.
+Current colors and geometry come from colors: panel, border, accent, knob, and knobInner. Focus replaces the border; no existing KnobStyle.
 
-Valeur externe/interne et focus = repaint. La plage et le label sont immuables après création. L’extraction ne promet pas une animation ou un effet matériel nouveau.
+External/internal value and focus trigger repaint. Range and label are immutable after creation. Extraction does not promise a new animation or hardware effect.
 
-Plage maximum <= minimum : préserver maximum = minimum + 1 pour valeurs ordinaires. Contrat enrichi : bornes non finies rejetées par invalid_argument ; si minimum+1 float ne progresse pas, utiliser nextafter(minimum,+inf), rejet si résultat non fini. Valeur source non finie a pour vue minimum, jamais une géométrie invalide.
+Range maximum <= minimum: preserve maximum = minimum + 1 for ordinary values. Enhanced contract: reject non-finite bounds with invalid_argument; if minimum+1 does not advance in float, use nextafter(minimum,+inf), rejecting a non-finite result. A non-finite source value is displayed as minimum and never produces invalid geometry.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Slider, nom = label, numeric_value = valeur effective, value_range = plage et step 1 %, actions Increment/Decrement/SetValue/Focus.
+Target contract: Slider, name = label, numeric_value = effective value, value_range = range with a 1% step, actions Increment/Decrement/SetValue/Focus.
 
-ReadOnly conserve nom/valeur et retire les mutations sémantiques. Les actions suivent le même clamp que le clavier ; aucune voie privilégiée hors plage.
+ReadOnly preserves name/value and removes semantic mutations. Actions use the same clamp as the keyboard; no privileged out-of-range path.
 
-Knob actuel ne démontre pas ces overrides. Vérifier la publication backend-neutre ; ponts natifs T068 différés, sans revendiquer prise en charge native.
+The current Knob does not demonstrate these overrides. Verify backend-neutral publication; native T068 bridges are deferred, without claiming native support.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Subscriptions RAII annulées au démontage ; ajouter un unmount explicite si nécessaire sans dépendre seulement de la destruction. Déactivation et exception ne laissent pas DragGesture active.
+RAII subscriptions are cancelled at unmounting; add an explicit unmount if needed rather than depending solely on destruction. Disabling and exceptions do not leave DragGesture active.
 
-Appel Binding::set potentiellement réentrant : préparer valeur et état geste, écrire, puis revalider le token de vie avant tout accès au composant. Une notification commencée n’est jamais rejouée après exception.
+Binding::set may be reentrant: prepare the value and gesture state, write, then revalidate the lifetime token before any component access. A notification that has started is never replayed after an exception.
 
-Destruction no-throw ; pas de callback métier de fin de geste improvisé. Aucun globals, locks ou audio calls ; deux Knob simultanés restent indépendants.
+Destruction is no-throw; do not invent an application end-of-gesture callback. No globals, locks, or audio calls; two simultaneous Knobs remain independent.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutilise Binding/State, DragGesture et focus/capture existants. Aucun contrôleur de paramètre de plugin ajouté au toolkit.
+Reuses existing Binding/State, DragGesture, and focus/capture. No plugin parameter controller is added to the toolkit.
 
-Plage large avec subtraction float potentiellement overflow : calcul du span, delta et normalisation interne en double, conversion finale float après clamp, sans modifier l’API float. Valeur NaN/inf : présentation effective minimale, aucune correction du modèle.
+A wide range may overflow float subtraction: calculate span, delta, and internal normalization in double, then convert to float after clamping, without changing the float API. NaN/inf value: effective minimum presentation with no model correction.
 
-Une State/Binding réentrante qui retire le nœud cesse toute gesture ; une nouvelle instance ne reprend pas l’ancien drag. Le reset/reopen doit pouvoir réobserver sans garder l’ancien invalidateur.
+A reentrant State/Binding that removes the node stops every gesture; a new instance does not resume the old drag. Reset/reopen must be able to observe again without retaining the old invalidator.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/knob.hpp` et `src/knob.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/knob.hpp` and `src/knob.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : `widgets_basic.inc` et `widgets_builders.inc`. Préserver KnobComponent et les deux constructeurs du builder ; noyau de gesture/rendu dans knob.cpp, sans fichier wrapper vide.
+Source to extract or reuse: `widgets_basic.inc` and `widgets_builders.inc`. Preserve KnobComponent and both builder constructors; put the gesture/rendering core in knob.cpp without an empty wrapper file.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `knob_legacy_delta` : drag 180 unités et flèches/Shift reproduisent les incréments.
-- `knob_external_drag` : écriture externe annule le drag avant autre mouvement.
-- `knob_readonly_cancel` : transition ReadOnly et PointerCancel libèrent capture sans écriture.
-- `knob_wide_nonfinite` : aucune géométrie non finie pour entrées extrêmes.
-- `knob_observer_throw` : après observer réentrant qui lève un nouveau drag reste possible.
+- `knob_legacy_delta`: a 180-unit drag and arrows/Shift reproduce the increments.
+- `knob_external_drag`: an external write cancels dragging before further movement.
+- `knob_readonly_cancel`: a ReadOnly transition and PointerCancel release capture without writing.
+- `knob_wide_nonfinite`: extreme inputs produce no non-finite geometry.
+- `knob_observer_throw`: after a reentrant observer throws, a new drag remains possible.
 
-Créer `examples/features/knob.cpp` et la cible `nativeui_example_knob`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/knob.cpp` and target `nativeui_example_knob`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

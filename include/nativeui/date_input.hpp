@@ -22,7 +22,7 @@ public:
   Spec spec() &&;
 
 private:
-  std::string label_, placeholder_{"Choisir une date"};
+  std::string label_, placeholder_{"Choose a date"};
   Binding<Value> value_;
   Value minimum_, maximum_;
   std::chrono::sys_days reference_{};

@@ -1,26 +1,26 @@
 # NumberInput
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Éditer un double borné à partir d’un texte et de flèches, avec draft temporairement incomplet. La
-valeur numérique ne reçoit jamais NaN ni texte invalide.
+Edit a bounded double using text and arrows, with a temporarily incomplete draft. The numeric
+value never receives NaN or invalid text.
 
-NativeUI a TextInput et SliderDomain float, mais aucun champ numérique. Réutiliser le noyau
-d’édition sans relier directement son draft string au State<double>.
+NativeUI has TextInput and the float SliderDomain, but no numeric field. Reuse the editing core
+without directly connecting its string draft to State<double>.
 
-MyGo : `ui/number.go`, `NumberInput`. Publie dès que saisie parse dans plage, ajoute Up/Down et
-boutons, puis formate à la perte de focus. Cible conserve live-valid et formalise les conflits
-externes.
+MyGo: `ui/number.go`, `NumberInput`. It publishes as soon as input parses within the range, adds
+Up/Down and buttons, then formats on loss of focus. The target retains live-valid behavior and
+formalizes external conflicts.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class NumberInput {
@@ -36,7 +36,7 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<double> copies{1.0};
@@ -44,180 +44,176 @@ auto count = ui::NumberInput("Copies", copies).range(1.0, 99.0).step(1.0)
     .precision(0).on_submit([](double) {}).spec();
 ```
 
-Defaults : range[0,100], step=1, précision dérivée de la représentation décimale minimale du step,
-bornée à 17 digits. precision(0..17) explicite remplace ce calcul ; hors limites rejeté.
+Defaults: range[0,100], step=1, precision derived from the step's shortest decimal representation,
+bounded to 17 digits. Explicit precision(0..17) overrides this calculation; out-of-range values
+are rejected.
 
-NumberInputStyle contient TextInputStyle, StepperStyle, gap et message/couleur invalid. Style des
-sous-parties dans le couple NumberInput ; pas de callbacks de parsing arbitraires requis pour v1.
+NumberInputStyle contains TextInputStyle, StepperStyle, gap, and invalid message/color. Subpart
+styles belong in the NumberInput pair; arbitrary parsing callbacks are not required for v1.
 
-Parser locale-indépendant : trim espaces ASCII, signe, décimales point et exposant ; refuser
-trailing bytes, NaN/Inf et overflow. Une virgule ne représente pas un séparateur décimal.
+Locale-independent parser: trim ASCII whitespace, accept a sign, decimal point, and exponent;
+reject trailing bytes, NaN/Inf, and overflow. A comma does not represent a decimal separator.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-State<double> est valeur validée ; string draft, validity et focus_baseline sont locaux. Un draft
-parse finite et dans plage publie live la valeur saisie sans snap au step ; la granularité n’impose
-pas l’arrondi lors frappe.
+State<double> is the validated value; the string draft, validity, and focus_baseline are local. A
+draft that parses as finite and in range publishes the entered value live without snapping to the
+step; granularity does not impose rounding during typing.
 
-Textes “”, “-”, “1e” sont des drafts incomplets sans mutation. Une valeur hors plage reste draft
-invalid et affiche erreur ; blur restaure la représentation de dernière valeur valide.
+Texts “”, “-”, and “1e” are incomplete drafts without mutation. An out-of-range value remains an
+invalid draft and displays an error; blur restores the last valid value's representation.
 
-Changement externe différent pendant focus remplace draft et baseline avec sa valeur effective et
-termine composition locale ; il gagne sur un draft ancien. Une publication identique issue de
-l’édition ne reformatte pas la frappe.
+A different external change while focused replaces the draft and baseline with its effective value
+and ends local composition; it wins over an old draft. An identical publication from editing does
+not reformat typing.
 
-Enter valide le draft valide, met à jour baseline, formate et appelle submit une fois ; Escape
-restaure baseline par une écriture si nécessaire. Les flèches relisent la valeur actuelle puis
-snap/clamp sur grille comme Stepper.
+Enter validates a valid draft, updates the baseline, formats, and calls submit once; Escape restores
+the baseline with a write if necessary. Arrows reread the current value, then snap/clamp to the grid
+as Stepper does.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Text editing reprend TextInput : sélection, clipboard, undo/redo draft. Up/Down changent valeur de
-step et reformatent ; Home/End restent navigation textuelle, sans sauter aux bornes.
+Text editing follows TextInput: selection, clipboard, draft undo/redo. Up/Down change the value by
+step and reformat; Home/End remain text navigation without jumping to the bounds.
 
-Stepper attenant prend l’action plus/moins et son maintien 400/80 ms ; clic garde le focus du champ
-pour continuer la saisie. Un seul Tab stop sur l’éditeur, actions stepper via clavier/sémantique.
+The adjacent Stepper handles plus/minus and its 400/80 ms repeat; clicking keeps the field focused
+to continue typing. A single Tab stop on the editor, with stepper actions through keyboard/semantics.
 
-Enter invalid/incomplete garde focus et erreur, sans submit ; blur invalid abandonne draft et
-affiche dernière valeur valide. Escape annule à baseline ; PointerCancel du Stepper conserve les
-increments live déjà publiés.
+Invalid/incomplete Enter retains focus and the error without submit; invalid blur discards the draft
+and displays the last valid value. Escape cancels to the baseline; Stepper PointerCancel retains
+live increments already published.
 
-ReadOnly permet sélection/copie sans parse-mutant ni flèches ; disabled bloque édition. Molette
-ignorée pour éviter modification accidentelle d’un nombre pendant scroll.
+ReadOnly permits selection/copying without mutating parsing or arrows; disabled blocks editing. The
+wheel is ignored to prevent accidental numeric changes during scrolling.
 
-Committed text normal suit TextInput ; absence de pont natif preedit est explicite. Pendant
-composition synthétique active, ne parser qu’après Commit, pas chaque preedit Update.
+Normal committed text follows TextInput; the absence of a native preedit bridge is explicit. While
+synthetic composition is active, parse only after Commit, not on each preedit Update.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Champ prend largeur TextInputStyle, Stepper largeur compacte, gap ; hauteur commune. Préserver une
-largeur indépendante de la longueur de draft pour éviter déplacement pendant frappe.
+The field takes TextInputStyle width, a compact Stepper width, and gap; height is shared. Preserve a
+width independent of draft length to avoid movement while typing.
 
-Le message invalid peut être exposé en description et peint dans espace réservé par style, sans
-affaissement du champ ; Form/Field gère une ligne d’erreur externe si besoin.
+The invalid message may be exposed as a description and painted in space reserved by the style,
+without collapsing the field; Form/Field handles an external error line if needed.
 
-Caret/selection clip dans aire de texte. Toutes coordonnées logiques ; un format scientifique long
-défile horizontalement.
+Caret/selection clip to the text area. All coordinates are logical; long scientific notation
+scrolls horizontally.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Validité invalid affecte border/text/message, pas la valeur présentée au Stepper. Blank placeholder
-et nombre zéro sont des contenus distincts.
+Invalid validity affects border/text/message, but not the value presented to Stepper. A blank
+placeholder and the number zero are distinct content.
 
-Le format est locale-indépendant, fixed aux digits choisis ; l’arrondi de présentation ne republie
-pas une valeur arrondie au blur.
+Formatting is locale-independent and fixed to the chosen digits; presentation rounding does not
+republish a rounded value on blur.
 
-Draft change paint et scroll, géométrie/style metrics layout ; le Stepper repeint sa disponibilité
-près bornes. Aucun validator/parse appelé depuis paint.
+Draft changes require paint and scroll updates; geometry/style metrics require layout; Stepper
+repaints its availability near the bounds. No validator/parser is called from paint.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Custom avec numeric_value/value_range et text_value draft, nom label, actions
-Increment/Decrement/SetValue quand mutable.
+Target: Custom with numeric_value/value_range and draft text_value, label as name, and
+Increment/Decrement/SetValue actions when mutable.
 
-SpinButton n’existe pas dans SemanticRole actuel ; invalid/error est description backend-neutre tant
-qu’aucun champ dédié n’est ajouté. Les flèches ne doublent pas les arrêts Tab.
+SpinButton does not exist in the current SemanticRole; invalid/error is a backend-neutral description
+until a dedicated field is added. Arrows do not duplicate Tab stops.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer parse et représentation avant commit ; libérer capture/context puis set. Callback submit
-copié avec double stable, après état local cohérent, sans accès à this après appel.
+Prepare parsing and representation before commit; release capture/context, then set. Copy the submit
+callback with a stable double after local state is consistent, without accessing this after the call.
 
-Observer peut remplacer la valeur, retirer champ ou lever. Garder valeur déjà commise, reprendre
-draft à prochain checkpoint ; ne republier pas automatiquement la valeur du draft après un échec.
+An observer may replace the value, remove the field, or throw. Retain the already committed value,
+resume the draft at the next checkpoint; do not automatically republish the draft value after failure.
 
-Réponse clipboard génération et contrôle valid vérifiés. Démontage annule draft/composition et
-répétition du Stepper sans submit/rollback destructeur.
+Check the clipboard response generation and valid status. Unmounting cancels draft/composition and
+Stepper repetition without submit or destructive rollback.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), [stepper](stepper.md), domaine double privé,
-TextService/State. Ne pas changer SliderDomain float pour cet ajout.
+Dependencies: [TextInput](text_input.md), [Stepper](stepper.md), a private double domain,
+TextService/State. Do not change the float SliderDomain for this addition.
 
-Domain min<=max et step>0 finite ; min==max laisse un champ constant ReadOnly effectif pour
-modifications numériques. Externe NaN/inf rendu min avec description invalid sans correction
-automatique.
+Domain min<=max and finite step>0; min==max leaves a constant field effectively ReadOnly for numeric
+changes. External NaN/inf renders as min with an invalid description, without automatic correction.
 
-Double aux bornes extrêmes, exponent overflow, step sous-normal et precision17 doivent être testés
-sans addition overflow produisant NaN. User paste “1,2” reste invalid plutôt que silencieusement 12.
+Doubles at extreme bounds, exponent overflow, subnormal step, and precision17 must be tested without
+overflowing addition that produces NaN. User paste “1,2” remains invalid instead of silently becoming 12.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/number_input.hpp` et `src/number_input.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/number_input.hpp` and `src/number_input.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-Header expose NumberInput/NumberInputStyle et callbacks ; .cpp possède draft/parser/formatter,
-synchronisation, composition TextInput/Stepper et rendu.
+The header exposes NumberInput/NumberInputStyle and callbacks; the .cpp owns draft/parser/formatter,
+synchronization, TextInput/Stepper composition, and rendering.
 
-Noyaux texte/stepper sont partagés par interfaces privées, sans copier leur implémentation dans un
-header NumberInput.
+Text/stepper cores are shared through private interfaces without copying their implementation into
+a NumberInput header.
 
-Inscrire `src/number_input.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/number_input.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`number_input_parse` : signed/decimal/exponent admis ; vide/partiel/comma/NaN/trailing/overflow sans
-mutation.
+`number_input_parse`: signed/decimal/exponent accepted; empty/partial/comma/NaN/trailing/overflow
+input without mutation.
 
-`number_input_live_valid` : frappe valide publie sans snap ; format blur ne change pas double.
+`number_input_live_valid`: valid typing publishes without snapping; blur formatting does not change
+the double.
 
-`number_input_external_conflict` : écriture externe gagne sur draft actif et devient Escape
-baseline.
+`number_input_external_conflict`: an external write wins over an active draft and becomes the
+Escape baseline.
 
-`number_input_submit_blur` : invalid Enter reste edit sans submit ; invalid blur restaure dernière
-valeur.
+`number_input_submit_blur`: invalid Enter stays in editing without submit; invalid blur restores
+the last value.
 
-`number_input_stepper` : increments snap/clamp, maintien, no wheel et un Tab stop.
+`number_input_stepper`: increments snap/clamp, repeat, no wheel, and one Tab stop.
 
-`number_input_composition` : Update non parse, Commit parse une fois ; clipboard périmé ignoré.
+`number_input_composition`: Update does not parse, Commit parses once; stale clipboard is ignored.
 
-`number_input_throw_remove` : observer/submit retire/ lève et prochaine action fonctionne.
+`number_input_throw_remove`: an observer/submit removes/throws and the next action works.
 
-Ajouter `examples/features/number_input.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/number_input.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

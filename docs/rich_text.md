@@ -1,22 +1,22 @@
 # RichText
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Composer un paragraphe de fragments possédés avec polices, couleurs, décorations, surlignages et actions inline. Le texte reste non éditable ; édition riche et markup HTML ne font pas partie de ce composant.
+Compose a paragraph from owned fragments with fonts, colors, decorations, highlights, and inline actions. Text remains non-editable; rich editing and HTML markup are outside this component's scope.
 
-Absent du catalogue public NativeUI. [text.hpp](../include/nativeui/text.hpp) expose TextStyle et TextService mais aucun layout public multi-run ; [Label](label.md) est un affichage simple.
+Absent from the NativeUI public catalog. [text.hpp](../include/nativeui/text.hpp) exposes TextStyle and TextService but no public multi-run layout; [Label](label.md) is a simple display.
 
-MyGo : `ui/richtext.go`, `Span`, `RichText`, `encodeSpans`, `spanPaint.runs`, `Painter.RichText`. Ses fragments se replient comme un paragraphe ; les enfants Link peuvent conserver leur interaction sur leurs mots. Il faut reprendre ce comportement sans importer le moteur Go.
+MyGo: `ui/richtext.go`, `Span`, `RichText`, `encodeSpans`, `spanPaint.runs`, `Painter.RichText`. Its fragments wrap as a paragraph; Link children can retain interaction on their words. Reproduce this behavior without importing the Go engine.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 struct RichTextSpan {
@@ -37,99 +37,99 @@ public:
 };
 ```
 
-Un style de span fourni remplace tout le TextStyle de base pour ce run ; une absence hérite intégralement. Couleur de décoration = couleur du texte. L’id est obligatoire/unique seulement pour un span interactif.
+A supplied span style replaces the entire base TextStyle for that run; absence inherits it in full. Decoration color equals text color. An id is required and unique only for an interactive span.
 
-Exemple cible proposé :
+Proposed target example:
 
 ```cpp
 auto paragraph = ui::RichText{std::vector<ui::RichTextSpan>{
-    {.text = "Lire "},
-    {.id = "guide", .text = "le guide", .underline = true,
+    {.text = "Read "},
+    {.id = "guide", .text = "the guide", .underline = true,
      .on_activate = [] {}},
-    {.text = " avant de commencer."}
+    {.text = " before starting."}
 }}.wrap().spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le composant possède fragments, styles et callbacks. Aucun pointer ou string_view vers le modèle utilisateur n’est conservé. Pas de Binding de texte ni de sélection dans cette première API.
+The component owns fragments, styles, and callbacks. No pointer or string_view into the user model is retained. No text Binding or selection in this initial API.
 
-Cache de paragraphe par instance indexé par texte/style/largeur ; les offsets désignent le buffer UTF-8 réparé possédé. Les clés interactives restent stables lors d’un reflow.
+Per-instance paragraph cache indexed by text/style/width; offsets refer to the owned repaired UTF-8 buffer. Interactive keys remain stable through reflow.
 
-Une activation n’émet aucune écriture texte. Le callback est pris en snapshot avant invocation ; l’état pressed est terminal avant code utilisateur.
+Activation does not write text. Snapshot the callback before invocation; the pressed state is terminal before user code runs.
 
 ## 4. Interactions
 
-Span interactif : clic primaire press/release dans la même zone de run ; capture puis annulation sur PointerCancel, désactivation ou retrait. Un run sur plusieurs lignes accepte tous ses rectangles.
+Interactive span: primary press/release in the same run region; capture, then cancellation on PointerCancel, disabling, or removal. A run spanning several lines accepts all its rectangles.
 
-Tab/Shift+Tab parcourent uniquement les actions inline. Enter/Space activent l’action focalisée une fois ; les répétitions clavier ne dupliquent pas une pression.
+Tab/Shift+Tab traverse only inline actions. Enter/Space activate the focused action once; keyboard repeats do not duplicate a press.
 
-Le texte ordinaire ignore événements et molette. Pas de sélection, clipboard, saisie, glissement de contenu ni validation. Escape annule la pression courante sans déclencher une action.
+Ordinary text ignores events and the wheel. No selection, clipboard, input, content dragging, or confirmation. Escape cancels the current press without triggering an action.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesurer un paragraphe complet, sans addition naïve de mesures indépendantes qui briserait ligatures, bidi ou clusters. Les retours à la ligne explicites séparent les paragraphes ; wrap actif par défaut utilise la largeur contrainte.
+Measure a complete paragraph without naively adding independent measurements that would break ligatures, bidi, or clusters. Explicit line breaks separate paragraphs; wrapping is enabled by default and uses the constrained width.
 
-Largeur non bornée : une ligne par paragraphe. Largeur nulle : aucune géométrie non finie ni boucle de reflow. Mot trop long : coupure aux frontières de grapheme autorisées, jamais dans une séquence UTF-8.
+Unbounded width: one line per paragraph. Zero width: no non-finite geometry or reflow loop. Overlong word: breaks are allowed at grapheme boundaries, never inside a UTF-8 sequence.
 
-Le rendu et le hit testing consomment le même résultat de layout et ses rectangles de runs. Clipper aux bornes retenues ; toutes les mesures et offsets géométriques sont logiques.
+Rendering and hit testing consume the same layout result and run rectangles. Clip to retained bounds; all measurements and geometric offsets are logical.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Base TextStyle et overrides complets ; backgrounds derrière glyphes, soulignements/suppressions sur métriques de police et non coordonnées magiques par span.
+Base TextStyle and complete overrides; backgrounds behind glyphs, underlines/strikethroughs based on font metrics rather than arbitrary per-span coordinates.
 
-Contrat visuel fixé : une action inline est soulignée en hover/pressed, et ses rectangles de runs reçoivent un focus ring dans la couleur de texte du run au focus clavier. Le fond explicite est conservé. Aucun type RichTextStyle ni slot Theme supplémentaire dans cette v1.
+Fixed visual contract: an inline action is underlined when hovered/pressed, and its run rectangles receive a focus ring in the run's text color on keyboard focus. Preserve the explicit background. No RichTextStyle type or additional Theme slot in this v1.
 
-Style ou largeur modifié = reflow et repaint ; action/id seul = structure sémantique et interactions. La peinture reste pure et ne lance pas de callback d’action.
+Style or width change means reflow and repaint; action/id alone affects semantic structure and interactions. Painting remains pure and does not invoke action callbacks.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Text pour le paragraphe ordinaire et Button/Custom pour une action inline selon le mapping approuvé. SemanticRole::Link n’existe pas dans la version étudiée ; ne pas le publier fictivement.
+Target contract: Text for an ordinary paragraph and Button/Custom for an inline action according to the approved mapping. SemanticRole::Link does not exist in the reviewed version; do not publish it as if it did.
 
-Nom d’action = texte du span ; bornes logiques = union de ses rectangles, identité stable. La lecture textuelle ne duplique pas chaque run déjà décrit par la valeur globale.
+Action name equals span text; logical bounds are the union of its rectangles, with stable identity. Textual reading does not duplicate every run already described by the overall value.
 
-Le pont natif T068 est différé. Texte non éditable : aucun IME actif ; si sélection/édition sont ajoutées plus tard, elles doivent respecter la séparation committed/preedit de DESIGN17.4.
+The native T068 bridge is deferred. Non-editable text: no active IME; if selection/editing are added later, they must respect the committed/preedit separation in DESIGN17.4.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; subscriptions absentes. Ne pas garder Painter, contextes ni nœuds retenus dans le cache de paragraphe.
+UI/main thread; no subscriptions. Do not retain Painter, contexts, or retained nodes in the paragraph cache.
 
-Un reflow est préparé puis publié atomiquement. S’il échoue, conserver le résultat précédent valide ; si aucun résultat n’existe, propagation C++ après nettoyage.
+Prepare reflow and then publish it atomically. If it fails, keep the previous valid result; if no result exists, propagate the C++ exception after cleanup.
 
-Une action qui retire son sous-arbre ou lève n’est jamais rejouée. Libérer capture et marque pressed avant invocation ; destruction no-throw. Destruction top-level UI différée au checkpoint sûr.
+An action that removes its subtree or throws is never replayed. Release capture and clear the pressed flag before invocation; destruction is no-throw. Top-level UI destruction is deferred to a safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendance structurante : ajouter un adaptateur privé de layout multi-run du texte existant dans ce couple, avec backend privé et contrat mesure/peinture commun ; aucune nouvelle API Skia publique.
+Structural dependency: add a private multi-run layout adapter for the existing text system within this file pair, with a private backend and a common measurement/painting contract; no new public Skia API.
 
-Spans vides ignorés dans le layout mais ne créent pas d’action invisible. Ids interactifs vides/dupliqués = invalid_argument avant publication. Aucun parsing implicite de markup.
+Empty spans are ignored in layout but do not create invisible actions. Empty/duplicate interactive ids cause invalid_argument before publication. No implicit markup parsing.
 
-UTF-8 invalide réparé identiquement dans tous les runs ; clusters combinés traversant une frontière de run restent géométriquement cohérents. Retrait d’un span actif annule son action ; un nouvel id ne réutilise pas son focus.
+Invalid UTF-8 is repaired identically in all runs; combining clusters crossing a run boundary remain geometrically consistent. Removing an active span cancels its action; a new id does not reuse its focus.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/rich_text.hpp` et `src/rich_text.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/rich_text.hpp` and `src/rich_text.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : TextService et Painter existants. `RichTextSpan` et le cache ne doivent pas être ajoutés à widgets_basic.inc ; le composant utilise les services existants et un noyau non template.
+Source to extract or reuse: existing TextService and Painter. `RichTextSpan` and the cache must not be added to widgets_basic.inc; the component uses existing services and a non-template core.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `rich_text_mixed_runs` : styles, fond et décorations suivent chaque fragment.
-- `rich_text_unicode_reflow` : bidi, emoji et clusters restent entiers sur largeur réduite.
-- `rich_text_inline_hit` : action répartie sur deux lignes hit-teste ses seuls rectangles.
-- `rich_text_remove_pressed` : retrait de l’id pendant pression supprime l’activation.
-- `rich_text_callback_throw` : après une action réentrante qui lève la suivante fonctionne sans rejouer la première.
+- `rich_text_mixed_runs`: styles, background, and decorations follow each fragment.
+- `rich_text_unicode_reflow`: bidi, emoji, and clusters remain intact at reduced width.
+- `rich_text_inline_hit`: an action spanning two lines hit-tests only its own rectangles.
+- `rich_text_remove_pressed`: removing the id during a press suppresses activation.
+- `rich_text_callback_throw`: after a reentrant action throws, the next works without replaying the first.
 
-Créer `examples/features/rich_text.cpp` et la cible `nativeui_example_rich_text`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/rich_text.cpp` and target `nativeui_example_rich_text`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

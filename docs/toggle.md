@@ -1,26 +1,22 @@
 # Toggle
 
-Statut : **existant à extraire**.
+**Status: existing — extraction required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Interrupteur booléen à curseur visuel ; activer/désactiver une option. Ce nom conserve sa
-signification actuelle NativeUI.
+A boolean switch with a visual sliding thumb; enable/disable an option. This name preserves its current NativeUI meaning.
 
-NativeUI : [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc), ToggleComponent public
-; [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), Toggle(label,
-State/Binding). Style dans [toggle_style.hpp](../include/nativeui/toggle_style.hpp).
+NativeUI: [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc), public ToggleComponent; [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), Toggle(label, State/Binding). Style in [toggle_style.hpp](../include/nativeui/toggle_style.hpp).
 
-MyGo : `ui/widgets.go`, `Switch` ; `ui/base.go`, `SwitchBase`. Son `Toggle` désigne un bouton pressé
-porté séparément comme ToggleButton ; Switch<T> NativeUI reste une composition conditionnelle.
+MyGo: `ui/widgets.go`, `Switch`; `ui/base.go`, `SwitchBase`. Its `Toggle` denotes a pressed button ported separately as ToggleButton; NativeUI Switch<T> remains conditional composition.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp
 Toggle(std::string label, Binding<bool> state);
@@ -29,167 +25,113 @@ Toggle&& style(ToggleStyle value) &&;
 Spec spec() &&;
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
 ui::State<bool> enabled{true};
-auto control = ui::Toggle("Actif", enabled).spec();
+auto control = ui::Toggle("Active", enabled).spec();
 ```
 
-Conserver l’ordre label puis état ainsi que ToggleComponent public et ToggleStyle. Aucun alias
-Switch vers Toggle, aucun changement du type bool.
+Preserve label-then-state order, public ToggleComponent, and ToggleStyle. No Switch alias for Toggle or bool type change.
 
-Valeur notifiée par Binding ; pas d’API audio start/end gesture ni callback d’automation dans le
-contrôle.
+Value notifications use Binding; no audio start/end gesture API or automation callback in the control.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<bool> est l’unique état persistant. Le curseur représente state.get() ; les bools
-space_pressed_/enter_pressed_ filtrent les répétitions et ne sont pas la valeur.
+Binding<bool> is the only persistent state. The thumb represents state.get(); space_pressed_/enter_pressed_ bools filter repeats and are not the value.
 
-Les valeurs externes sont observées et rafraîchissent le rendu. Une écriture externe lors d’un appui
-reste autoritative ; aucun commit final au PointerUp n’écrase sa modification.
+External values are observed and refresh rendering. An external write during a press remains authoritative; no final PointerUp commit overwrites its change.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Comportement actuel à conserver : PointerDown bascule immédiatement puis capture ; PointerUp termine
-l’appui sans second set. PointerCancel ne restaure pas la valeur déjà publiée.
+Current behavior to preserve: PointerDown toggles immediately and then captures; PointerUp ends the press without a second set. PointerCancel does not restore the already published value.
 
-Space et Enter basculent au premier KeyDown ; auto-repeat supprimé jusqu’au KeyUp. Perte de
-focus/désactivation remet les drapeaux de touche à zéro.
+Space and Enter toggle on the first KeyDown; suppress auto-repeat until KeyUp. Loss of focus/disabling clears key flags.
 
-ReadOnly bloque les pointeurs mutants et touches ; si appliqué pendant capture, terminer l’armement
-sans publier. Disabled suit disponibilité héritée. Molette ignorée.
+ReadOnly blocks mutating pointer input and keys; if applied during capture, end arming without publication. Disabled follows inherited availability. Wheel ignored.
 
-Le curseur ne se déplace pas proportionnellement au drag : c’est un bool, pas un slider. Toute
-nouvelle interaction “drag pour choisir” serait une extension séparée, pas une conséquence de
-l’extraction.
+The thumb does not move proportionally to drag: this is a bool rather than a slider. Any new “drag to choose” interaction would be a separate extension rather than a consequence of extraction.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Track, thumb et label utilisent ToggleStyle et mesure de texte, selon le noyau existant. La position
-on/off déplace seulement le thumb, pas la largeur du contrôle.
+Track, thumb, and label use ToggleStyle and text measurement according to the existing core. The on/off position moves only the thumb, not the control's width.
 
-Garder padding, gap et minimum de la source ; les limites logiques servent au hit-test même à scale
-élevé. Un label long se clippe sous contrainte du parent.
+Keep source padding, gap, and minimum; logical bounds serve hit testing even at high scale. A long label clips under parent constraints.
 
-Resize pendant appui ne repasse pas state.set. Changement métrique de track/thumb/police implique
-layout, changement de position/couleur implique paint.
+Resizing during a press does not call state.set again. Metric changes to track/thumb/font imply layout; position/color changes imply paint.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Conserver style base/checked/hovered/pressed/focused/disabled/read_only et patches actuels. Afficher
-position checked et distinction focus ; ne pas remplacer l’interrupteur par une face de bouton.
+Preserve base/checked/hovered/pressed/focused/disabled/read_only style and current patches. Display checked position and distinct focus; do not replace the switch with a button face.
 
-La source ne promet pas d’animation temporelle automatique du curseur ; l’extraction ne crée aucun
-timer. Une animation future doit respecter réduit-motion et pause hors disponibilité.
+The source promises no automatic time-based thumb animation; extraction creates no timer. A future animation must respect reduced motion and pause when unavailable.
 
-Le classificateur de transition compare métriques et présentation, y compris patches dependent on
-checked. Theme reste par instance/portée.
+The transition classifier compares metrics and presentation, including patches dependent on checked. Theme remains per instance/scope.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Toggle, checked Checked/Unchecked, action Toggle quand mutable ; nom label. Le bool est lu
-après commit instantané, sans attendre PointerUp.
+Target: Toggle, Checked/Unchecked checked state, Toggle action when mutable; label name. Read bool after immediate commit without waiting for PointerUp.
 
-ToggleComponent ne publie pas actuellement semantics dans le fichier étudié. Ajouter l’override lors
-extraction sans déclarer un pont natif livré.
+ToggleComponent currently publishes no semantics in the reviewed file. Add the override during extraction without claiming a delivered native bridge.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Tout contexte/capture doit être dans un état cohérent avant la publication instantanée à
-PointerDown. Copier le Binding si nécessaire pour ne pas relire ce composant après set retirant son
-sous-arbre.
+Every context/capture must be consistent before immediate publication at PointerDown. Copy Binding if needed to avoid rereading this component after set removes its subtree.
 
-Une exception d’observateur conserve la valeur commise ; drapeaux clavier/capture rétablis pour
-prochaine interaction. Le démontage ne remet jamais l’option false.
+An observer exception preserves the committed value; restore keyboard flags/capture for the next interaction. Unmounting never resets the option to false.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : ThemeBinding, State, PressActivationState et TextService.
-[toggle_button](toggle_button.md) partage la logique bool mais a un timing de commit différent
-explicite.
+Dependencies: ThemeBinding, State, PressActivationState, and TextService. [toggle_button](toggle_button.md) shares bool logic but explicitly has different commit timing.
 
-Deux interrupteurs liés à un même bool affichent la même valeur mais leurs captures/focus restent
-distincts. State expiré suit Binding, aucune référence brute.
+Two switches bound to the same bool display the same value but retain distinct capture/focus. Expired State follows Binding; no raw reference.
 
-Aucun service système, préférence OS, automation ou traitement DSP n’est déclenché directement par
-le widget. L’observateur applicatif réalise l’effet.
+The widget directly triggers no system service, OS preference, automation, or DSP processing. The application observer performs the effect.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/toggle.hpp` et `src/toggle.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/toggle.hpp` and `src/toggle.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Déplacer ToggleComponent public et le builder depuis les .inc ; le header conserve leurs
-déclarations et signatures publiques. Le .cpp accueille observer/input/layout/paint et
-classification de style.
+Move public ToggleComponent and the builder out of the .inc files; the header preserves their public declarations and signatures. The .cpp contains observer/input/layout/paint and style classification.
 
-toggle_style.hpp reste compatible ; les anciens includes widgets.hpp/nativeui.hpp continuent à
-exporter Toggle. Ne jamais renommer ce composant en Switch.
+toggle_style.hpp remains compatible; existing widgets.hpp/nativeui.hpp includes continue exporting Toggle. Never rename this component Switch.
 
-Inscrire `src/toggle.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/toggle.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`toggle_down_commit` : PointerDown écrit une fois ; PointerUp/Cancel n’annulent ni ne réécrivent.
+`toggle_down_commit`: PointerDown writes once; PointerUp/Cancel neither undo nor rewrite.
 
-`toggle_key_repeat` : Space/Enter au premier KeyDown uniquement ; KeyUp autorise la suivante.
+`toggle_key_repeat`: Space/Enter only at the first KeyDown; KeyUp permits the next activation.
 
-`toggle_read_only` : transition ReadOnly pendant capture termine geste et préserve valeur.
+`toggle_read_only`: a ReadOnly transition during capture ends the gesture and preserves the value.
 
-`toggle_external_change` : valeur externe entre Down et Up n’est pas écrasée au relâchement.
+`toggle_external_change`: an external value between Down and Up is not overwritten on release.
 
-`toggle_style` : checked modifie thumb et invalidation exacte ; géométrie préservée à extraction.
+`toggle_style`: checked changes thumb and exact invalidation; geometry preserved during extraction.
 
-`toggle_publish_remove_throw` : observateur retire/ lève après commit ; captures et prochain Toggle
-récupèrent.
+`toggle_publish_remove_throw`: an observer removes/throws after commit; captures and the next Toggle recover.
 
-Ajouter `examples/features/toggle.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/toggle.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

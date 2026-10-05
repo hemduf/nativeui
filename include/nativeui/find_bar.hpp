@@ -31,7 +31,7 @@ private:
   Binding<std::string> query_;
   Binding<std::size_t> matches_;
   Binding<std::optional<std::size_t>> current_;
-  std::string label_{"Rechercher"};
+  std::string label_{"Search"};
   std::function<void(std::size_t)> on_navigate_;
   FindBarStyle style_;
 };

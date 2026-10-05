@@ -1,26 +1,26 @@
 # Canvas
 
-**Statut : existant à enrichir.**
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Surface de dessin et d’événements personnalisés en coordonnées locales. Le toolkit reste responsable du routage, clipping, focus et backend ; Canvas n’est pas une fenêtre native.
+A surface for custom drawing and events in local coordinates. The toolkit remains responsible for routing, clipping, focus, and the backend; Canvas is not a native window.
 
-Builder et `CanvasComponent` public dans [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc) et [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc). La façade CanvasContext2D et CanvasInputContext est dans [component_base.hpp](../include/nativeui/component_base.hpp).
+Builder and public `CanvasComponent` in [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc) and [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc). The CanvasContext2D and CanvasInputContext facade is in [component_base.hpp](../include/nativeui/component_base.hpp).
 
-MyGo : `Element.Draw`/`DrawOver` et Painter dans `ui/element.go`/`ui/paint.go` sont les primitives correspondantes, pas un Canvas autonome de catalogue. Aucun portage de fenêtre/render loop Go.
+MyGo: `Element.Draw`/`DrawOver` and Painter in `ui/element.go`/`ui/paint.go` are the corresponding primitives, rather than a standalone catalog Canvas. Do not port a Go window/render loop.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante à conserver : `Canvas(Size, DrawCallback)` et `Canvas(float width, float height, DrawCallback)`. `DrawCallback = std::function<void(CanvasContext2D&)>` ; `InputCallback = std::function<EventResult(const InputEvent&, CanvasInputContext&)>`.
+Existing API to preserve: `Canvas(Size, DrawCallback)` and `Canvas(float width, float height, DrawCallback)`. `DrawCallback = std::function<void(CanvasContext2D&)>`; `InputCallback = std::function<EventResult(const InputEvent&, CanvasInputContext&)>`.
 
-Le template rvalue `on_input(Callback&&)` accepte EventResult ou void. Le void est adapté en Handled ; toute autre valeur est rejetée à la compilation. `on_input` rend focusable ; `focusable(bool = true)` peut ensuite désactiver le focus. `spec() &&` conserve ces décisions.
+The rvalue template `on_input(Callback&&)` accepts EventResult or void. void is adapted to Handled; any other value is rejected at compile time. `on_input` makes the component focusable; `focusable(bool = true)` can subsequently disable focus. `spec() &&` preserves these decisions.
 
-Exemple existant vérifié :
+Verified example using the existing API:
 
 ```cpp
 auto surface = ui::Canvas{240.0f, 100.0f,
@@ -30,86 +30,86 @@ auto surface = ui::Canvas{240.0f, 100.0f,
     }}.focusable(false).spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le builder possède les callbacks std::function et la taille. Les captures applicatives sont à la charge de leur propriétaire ; une référence doit vivre au moins jusqu’au démontage.
+The builder owns the std::function callbacks and size. Application captures are their owner's responsibility; a reference must live at least until unmounting.
 
-Canvas ne possède aucun State implicite et n’émet aucun on_change. Un input callback mutateur choisit son état et demande explicitement invalidate via CanvasInputContext.
+Canvas owns no implicit State and emits no on_change. A mutating input callback chooses its state and explicitly requests invalidate through CanvasInputContext.
 
-Le modèle applicatif est UI/main-thread. Un Canvas partageant un Binding avec un autre widget doit souscrire dans un owner valide ; Canvas ne devine pas cette dépendance depuis la lambda.
+The application model is confined to the UI/main thread. A Canvas sharing a Binding with another widget must subscribe within a valid owner; Canvas does not infer this dependency from the lambda.
 
 ## 4. Interactions
 
-PointerDown/Move/Up/Wheel et DropOffer/Data sont traduits par soustraction de l’origine des bounds. Les touches et évènements non positionnels passent tels quels ; préserver ce détail actuel.
+PointerDown/Move/Up/Wheel and DropOffer/Data are translated by subtracting the bounds origin. Keys and non-positional events pass through unchanged; preserve this current detail.
 
-Sans callback input : Ignored, aucun focus automatique. Avec callback : résultat propagé ; capture/release, clipboard et invalidation se font à travers CanvasInputContext existant.
+Without an input callback: Ignored, no automatic focus. With a callback: propagate its result; capture/release, clipboard, and invalidation use the existing CanvasInputContext.
 
-Aucun drag, zoom, scroll ou bouton implicite. Le callback implémente et teste son PointerCancel ; validation/annulation métier appartiennent à l’application. Focusable false retire le Canvas du parcours Tab.
+No implicit drag, zoom, scroll, or button. The callback implements and tests its PointerCancel; application confirmation/cancellation belongs to the application. Focusable false removes Canvas from Tab traversal.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Taille préférée actuelle = largeur/hauteur bornées au minimum 1 lors de la construction du composant. Préserver ce comportement pour valeurs ordinaires et ne pas changer la signature float.
+Current preferred size: width/height bounded to a minimum of 1 when constructing the component. Preserve this behavior for ordinary values and do not change the float signature.
 
-Le parent assigne les bounds réels. `g.width()/height()/size()` décrivent ces bounds locaux réels, pas la taille demandée. Paint traduit vers l’origine locale (0,0) et clippe la surface.
+The parent assigns actual bounds. `g.width()/height()/size()` describe these actual local bounds rather than the requested size. Paint translates to local origin (0,0) and clips the surface.
 
-Contrat enrichi fixé : taille NaN ou <=1 conserve le repli historique1 ; +inf est rejetée par invalid_argument avant publication. Aucune transformation invalide ne contamine un frère. Mesure ne dépend pas du draw callback.
+Fixed enhanced contract: NaN size or size <=1 retains the historical fallback of 1; +inf is rejected with invalid_argument before publication. No invalid transform contaminates a sibling. Measurement does not depend on the draw callback.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-La lambda compose Painter via CanvasContext2D : primitives, texte, images et SVG existants. Pas de slot Canvas Theme présumé ; l’application choisit ses couleurs.
+The lambda composes Painter through CanvasContext2D: existing primitives, text, images, and SVG. No Canvas Theme slot is assumed; the application chooses its colors.
 
-Le draw callback ne doit pas modifier la structure retenue pendant paint. Toute invalidation deferred revient au checkpoint normal ; pas de rendu récursif.
+The draw callback must not change the retained structure during paint. Deferred invalidation returns to the normal checkpoint; no recursive rendering.
 
-Encadrer clip et transformation par scopes RAII pour les équilibrer si draw lève. L’enrichissement corrige la restauration exceptionnelle ; l’extraction doit garder les pixels du chemin normal. Ces corrections sont cibles et ne sont pas décrites comme déjà livrées.
+Wrap clipping and transforms in RAII scopes to balance them if draw throws. The enhancement fixes restoration after exceptions; extraction must preserve pixels on the normal path. These fixes are targets and are not described as already delivered.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible par défaut : Custom, nom/description fournis par la composition ; Canvas décoratif peut rester None. Pas de valeur ni d’action supposée.
+Default target contract: Custom, with name/description supplied by composition; decorative Canvas may remain None. No value or action is assumed.
 
-L’application qui dessine un contrôle doit aussi exposer ses actions sémantiques backend-neutres ; des pixels ne décrivent pas sa fonction.
+An application drawing a control must also expose its backend-neutral semantic actions; pixels do not describe its function.
 
-Pas de promesse de pont T068 livré. Le texte dessiné n’ouvre pas d’IME ; saisie personnalisée reste limitée aux chemins committed existants et à la dépendance preedit DESIGN17.4.
+No promise that the T068 bridge is delivered. Drawn text does not open an IME; custom input remains limited to existing committed paths and the DESIGN17.4 preedit dependency.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread. PaintContext/InputContext/CanvasContext2D/CanvasInputContext sont empruntés uniquement pendant l’appel ; ne pas les capturer dans du travail différé.
+UI/main thread. PaintContext/InputContext/CanvasContext2D/CanvasInputContext are borrowed only during the call; do not capture them in deferred work.
 
-Les callbacks sont possédés, copiés en snapshot avant leur invocation si une mutation réentrante peut les remplacer. Après exception, restaurer clip/transform et les guards de dispatch ; un callback commencé n’est pas rejoué.
+Callbacks are owned and copied into a snapshot before invocation if a reentrant mutation can replace them. After an exception, restore clip/transform and dispatch guards; a callback that has started is not replayed.
 
-Démontage annule capture/focus via Tree, sans exécuter de draw. Destruction no-throw. Retrait d’un sous-arbre possible au checkpoint ; destruction top-level différée, pas sur la pile active.
+Unmounting cancels capture/focus through Tree without running draw. Destruction is no-throw. A subtree may be removed at the checkpoint; top-level destruction is deferred rather than performed on the active stack.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de Component, Painter/CanvasContext2D, Input et routage existants. Aucun objet SkCanvas/Pugl ni thread de rendu nouveau dans la surface publique.
+Depends on existing Component, Painter/CanvasContext2D, Input, and routing. No SkCanvas/Pugl object or new render thread in the public surface.
 
-Callback draw vide : surface vide. Callback input vide : events ignored. Size nulle/négative : clamp historique. Input hors bounds peut arriver après capture et doit garder ses coordonnées locales non clampées.
+Empty draw callback: empty surface. Empty input callback: events ignored. Zero/negative Size: historical clamp. Out-of-bounds input may arrive after capture and must keep its unclamped local coordinates.
 
-Drop ne lit aucun fichier implicitement ; bytes/MIME livrés selon services existants. Les timers applicatifs doivent être annulables et ne capturer que des identités lifetime-safe.
+Drop does not implicitly read files; bytes/MIME are delivered through existing services. Application timers must be cancellable and capture only lifetime-safe identities.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/canvas.hpp` et `src/canvas.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/canvas.hpp` and `src/canvas.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : `widgets_builders.inc`, `widgets_basic.inc`, `component_base.hpp`. Conserver CanvasComponent public et la façade de contexte commune dans ses includes historiques ; seul le comportement Canvas est déplacé.
+Source to extract or reuse: `widgets_builders.inc`, `widgets_basic.inc`, `component_base.hpp`. Preserve public CanvasComponent and the shared context facade through its historical includes; move only Canvas behavior.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `canvas_local_coordinates` : positions et dimensions après translation parent sont exactes.
-- `canvas_input_adapter` : void/Handled/Ignored et focusable explicite gardent leur contrat.
-- `canvas_throw_balanced` : un draw qui lève laisse clip et transform intacts pour un frère.
-- `canvas_capture_teardown` : démontage pendant drag rend inoffensive la suite des événements.
-- `canvas_headless_primitives` : primitives, images et SVG restent renderer-independent.
+- `canvas_local_coordinates`: positions and dimensions after parent translation are exact.
+- `canvas_input_adapter`: void/Handled/Ignored and explicit focusable preserve their contract.
+- `canvas_throw_balanced`: a throwing draw leaves clip and transform intact for a sibling.
+- `canvas_capture_teardown`: unmounting during drag makes subsequent events harmless.
+- `canvas_headless_primitives`: primitives, images, and SVG remain renderer-independent.
 
-Créer `examples/features/canvas.cpp` et la cible `nativeui_example_canvas`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/canvas.cpp` and target `nativeui_example_canvas`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Reprendre `tests/canvas_tests.cpp` et les scènes headless existantes comme oracle de compatibilité, puis ajouter les cas de restauration.
+Reuse `tests/canvas_tests.cpp` and existing headless scenes as a compatibility oracle, then add restoration cases.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

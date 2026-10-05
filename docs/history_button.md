@@ -1,20 +1,20 @@
 # HistoryButton
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-HistoryButton représente Retour ou Avance avec historique optionnel pour saut multiple. Aucun composant NativeUI dédié ; les actions doivent être injectées par l’application.
+HistoryButton represents Back or Forward with optional history for multistep jumps. No dedicated NativeUI component; the application must inject actions.
 
-MyGo `ui/router.go` : `BackButton`, `ForwardButton`, `historyButton`. Un click appelle Go(±1), contexte menu liste jusqu’à quinze destinations ; le Router est une dépendance MyGo non portée par ce widget.
+MyGo `ui/router.go`: `BackButton`, `ForwardButton`, `historyButton`. A click calls Go(±1); a context menu lists up to fifteen destinations; Router is a MyGo dependency not ported by this widget.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 enum class HistoryDirection { Backward, Forward };
@@ -41,73 +41,73 @@ auto back = ui::HistoryButton{ui::HistoryDirection::Backward,can_back,
     [](int steps){(void)steps;}};
 ```
 
-Default menu cap15, labels « Retour »/« Avance », entries nearest-first. signed_steps négatif backward/positif forward. Les entries résument les destinations dans cette direction uniquement ; keys non vides uniques, titles peuvent être égaux.
+Default menu cap15, “Back”/“Forward” labels, nearest-first entries. signed_steps negative backward/positive forward. Entries summarize destinations in this direction only; nonempty unique keys, titles may be equal.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-can_navigate Binding externe ; bouton effectif enabled = can true AND disponibilité inherited AND callback présent. entries optional Binding, snapshot own pour menu. Le composant ne maintient pas l’historique ni current index : app fournit liste et gère toutes writes. Binding invalide interdit navigation, aucun callback synthétique. Titles vides affichent key comme fallback explicite.
+External can_navigate Binding; effective button enabled = can true AND inherited availability AND callback present. Optional entries Binding, owned snapshot for menu. The component maintains neither history nor current index: the application supplies the list and handles every write. Invalid Binding forbids navigation, no synthetic callback. Empty titles display the key as an explicit fallback.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Primary click/Enter/Space appelle navigate(±1) une fois au release. Context request ou keyboard context command ouvre menu portable si entries nonempty/can true. Choix key remapée dans entries actuelles, appelle direction*(index+1), pas ancien menu index. Échap annule press/ferme menu. Long press n’est pas imposé v1. Molette ignorée, pas raccourci global Alt-Left/Right capturé par ce widget ; app compose ses commandes.
+Primary click/Enter/Space call navigate(±1) once on release. A context request or keyboard context command opens a portable menu if entries are nonempty/can is true. Choice remaps the key in current entries, then calls direction*(index+1), rather than the old menu index. Escape cancels press/closes menu. Long press is not required in v1. Wheel ignored, no global Alt-Left/Right shortcut captured by this widget; the application composes its commands.
 
-Le contrat cible de ce contrôle traite ReadOnly comme une interdiction de navigation, car celle-ci déclenche une mutation applicative ; le focus et la lecture du label restent permis. Revalider can_navigate, enabled et read_only à release et au choix de menu.
+This control's target contract treats ReadOnly as forbidding navigation because it triggers an application mutation; focus and label reading remain allowed. Revalidate can_navigate, enabled, and read_only on release and menu choice.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Button intrinsèque icon chevron + padding, minimum hit target résolu style, optional label visible si style choisi. Menu anchored à bounds via service overlay, contraintes viewport/scroll menu existants. Pas de dimension dédiée par longueur de tout l’historique et aucune répartition de pages UI.
+Intrinsic Button chevron icon + padding, style-resolved minimum hit target, optional visible label if chosen by style. Menu anchored to bounds through the overlay service, existing viewport/menu scrolling constraints. No dedicated size based on total history length and no UI page allocation.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-HistoryButtonStyle basé recette button/icon : hover/pressed/disabled/focus et dimensions. Can false efface pressed state et ferme le menu, sans navigation. Entries update peut reflow menu mais ne demande pas layout du bouton si label/icon inchangé. Pas de theme slot History déjà existant supposé.
+HistoryButtonStyle based on the button/icon recipe: hover/pressed/disabled/focus and dimensions. Can false clears pressed state and closes the menu without navigation. Entries updates may reflow the menu but do not request button layout if label/icon is unchanged. Do not assume an already-existing History theme slot.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Rôle Button, nom descriptif Retour/Avance, Focus/Activate quand éligible ; menu PopupMenu/MenuItems nommés destinations. Direction alone n’est pas la seule information visible/accessibility. Disable bloque actions de mutation ; ne pas inventer un rôle Router ou historique natif.
+Button role, descriptive Back/Forward name, Focus/Activate when eligible; PopupMenu/MenuItems named by destinations. Direction alone is not the only visible/accessibility information. Disabled blocks mutating actions; do not invent a Router role or native history.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Navigation peut fermer/détruire owner via safe deferred checkpoint ; bouton désarme et libère capture avant callback. Entries change pendant menu : revalider key/can avant signed step, key absente no-op et fermeture. Callback throwing n’est pas réessayé ; popup handles terminalisés/cleanup RAII. Démontage n’appelle pas navigate.
+Navigation may close/destroy the owner through a safe deferred checkpoint; the button disarms and releases capture before callback. Entries changed during menu: revalidate key/can before signed step; absent key is a no-op and closes the menu. A throwing callback is not retried; popup handles terminalized/RAII cleanup. Unmounting does not call navigate.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[Button](button.md), [IconView](icon_view.md), [PopupMenu](popup_menu.md)/[ContextMenu](context_menu.md), services Overlay/Focus. Cas : début/fin historique, entries empty, cap zéro menu désactivé, duplicate keys rejected avant snapshot, index > INT_MAX reject menu action sans overflow, can expired et callback absent. Aucun Router ou global history registry.
+[Button](button.md), [IconView](icon_view.md), [PopupMenu](popup_menu.md)/[ContextMenu](context_menu.md), Overlay/Focus services. Cases: history beginning/end, empty entries, cap zero disables menu, duplicate keys rejected before snapshot, index > INT_MAX rejects menu action without overflow, expired can and absent callback. No Router or global history registry.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/history_button.hpp` et `src/history_button.cpp`.
+Target: `include/nativeui/history_button.hpp` and `src/history_button.cpp`.
 
-history_button.hpp contient direction/entry/style/builders ; history_button.cpp porte retained activation, snapshot mapping de menu et paint/layout. Backward/Forward sont variantes de ce couple, pas headers/cpp distincts. Aucun type Router ni API OS dans signatures.
+history_button.hpp contains direction/entry/style/builders; history_button.cpp contains retained activation, menu snapshot mapping, and paint/layout. Backward/Forward are variants of this pair, rather than separate headers/cpp files. No Router type or OS API in signatures.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `history_directions_steps` : main clicks ±1 et saut menu ±N.
-- `history_can_gating` : disabled/read-only/expired bindings, aucun callback.
-- `history_menu_cap` : nearest-first limité15, cap0, labels égaux keys distinctes.
-- `history_menu_rebase` : changement entries remappe key avant action.
-- `history_destination_removed` : stale key no-op avec menu fermé.
-- `history_press_cancel` : release out/cancel et fermeture safe.
-- `history_navigate_throw` : callback at-most-once, interaction suivante valide.
-- `history_no_router` : exemple fonctionne avec callbacks injectés seuls.
+- `history_directions_steps`: main clicks ±1 and menu jump ±N.
+- `history_can_gating`: disabled/read-only/expired bindings, no callback.
+- `history_menu_cap`: nearest-first capped at 15, cap0, equal labels with distinct keys.
+- `history_menu_rebase`: changed entries remap the key before action.
+- `history_destination_removed`: stale key is a no-op with the menu closed.
+- `history_press_cancel`: release outside/cancel and safe closing.
+- `history_navigate_throw`: at-most-once callback, valid next interaction.
+- `history_no_router`: example works with injected callbacks alone.
 
-Créer l’exemple public futur `examples/features/history_button.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/history_button.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

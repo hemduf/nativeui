@@ -221,7 +221,7 @@ void field_help_error_expiration_and_semantic_names_recover_after_first_observer
     NUI_CHECK(after_expiry<with_error);
     render(tree,{240.0f,360.0f}); info=tree.component_semantics(control->id);
     NUI_CHECK(info && info->description.find("Initial help")==std::string::npos && info->description.find("long error")==std::string::npos);
-    NUI_CHECK(info->description.find("Champ requis")!=std::string::npos);
+    NUI_CHECK(info->description.find("Required field")!=std::string::npos);
 }
 void removing_field_participant_recomputes_shared_column_without_remounting_neighbor() {
     ui::State<bool> present{true}; auto longest=std::make_shared<Observation>(),remaining=std::make_shared<Observation>();

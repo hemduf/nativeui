@@ -1,101 +1,101 @@
 # ReadOnly
 
-Statut : **existant à enrichir**.
+Status: **existing — enhancements required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`ReadOnly` garde les valeurs lisibles et, suivant le contrôle, focus/copie/navigation, en bloquant leur mutation. Source : [component_state.hpp](../include/nativeui/component_state.hpp), `ReadOnly`, `ReadOnlyComponent`.
+`ReadOnly` keeps values readable and, depending on the control, permits focus/copy/navigation while blocking mutation. Source: [component_state.hpp](../include/nativeui/component_state.hpp), `ReadOnly`, `ReadOnlyComponent`.
 
-MyGo exprime cette propriété par états d’Element ; ce wrapper NativeUI n’a pas d’équivalent autonome de catalogue. Le code actuel State-only doit être extrait et enrichi avec Binding.
+MyGo expresses this property through Element states; this NativeUI wrapper has no independent catalog equivalent. The current State-only code must be extracted and enhanced with Binding.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle :
+Current API:
 
 ```cpp
 template<class Child> ReadOnly(State<bool>& state, Child&& child);
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<bool> locked{true};
-ui::State<std::string> text{"Valeur"};
-auto field = ui::ReadOnly{locked, ui::TextInput{"Valeur", text}};
+ui::State<std::string> text{"Value"};
+auto field = ui::ReadOnly{locked, ui::TextInput{"Value", text}};
 ```
 
-Cible : même constructeur prenant Binding<bool>. Les handlers de widget restent responsables de définir leurs actions non mutantes ; le wrapper ne remplace aucune valeur ni callback.
+Target: the same constructor taking Binding<bool>. Widget handlers remain responsible for defining their non-mutating actions; the wrapper replaces no value or callback.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-ReadOnly effectif est restrictif : un ancêtre true impose la lecture seule. Ne pas figer le Binding de valeur enfant : les modifications applicatives externes restent visibles. Aucun callback de changement de mode ajouté ; observer l’état d’entrée suffit.
+Effective ReadOnly is restrictive: a true ancestor imposes read-only behavior. Do not freeze the child’s value Binding: external application changes remain visible. No mode-change callback is added; observing the input state is sufficient.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-- Texte : lecture, sélection, copie et focus permis ; insertion/coupe/collage mutante refusés.
-- Contrôles de valeur : navigation/focus permis si leur contrat le prévoit, ajustement refusé.
-- Les actions sans valeur mutable suivent le contrat propre du widget ; ne pas assimiler tous les buttons à disabled.
-- Transition au milieu d’une gesture : récupération du gesture de mutation sans nouveau write.
-- Wrapper sans focus/capture, ni traitement d’Échap ou de molette direct.
+- Text: reading, selection, copying and focus are permitted; mutating insertion/cut/paste is rejected.
+- Value controls: navigation/focus is permitted where their contract allows it; adjustment is rejected.
+- Actions without a mutable value follow the widget’s own contract; do not treat all buttons as disabled.
+- Transition midway through a gesture: recover the mutating gesture without a new write.
+- The wrapper has no focus/capture or direct Escape/wheel handling.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure/minimum/placement transparents ; aucune suppression d’espace. Si recette visuelle read-only change métriques, l’enfant demande layout ; le wrapper ne suppose pas que toutes les recettes ont même dimension.
+Measurement/minimum/placement are transparent; no space is removed. If a read-only visual recipe changes metrics, the child requests layout; the wrapper does not assume every recipe has the same dimensions.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Aucun paint. Conserver lisibilité distincte de disabled ; ne pas réduire automatiquement l’opacité. Les descendants publient l’apparence read-only résolue. Changement externe de valeur demande le paint/layout approprié sans callback de geste utilisateur.
+No painting. Preserve readability distinct from disabled behavior; do not automatically reduce opacity. Descendants publish their resolved read-only appearance. External value changes request appropriate paint/layout without a user gesture callback.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Wrapper `None` ; descendants lisibles avec `read_only=true`. Refuser SetValue/Increment/Decrement et autres mutations annoncées ; Focus/lecture/navigation restent disponibles quand éligibles. Le bridge ne doit jamais contourner l’état via écriture directe.
+Wrapper `None`; descendants remain readable with `read_only=true`. Reject SetValue/Increment/Decrement and other advertised mutations; Focus/reading/navigation remain available when eligible. The bridge must never bypass state through a direct write.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Remplacement réentrant du mode pendant editing conserve les données commitées ; ne pas remettre une ancienne valeur par rollback tardif. Un binding expiré ne produit aucun accès stale. Restaurer les guards d’édition après exception et laisser le runtime récupérer focus/capture.
+Reentrant mode replacement during editing preserves committed data; do not restore an old value through a late rollback. An expired binding produces no stale access. Restore editing guards after an exception and let the runtime recover focus/capture.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Disponibilité héritée et implémentations enfants ; [Enabled](enabled.md) demeure une propriété distincte. Cas : verrouillage pendant drag slider, text draft, callback réentrant, modifications externes quand verrouillé, nested scopes. IME préedit non disponible n’est pas ajouté ici.
+Inherited availability and child implementations; [Enabled](enabled.md) remains a separate property. Cases: locking during slider drag, a text draft, a reentrant callback, external changes while locked and nested scopes. Unavailable IME preedit is not added here.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/read_only.hpp` et `src/read_only.cpp`.
+Target: `include/nativeui/read_only.hpp` and `src/read_only.cpp`.
 
-read_only.hpp/cpp extraient le noyau non template de lecture seule, component_state.hpp reste façade. Garder ReadOnly State& et ajouter Binding sans transformer les modèles de valeur des widgets ni leurs surcharges historiques.
+read_only.hpp/cpp extract the non-template read-only core; component_state.hpp remains a facade. Keep ReadOnly State& and add Binding without transforming widget value models or their historical overloads.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `readonly_text_copy` : sélection/copie fonctionnent, paste ne modifie pas.
-- `readonly_value_gesture` : slider focusable mais write refusé.
-- `readonly_external_update` : nouvelle valeur externe visible.
-- `readonly_inheritance` : parent true non annulable.
-- `readonly_mid_drag` : lock sous capture, aucun write après verrouillage.
-- `readonly_throw_recovery` : exception puis prochaine interaction valide.
+- `readonly_text_copy`: selection/copy works; paste makes no change.
+- `readonly_value_gesture`: the slider is focusable but writing is rejected.
+- `readonly_external_update`: a new external value is visible.
+- `readonly_inheritance`: a true parent cannot be overridden.
+- `readonly_mid_drag`: locking during capture, with no writes after locking.
+- `readonly_throw_recovery`: exception followed by a valid next interaction.
 
-Créer l’exemple public futur `examples/features/read_only.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/read_only.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

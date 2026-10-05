@@ -1,26 +1,26 @@
 # Autocomplete
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Éditer du texte libre avec suggestions facultatives ; une saisie sans suggestion demeure une valeur
-valide. Cela diffère de la sélection fermée EditableComboBox.
+Edit free text with optional suggestions; input without a suggestion remains a valid value. This
+differs from EditableComboBox's closed selection.
 
-NativeUI a TextInput et popup, mais aucun Autocomplete. Le nouvel éditeur réutilise le moteur de
-suggestions privé sans dupliquer Overlay/Focus.
+NativeUI has TextInput and popups, but no Autocomplete. The new editor reuses the private suggestion
+engine without duplicating Overlay/Focus.
 
-MyGo : `ui/combobox.go`, `Autocomplete`, `comboboxBase`, `matching`. Présente suggestions contenant
-la frappe, prefixes d’abord, exclut équivalent complet et ne présélectionne pas au premier
-caractère.
+MyGo: `ui/combobox.go`, `Autocomplete`, `comboboxBase`, `matching`. It presents suggestions containing
+the typed text, prefixes first, excludes a complete equivalent, and does not preselect on the first
+character.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class Autocomplete {
@@ -41,181 +41,175 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<std::string> city{""};
-auto city_input = ui::Autocomplete("Ville", city,
+auto city_input = ui::Autocomplete("City", city,
     std::vector<std::string>{"Paris", "Pau", "Lyon"})
     .on_submit([](const std::string&) {}).spec();
 ```
 
-Filter par défaut et fournisseur reprennent [EditableComboBox](editable_combo_box.md) : ASCII
-casefold, préfixes puis substring stables ; Unicode exact au défaut, politique étendue injectée.
+The default filter and provider follow [EditableComboBox](editable_combo_box.md): ASCII case folding,
+stable prefixes then substrings; exact Unicode by default, with an injected extended policy.
 
-AutocompleteStyle cible : TextInputStyle et MenuItemStyle, metrics popup ; la string freeform du
-Binding n’est pas contrainte à une suggestion.
+Target AutocompleteStyle: TextInputStyle, MenuItemStyle, and popup metrics; the Binding's freeform
+string is not constrained to a suggestion.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<string> est texte live : toutes éditions valides du moteur texte publient, avec ou sans
-correspondance. Suggested value chosen est une écriture normale du même Binding.
+Binding<string> is live text: all valid edits by the text engine publish, with or without a match.
+Choosing a suggested value is a normal write to the same Binding.
 
-Highlighted initial absent après frappe ; une flèche choisit une cible de preview sans set. Prendre
-une suggestion copie tout son texte, met caret à la fin et ferme popup.
+There is initially no highlight after typing; an arrow chooses a preview target without set. Taking
+a suggestion copies its entire text, moves the caret to the end, and closes the popup.
 
-Écriture externe modifie l’éditeur, ferme anciennes suggestions et ne produit pas submit. Une valeur
-identique issue de son propre commit conserve caret.
+An external write changes the editor, closes old suggestions, and does not produce submit. An
+identical value from its own commit preserves the caret.
 
-Escape annule popup seulement et garde texte live, sans revenir à un choix antérieur. Une seconde
-Escape popup fermée suit la politique de TextInput snapshot.
+Escape cancels only the popup and retains live text without reverting to an earlier choice. A
+second Escape with the popup closed follows TextInput's snapshot policy.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Frappe query non blanc ouvre matches, en excluant suggestion égale au texte selon comparaison défaut
-; query vide/blanc ne montre aucun panneau.
+Typing a nonblank query opens matches, excluding suggestions equivalent to the text under the
+default comparison; an empty/blank query shows no panel.
 
-Bas/Haut ouvrent/ciblent première/dernière puis naviguent sans bouclage. Enter avec surligné prend
-suggestion sans on_submit ; Enter sans cible submit texte live. Clic suggestion valide au
-relâchement.
+Down/Up open/target the first/last option, then navigate without wrapping. Enter with a highlight
+takes the suggestion without on_submit; Enter without a target submits live text. Clicking a
+suggestion validates on release.
 
-Échap ferme preview ; Tab ferme et sort, sans choisir ; perte focus ferme. L’éditeur garde
-caret/focus, contrairement au popup de sélection ComboBox.
+Escape closes preview; Tab closes and exits without choosing; loss of focus closes it. The editor
+retains caret/focus, unlike the ComboBox selection popup.
 
-Molette du panneau scroll ; champ fermé ne sélectionne rien. ReadOnly garde sélection/copie mais pas
-suggestion ou commit ; Disabled suit disponibilité.
+The panel wheel scrolls; a closed field selects nothing. ReadOnly retains selection/copying but
+allows no suggestion or commit; Disabled follows availability.
 
-Composition Update ne sollicite pas provider ; Commit query relance une seule génération. Le pont
-native preedit/candidate reste séparé.
+Composition Update does not call the provider; query Commit starts exactly one generation. Native
+preedit/candidate bridging remains separate.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Taille stable TextInputStyle ; popup largeur au moins le champ, hauteur jusqu’à huit lignes puis
-viewport scroll. Le parent ne grandit pas avec la liste.
+Stable TextInputStyle size; popup width at least the field width, height up to eight rows, then a
+scroll viewport. The parent does not grow with the list.
 
-Suggestions longues clippées/ellipsées dans lignes ; paint et hit-test suivent la même hauteur
-MenuItemStyle. Ancre logique suivie par service overlay.
+Long suggestions clip/ellipsize within rows; paint and hit-testing use the same MenuItemStyle height.
+The overlay service tracks the logical anchor.
 
-Aucun panneau vide sélectionnable : aucune suggestion ou texte équivalent complet ferme le panneau.
-Resize conserve la cible par texte stable si encore présent.
+No selectable empty panel: no suggestions or complete equivalent text closes the panel. Resize
+preserves the target by stable text if it is still present.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Focus ring sur champ ; highlighted sur ligne sans confondre la valeur déjà dans Binding. Placeholder
-conservé pour empty.
+Field focus ring; row highlight does not conflate with the value already in the Binding. The
+placeholder remains for empty text.
 
-Filtre calculé hors paint puis snapshot possédé publié. Changement query/list metrics remesure popup
-; highlight couleurs paint seulement.
+Compute the filter outside paint, then publish an owned snapshot. Query/list metric changes
+remeasure the popup; highlight colors require only paint.
 
-Suggestion provider peut être coûteux mais reste synchrone UI ; pas de debounce/network implicite.
-Recherche distante demande app utilisant snapshots sûrs, pas cette v1.
+The suggestion provider may be expensive but remains synchronous on the UI thread; no implicit
+debounce/networking. Remote search requires an application using safe snapshots, beyond this v1.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : ComboBox éditable avec expanded, text_value et description de suggestions ; options nommées
-ListItem. Actions SetValue/Select sont disponibles si mutables.
+Target: editable ComboBox with expanded, text_value, and a suggestion description; named ListItem
+options. SetValue/Select actions are available when mutable.
 
-Highlighted est annoncé via identité backend-neutre du snapshot, jamais un Node*. Valeur libre sans
-matches reste text_value valide, aucune erreur sémantique.
+Announce highlighted through the snapshot's backend-neutral identity, never a Node*. A free value
+without matches remains valid text_value, without a semantic error.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Filtrage/provider prépare snapshot complet, génération query liée. Exception conserve texte live,
-ferme panel périmé et laisse caret utilisable.
+Filtering/provider prepares a complete snapshot tied to the query generation. An exception retains
+live text, closes the stale panel, and leaves the caret usable.
 
-Choix termine popup/capture avant Binding.set ; submit copie valeur/callback avant appel. Un
-observateur ou submit levant n’est pas rejoué, modèle publié reste.
+Choosing ends popup/capture before Binding.set; submit copies value/callback before invocation. A
+throwing observer or submit is not replayed; the published model remains.
 
-Retrait d’une suggestion ou State invalid annule cible de l’ancienne génération ; aucune réponse
-clipboard/provider différée après destruction ne peut modifier le remplaçant.
+Removal of a suggestion or an invalid State cancels the old generation's target; no deferred
+clipboard/provider response after destruction can modify the replacement.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), [editable_combo_box](editable_combo_box.md), noyau
-suggestions, Overlay/Focus/State.
+Dependencies: [TextInput](text_input.md), [EditableComboBox](editable_combo_box.md), the suggestion
+core, Overlay/Focus/State.
 
-Dédupliquer suggestions exactes, garder première occurrence ; query blanc non suggéré mais valeur
-conservée. Suggestions vides n’empêchent jamais submit libre.
+Deduplicate exact suggestions, retaining the first occurrence; a blank query gets no suggestions
+but its value is preserved. Empty suggestions never prevent free submission.
 
-Pas d’apprentissage global des choix ni d’historique entre instances ; options/string callbacks
-appartiennent au composant ou modèle applicatif explicite.
+No global learning of choices or history between instances; options/string callbacks belong to the
+component or an explicit application model.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/autocomplete.hpp` et `src/autocomplete.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/autocomplete.hpp` and `src/autocomplete.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-AutocompleteStyle et provider/filter restent dans header du composant ; autocomplete.cpp porte
-comportement freeform/submit, runtime, mise en page et peinture, partage seulement le moteur
-suggestions privé.
+AutocompleteStyle and provider/filter remain in the component header; autocomplete.cpp contains
+freeform/submit behavior, runtime, layout, and painting, sharing only the private suggestion engine.
 
-Inscrire `src/autocomplete.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/autocomplete.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`autocomplete_freeform` : texte hors liste publie et submit normalement ; aucun retour forcé à
-suggestion.
+`autocomplete_freeform`: text outside the list publishes and submits normally; no forced reversion
+to a suggestion.
 
-`autocomplete_highlight` : premier caractère ne présélectionne pas ; Down puis Enter prend une seule
-suggestion.
+`autocomplete_highlight`: the first character does not preselect; Down then Enter takes one suggestion.
 
-`autocomplete_submit_choice` : Enter sur cible ne submit pas ; Enter sans cible submit texte exact.
+`autocomplete_submit_choice`: Enter on a target does not submit; Enter without a target submits
+exact text.
 
-`autocomplete_escape` : fermeture popup conserve texte live ; seconde Escape suit baseline
-TextInput.
+`autocomplete_escape`: closing the popup preserves live text; a second Escape follows the
+TextInput baseline.
 
-`autocomplete_filter_empty` : vide/blanc/equivalent ferme panneau, dédup et order stables.
+`autocomplete_filter_empty`: empty/blank/equivalent closes the panel; stable deduplication and order.
 
-`autocomplete_external_failure` : external write/provider/filter failure ferment périmé sans perdre
-texte.
+`autocomplete_external_failure`: external write/provider/filter failure close stale content without
+losing text.
 
-`autocomplete_remove_throw` : suggestion retirée/callback retire ou lève : aucune mutation périmée.
+`autocomplete_remove_throw`: a removed suggestion/callback removing or throwing causes no stale mutation.
 
-Ajouter `examples/features/autocomplete.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/autocomplete.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

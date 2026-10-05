@@ -1,25 +1,25 @@
 # TokenField
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Éditer une liste ordonnée de tags/destinataires sous forme de chips et d’un champ draft, avec
-suggestions facultatives.
+Edit an ordered list of tags/recipients as chips and a draft field, with optional suggestions.
 
-NativeUI possède TextInput, layouts et State<vector<T>>, mais aucun TokenField. Chips et boutons
-retirer restent sous-parties d’un composant, pas une famille de fichiers supplémentaire.
+NativeUI has TextInput, layouts, and State<vector<T>>, but no TokenField. Chips and remove buttons
+remain subparts of one component, rather than an additional family of files.
 
-MyGo : `ui/combobox.go`, `TokenField`. Enter/virgule ajoutent texte, Backspace draft vide retire
-dernier, suggestions excluent tokens existants et l’input garde identité malgré chips précédentes.
+MyGo: `ui/combobox.go`, `TokenField`. Enter/comma add text, Backspace with an empty draft removes the
+last token, suggestions exclude existing tokens, and the input retains its identity despite
+preceding chips.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class TokenField {
@@ -36,187 +36,185 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<std::vector<std::string>> tags{std::vector<std::string>{"Audio"}};
-auto field = ui::TokenField("Tags", tags, {"Audio", "Synthèse", "Effets"})
+auto field = ui::TokenField("Tags", tags, {"Audio", "Synthesis", "Effects"})
     .allow_custom().maximum_tokens(20).spec();
 ```
 
-Defaults : allow_custom=true, maximum_tokens=0 illimité. Suggestions vector possédé ; modèle
-distant/asynchrone hors v1, source reconstruite via Spec.
+Defaults: allow_custom=true, maximum_tokens=0 meaning unlimited. The suggestions vector is owned;
+remote/asynchronous models are outside v1; reconstruct the source through Spec.
 
-TokenFieldStyle cible : TextInputStyle, chip text/background/border/padding, remove ButtonStyle,
-gaps et MenuItemStyle suggestions. Séparateur ajouté v1 = virgule ASCII, sans parsing CSV/quoting
-implicite.
+Target TokenFieldStyle: TextInputStyle, chip text/background/border/padding, remove ButtonStyle,
+gaps, and suggestion MenuItemStyle. The v1 addition separator is an ASCII comma, without implicit
+CSV parsing/quoting.
 
-L’ordre des tokens est celui de vector. Aucun on_change supplémentaire : toutes opérations publient
-un vector complet via Binding.
+Token order is vector order. No additional on_change: every operation publishes a complete vector
+through the Binding.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<vector<string>> est la liste ; draft, popup generation et chip actif sont locaux. L’éditeur
-est un enfant à identité fixe indépendante du nombre/ordre de tokens.
+Binding<vector<string>> is the list; draft, popup generation, and active chip are local. The editor
+is a child with a fixed identity independent of token count/order.
 
-Ajouter trim ASCII, refuser vide et doublon exact ; conserver casing/Unicode. allow_custom=false
-exige égalité exacte d’une suggestion ; maximum atteint refuse sans effacer draft.
+Adding trims ASCII whitespace and rejects empty text and exact duplicates; preserve casing/Unicode.
+allow_custom=false requires an exact suggestion match; reaching the maximum refuses addition without
+clearing the draft.
 
-Une opération de collage avec virgules prépare la nouvelle liste complète et publie une seule valeur
-: segments complets ajoutés, segment final garde draft. Doublons/vides sont ignorés, tokens
-dépassant maximum restent dans draft joint avec virgules.
+A paste operation containing commas prepares the entire new list and publishes one value: complete
+segments are added, the final segment remains draft. Duplicates/empty segments are ignored; tokens
+exceeding the maximum remain in the draft joined with commas.
 
-Écriture externe des tokens ne détruit pas le draft, mais recalcule suggestions et annule une
-suppression/choix armé d’ancienne génération. Valeurs externes dupliquées sont rendues sans
-correction silencieuse, avec identité occurrence locale.
+An external token write does not destroy the draft, but recalculates suggestions and cancels an
+armed removal/choice from the old generation. External duplicate values are rendered without silent
+correction, with local occurrence identities.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Enter sur suggestion ajoute celle-ci ; sinon ajoute draft si autorisé, puis remet draft vide en cas
-d’ajout réussi ou de doublon déjà présent. Virgule commit segments complets ; défaut clipboard suit
-TextInput single-line.
+Enter on a suggestion adds it; otherwise it adds the draft if allowed, then clears the draft on
+successful addition or an already-present duplicate. Comma commits complete segments; default
+clipboard behavior follows single-line TextInput.
 
-Backspace quand draft vide retire dernier token immédiatement ; Delete retire chip actif. Pour
-accessibilité clavier, Left au début de draft peut activer dernier chip, puis Left/Right traversent
-chips et draft ; Escape revient au draft sans mutation.
+Backspace with an empty draft immediately removes the last token; Delete removes the active chip.
+For keyboard accessibility, Left at the draft's beginning can activate the last chip, then
+Left/Right traverse chips and draft; Escape returns to the draft without mutation.
 
-Bouton remove clique au relâchement, garde focus draft. Les boutons ne créent pas un arrêt Tab par
-chip : TokenField un arrêt, navigation interne aux flèches.
+The remove button acts on click release and retains draft focus. Buttons do not create a Tab stop
+per chip: TokenField has one stop, with internal arrow navigation.
 
-Suggestions filtrent comme Autocomplete et excluent tokens existants ; Up/Down/Enter,
-Tab/blur/Escape et PointerCancel suivent moteur suggestions. Molette uniquement scroll du panneau.
+Suggestions filter as in Autocomplete and exclude existing tokens; Up/Down/Enter, Tab/blur/Escape,
+and PointerCancel follow the suggestion engine. The wheel only scrolls the panel.
 
-ReadOnly interdit ajout/retrait mais expose texte et liste ; disabled bloque actions. Composition
-Update n’interprète pas une virgule préedit : découpage seulement Commit.
+ReadOnly forbids addition/removal but exposes text and the list; disabled blocks actions.
+Composition Update does not interpret a preedit comma: split only on Commit.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Layout wrapping de chips et éditeur, avec largeur minimale de draft ; quand l’espace manque,
-renvoyer entier chip à la ligne suivante et augmenter hauteur du champ.
+Wrapping layout of chips and editor, with a minimum draft width; when space runs out, move an entire
+chip to the next line and increase field height.
 
-Chip trop long occupe largeur disponible, texte ellipsé, remove reste dans l’aire ; toutes positions
-logiques. Le popup s’ancre au cadre entier, pas seulement à la dernière petite zone de texte.
+An overlong chip takes the available width, ellipsizes text, and keeps remove within its area; all
+positions are logical. The popup anchors to the whole frame rather than only the last small text area.
 
-Ajouter/retrait tokens invalide layout ; draft à taille minimale stable paint/scroll, ne remount pas
-l’éditeur. Le parent scroll gère une liste très haute, sans virtualisation prétendue.
+Token addition/removal invalidates layout; the draft at a stable minimum size needs paint/scroll,
+without remounting the editor. Parent scrolling handles a very tall list, with no claimed
+virtualization.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Chaque chip a face distincte et libellé ; chip actif porte ring/selection local, remove a affordance
-hover. La valeur textuelle n’est pas l’identité d’un Node mutable.
+Each chip has a distinct face and label; the active chip carries a local ring/selection, and remove
+has a hover affordance. The textual value is not the identity of a mutable Node.
 
-Parent Focus ring inclut le champ ; forme interne du chip ne doit pas produire un second focus
-simultané. Les données externes sont prises au snapshot du layout.
+The parent focus ring includes the field; the chip's internal shape must not produce a second
+simultaneous focus. External data is taken at the layout snapshot.
 
-Pas d’animation continue ni drag-reorder en v1. Color/font/padding changent invalidation suivant
-leurs métriques.
+No continuous animation or drag reordering in v1. Color/font/padding change invalidation according
+to their metrics.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Group nommé, éditeur TextInput/ComboBox et chips ListItem/Text avec boutons Remove “Retirer
-<token>”. L’ordre sémantique suit la liste, avec aucune action mutante si ReadOnly.
+Target: a named Group, TextInput/ComboBox editor, and ListItem/Text chips with Remove buttons named
+“Remove <token>”. Semantic order follows the list, with no mutating action in ReadOnly.
 
-Un rôle TokenField n’existe pas ; les chips restent dans le modèle backend-neutre. L’input unique
-garde identité même si la liste devient vide.
+There is no TokenField role; chips remain in the backend-neutral model. The single input retains
+its identity even if the list becomes empty.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer vector nouvellement possédé, terminer geste/capture et état draft, puis Binding.set. Aucun
-pointeur vers string d’un ancien vector gardé dans remove callback.
+Prepare a newly owned vector, end gesture/capture and update draft state, then Binding.set. Do not
+retain a pointer to a string in an old vector in the remove callback.
 
-Une suppression d’un duplicat externe cible occurrence et génération ; si modèle change, annuler
-l’action plutôt que retirer un token de même texte mais nouvelle position.
+Removal of an external duplicate targets its occurrence and generation; if the model changes,
+cancel the action instead of removing a token with the same text but a new position.
 
-Exception d’observer laisse vector commis et éditeur utilisable ; draft à disposition au checkpoint,
-aucun ajout automatique rejoué. Un mount de chip levant ne publie pas une liste partielle.
+An observer exception leaves the vector committed and the editor usable; the draft is available
+at the checkpoint, without replaying an automatic addition. A throwing chip mount does not publish
+a partial list.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), [autocomplete](autocomplete.md), noyau privé de layout
-wrapping dans token_field.cpp, Overlay et State.
+Dependencies: [TextInput](text_input.md), [Autocomplete](autocomplete.md), a private wrapping layout
+core in token_field.cpp, Overlay, and State.
 
-Tokens externes empty/duplicate sont affichés fidèlement, retrait autorisé par identité occurrence ;
-les ajouts utilisateur ne créent pas de nouveaux empty/duplicate. Maximum nouveau inférieur à taille
-existante ne tronque pas le modèle.
+External empty/duplicate tokens are faithfully displayed; removal is allowed by occurrence identity.
+User additions do not create new empty/duplicate tokens. A new maximum below the existing size does
+not truncate the model.
 
-Suggestions absentes et allow_custom=false rendent ajout indisponible mais retrait reste possible.
-Trim/égalité sont explicités ; aucun normaliseur email/network caché.
+No suggestions with allow_custom=false makes addition unavailable, but removal remains possible.
+Trimming/equality are explicit; no hidden email/network normalizer.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/token_field.hpp` et `src/token_field.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/token_field.hpp` and `src/token_field.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-TokenFieldStyle, chip model private et options restent dans le couple ; le .cpp porte liste retenue
-à keys, wrapping, draft, opérations de vector et popup via noyau suggestions partagé.
+TokenFieldStyle, the private chip model, and options remain in the pair; the .cpp contains the
+retained keyed list, wrapping, draft, vector operations, and popup through the shared suggestion core.
 
-Inscrire `src/token_field.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/token_field.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`token_field_add_batch` : Enter/virgule/collage produisent tokens trim sans doublons et une seule
-notification batch.
+`token_field_add_batch`: Enter/comma/paste produce trimmed tokens without duplicates and one batch
+notification.
 
-`token_field_limits` : maximum/custom restriction refusent sans perte draft ni truncation externe.
+`token_field_limits`: maximum/custom restrictions refuse without draft loss or external truncation.
 
-`token_field_remove_keyboard` : remove, Backspace vide, chip Left/Right/Delete et Escape corrects.
+`token_field_remove_keyboard`: correct remove, empty Backspace, chip Left/Right/Delete, and Escape.
 
-`token_field_input_identity` : ajout/retrait/réordre gardent même éditeur/caret ; suggestions
-excluent tokens.
+`token_field_input_identity`: addition/removal/reordering retain the same editor/caret; suggestions
+exclude tokens.
 
-`token_field_external_duplicates` : snapshot duplicate render fidèle ; occurrence armée annulée
-après modèle changé.
+`token_field_external_duplicates`: faithful duplicate snapshot rendering; the armed occurrence is
+canceled after model change.
 
-`token_field_composition` : virgule preedit n’ajoute rien ; Commit une opération.
+`token_field_composition`: a preedit comma adds nothing; Commit performs one operation.
 
-`token_field_throw_recovery` : observer, chip mount ou callback retirant le champ gardent
-liste/flags cohérents.
+`token_field_throw_recovery`: an observer, chip mount, or callback removing the field keeps the
+list/flags consistent.
 
-Ajouter `examples/features/token_field.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/token_field.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

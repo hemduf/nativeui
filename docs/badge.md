@@ -1,22 +1,22 @@
 # Badge
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Court texte ou compteur visuel dans une pillule, utilisable près d’un item de navigation. Présentation readonly ; aucune action ou filtre implicite.
+Short text or a visual counter in a pill, usable beside a navigation item. Read-only presentation; no implicit action or filter.
 
-Absent de NativeUI. [Label](label.md), TextService et primitives arrondies existent ; une simple composition actuelle peut en dessiner, sans builder autonome.
+Absent from NativeUI. [Label](label.md), TextService, and rounded primitives exist; current simple composition can draw one without a standalone builder.
 
-MyGo : `ui/sidebar.go`, `Badge`, petite pillule de texte SingleLine avec fond texte alpha0,1. La cible rend taille/couleurs explicites et peut observer un texte déjà formaté par l’application.
+MyGo: `ui/sidebar.go`, `Badge`, a small pill of SingleLine text with a text-colored background at alpha 0.1. The target makes size/colors explicit and can observe text already formatted by the application.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class Badge {
@@ -29,95 +29,95 @@ public:
 };
 ```
 
-BadgeStyle nouveau : TextStyle text, Color background, double horizontal_padding=6, vertical_padding=1, minimum_width=0. Rayon=demi-hauteur, pas une option de click. Aucun `max_count`/capping99+ implicite.
+New BadgeStyle: TextStyle text, Color background, double horizontal_padding=6, vertical_padding=1, minimum_width=0. Radius=half-height, with no click option. No implicit `max_count`/99+ capping.
 
-Exemple cible proposé :
+Proposed target example:
 
 ```cpp
 ui::State<std::string> count{"3"};
 auto badge = ui::Badge{count}.spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Constructeur string possède snapshot ; overload Binding observe string effective et State convertit immédiatement. Le contenu est affiché tel que fourni, pas parsé comme nombre.
+The string constructor owns a snapshot; Binding overload observes the effective string, and State converts immediately. Display content as supplied rather than parsing it as a number.
 
-Source détruite : Binding invalid, dernière string lisible, observe inactive/set jamais utilisé et pas notification automatique. Aucune donnée détruite n’est réinterprétée comme « zéro ».
+Source destroyed: Binding invalid, last string readable, observe inactive/set never used, and no automatic notification. Destroyed data is never reinterpreted as “zero”.
 
-Update texte = layout/paint/semantics ; pas de callback onchange. Les handles de subscription restent localisés à chaque badge ; aucun badge current global.
+Text update affects layout/paint/semantics; no onchange callback. Subscription handles stay local to each badge; no global current badge.
 
 ## 4. Interactions
 
-Badge n’est ni focusable ni targetable interactif ; pointeur, molette, glissement, clavier, texte et drops Ignored.
+Badge is neither focusable nor an interactive target; pointer, wheel, dragging, keyboard, text, and drops are Ignored.
 
-Dans Sidebar/Button, l’activation vient de l’item parent. Pas de tooltip automatique, dismiss ou clear au clic.
+In Sidebar/Button, activation comes from the parent item. No automatic tooltip, dismiss, or clear on click.
 
-Validation et annulation non applicables ; Disabled ne supprime pas la valeur de compteur, ReadOnly n’a pas de mutation à empêcher.
+Confirmation and cancellation do not apply; Disabled does not remove the counter value, and ReadOnly has no mutation to prevent.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure TextService en une ligne + padding, minimum width optionnel ; parent fournit contraintes et clipping. Long texte est clipé, sans ellipse ajoutée ni retour à la ligne dans v1.
+Single-line TextService measurement plus padding, optional minimum width; parent supplies constraints and clipping. Long text clips without added ellipsis or wrapping in v1.
 
-Texte vide conserve pillule de padding dans le builder, comme une décoration explicite. Pour supprimer place quand vide, l’application compose Visibility/If ; pas de collapse caché.
+Empty text retains the padding pill in the builder as explicit decoration. To remove space when empty, the application composes Visibility/If; no hidden collapse.
 
-Place minuscule borne rayon à demi-hauteur réelle et ne peint pas hors bounds. Unit logique, marge externe propriété du layout parent.
+Tiny space bounds the radius to half the actual height and prevents painting outside bounds. Logical units; external margin belongs to parent layout.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-BadgeStyle nouveau : défaut texte taille12/famille héritée, foreground Theme.text, background=Theme.text alpha0,1. Pas de slot de Theme badge présumé existant.
+New BadgeStyle: default text size 12/inherited family, foreground Theme.text, background=Theme.text at alpha 0.1. No Theme badge slot is assumed to exist.
 
-Variation couleur/availability = paint ; typographie/padding/texte = layout. Disabled applique palette.disabled au texte, fond inchangé ; aucun style de press/hover.
+Color/availability changes affect paint; typography/padding/text affect layout. Disabled applies palette.disabled to text, with unchanged background; no press/hover style.
 
-Pas d’animation, blink ou annonce « urgent » selon couleur. Une couleur transparente garde la mesure.
+No animation, blinking, or “urgent” announcement based on color. Transparent color preserves measurement.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Text avec valeur string, ou None si la valeur est déjà incorporée dans le nom/description du parent par composition. Aucun Role::Badge absent ajouté furtivement.
+Target contract: Text with a string value, or None if composition already incorporates the value into the parent's name/description. Do not silently add an absent Role::Badge.
 
-La valeur ne doit pas être lue deux fois quand l’item parent donne déjà « Boîte, 3 non lus » ; le choix d’exclusion appartient au conteneur.
+Do not read the value twice when the parent item already supplies “Inbox, 3 unread”; exclusion belongs to the container.
 
-Ponts natifs T068 différés. Aucun IME/action ; updates backend-neutres ne prouvent pas annonce native live.
+Native T068 bridges are deferred. No IME/action; backend-neutral updates do not prove live native announcements.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; snapshot string possédé et RAII d’observation pour overload dynamique. Invalidateurs stale no-op après retrait.
+UI/main thread; owned string snapshot and RAII observation for the dynamic overload. Stale invalidators are no-ops after removal.
 
-Allocation texte/mesure échouée ne publie pas style/texte partiels. Reprise après exception utilise le dernier snapshot valide sans forcer une notification applicative.
+Failed text allocation/measurement does not publish partial style/text. Recovery after an exception uses the last valid snapshot without forcing application notification.
 
-Destruction no-throw callback-silent ; aucun timer. Un observer modifiant la même source et levant ne laisse pas de guard du badge bloqué.
+Destruction is no-throw and invokes no callbacks; no timer. An observer changing the same source and throwing does not leave a badge guard blocked.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de TextService/Painter/Binding/Theme, pas de Sidebar ou modèle de messages. Une sidebar peut consommer Badge sans importer de service de compteurs.
+Depends on TextService/Painter/Binding/Theme rather than Sidebar or a message model. A sidebar can consume Badge without importing a counter service.
 
-UTF-8 invalide réparé comme Label ; nombre négatif,99+ ou texte non numérique sont des valeurs valides. Capping/classement arrivent en amont.
+Invalid UTF-8 is repaired like Label; negative numbers, 99+, and non-numeric text are valid values. Capping/classification happen upstream.
 
-Padding/minimum_width non finis/négatifs = invalid_argument avant publication. Texte long/empty/graphemes emoji restent des cas du layout, sans ressource chargée à paint.
+Non-finite/negative padding/minimum_width cause invalid_argument before publication. Long/empty text and emoji graphemes remain layout cases, without resources loaded in paint.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/badge.hpp` et `src/badge.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/badge.hpp` and `src/badge.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : TextService/Label primitives existantes. BadgeStyle dans le header parent, subscription/layout/pillule dans badge.cpp. Pas de template variadique ni spécialisation numérique par type de compteur.
+Source to extract or reuse: existing TextService/Label primitives. BadgeStyle in the parent header, subscription/layout/pill in badge.cpp. No variadic template or numeric specialization by counter type.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `badge_static_dynamic` : constructeurs string/Binding/State affichent même valeur.
-- `badge_text_layout` : texte vide,99+,long et Unicode donnent padding/clipping prévu.
-- `badge_source_lifetime` : source détruite laisse dernière string sûre sans callback.
-- `badge_parent_input` : Badge dans Button laisse activation au parent et aucun focus.
-- `badge_style_isolation` : deux badges et Theme séparés ne partagent pas données/styles.
+- `badge_static_dynamic`: string/Binding/State constructors display the same value.
+- `badge_text_layout`: empty, 99+, long, and Unicode text have intended padding/clipping.
+- `badge_source_lifetime`: a destroyed source leaves the last safe string without callback.
+- `badge_parent_input`: Badge in Button leaves activation to the parent and has no focus.
+- `badge_style_isolation`: two badges and separate Themes share neither data nor styles.
 
-Créer `examples/features/badge.cpp` et la cible `nativeui_example_badge`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/badge.cpp` and target `nativeui_example_badge`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

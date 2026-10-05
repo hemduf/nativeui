@@ -1,20 +1,20 @@
 # Fieldset
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Fieldset regroupe des fields sous une légende et une disponibilité héritée. NativeUI possède les wrappers Enabled/ReadOnly mais aucun Fieldset. Fondations : [component_state.hpp](../include/nativeui/component_state.hpp).
+Fieldset groups fields under a legend and inherited availability. NativeUI has Enabled/ReadOnly wrappers but no Fieldset. Foundations: [component_state.hpp](../include/nativeui/component_state.hpp).
 
-MyGo `ui/form.go` : `Fieldset`. La légende nomme le Group et les labels internes participent au Form extérieur. NativeUI reprend ce regroupement sans fusionner Field/Fieldset.
+MyGo `ui/form.go`: `Fieldset`. The legend names the Group and internal labels participate in the enclosing Form. NativeUI adopts this grouping without merging Field/Fieldset.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 template<class... Children> Fieldset(std::string legend, Children&&... fields);
@@ -30,73 +30,73 @@ Spec spec() &&;
 ```cpp
 ui::State<bool> allowed{true};
 ui::State<std::string> address{""};
-auto shipping = ui::Fieldset{"Livraison",
-    ui::Field{"Adresse",ui::TextInput{"",address}}}.enabled(allowed);
+auto shipping = ui::Fieldset{"Shipping",
+    ui::Field{"Address",ui::TextInput{"",address}}}.enabled(allowed);
 ```
 
-Defaults enabled true/read_only false, légende possédée. Variantes de bordure et espacement dans FieldsetStyle, pas un composant « section de form » séparé.
+Defaults: enabled true/read_only false, with an owned legend. Border and spacing variants belong in FieldsetStyle rather than a separate “form section” component.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Le groupe possède legend/description/children ; états d’availability optionnels Binding. Sans binding, héritage normal. Les valeurs contrôles restent applicatives, aucune map globale de noms ou état « formulaire courant ». Les Field imbriqués contribuent au contexte Form le plus proche, sauf Form interne qui démarre son propre contexte.
+The group owns legend/description/children; optional availability states use Binding. Without a binding, normal inheritance applies. Control values remain application-owned, with no global name map or “current form” state. Nested Field components contribute to the nearest Form context, except an internal Form, which starts its own context.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Légende n’est pas un bouton ni arrêt Tab. Tab/pointeur vont aux descendants. False enabled bloque actions selon héritage sans effacer valeurs ; read-only garde navigation/lecture. Pas d’action groupée toggle à l’activation de légende. Échap/Enter restent les contrôles/Form.
+The legend is neither a button nor a Tab stop. Tab/pointer input goes to descendants. False enabled blocks actions according to inheritance without clearing values; read-only preserves navigation/reading. No grouped toggle action when activating the legend. Escape/Enter remain with controls/Form.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Légende au-dessus de la colonne des enfants, gaps/padding explicites. En Form, ne pas commencer une nouvelle colonne de labels : garder alignement courant. Légende longue wrap ; empty legend laisse une description/groupe éventuel mais aucun texte vide annoncé. Overflow requiert ScrollView externe.
+The legend sits above the child column with explicit gaps/padding. Within Form, do not start a new label column: retain the current alignment. A long legend wraps; an empty legend leaves any description/group but announces no empty text. Overflow requires an external ScrollView.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-FieldsetStyle : legend typography, spacing, option border/padding. Ne pas appliquer une opacité uniforme pour disabled ; controls résolvent leur recette. Repaint/layout classés selon changement réel de legend/style/availability. Aucune animation permanente.
+FieldsetStyle: legend typography, spacing and optional border/padding. Do not apply uniform opacity for disabled state; controls resolve their own recipe. Classify repaint/layout according to actual legend/style/availability changes. No permanent animation.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Group avec name=legend et description possédée. Les noms spécifiques des champs sont conservés, pas remplacés par legend. Disabled/read-only effectifs se répercutent sur descendants. Group sans legend n’invente pas un label depuis le premier Field.
+Group with name=legend and an owned description. Specific field names are preserved rather than replaced by the legend. Effective disabled/read-only states propagate to descendants. A Group without a legend does not invent a label from the first Field.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Abonnements availability et contexte Form RAII propre à instance. Retrait réentrant pendant mesure doit supprimer contribution au contexte sans garder référence de label. Destruction n’appelle pas de validation ou callback d’enabled ; cleanup no-throw.
+Availability subscriptions and the Form context use per-instance RAII. Reentrant removal during measurement must remove the context contribution without retaining a label reference. Destruction calls no validation or enabled callback; cleanup is no-throw.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[Field](field.md), [Form](form.md), [Enabled](enabled.md), [ReadOnly](read_only.md). Cas : groupe vide, légende vide, fieldset imbriqué, nested Form, state availability expiré, retirer sous focus/capture. Aucun ordre de validation automatique ni transfert audio.
+[Field](field.md), [Form](form.md), [Enabled](enabled.md), [ReadOnly](read_only.md). Cases: an empty group, empty legend, nested fieldset, nested Form, expired availability state and removal during focus/capture. No automatic validation ordering or audio transfer.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/fieldset.hpp` et `src/fieldset.cpp`.
+Target: `include/nativeui/fieldset.hpp` and `src/fieldset.cpp`.
 
-fieldset.hpp déclare builder/style et adaptateurs enfants/State ; fieldset.cpp contient Group retained, lexical participation Form, mesure/layout/availability/paint legend. Couple distinct de field.cpp et form.cpp ; aucun déplacement des styles d’enfants vers ce modèle.
+fieldset.hpp declares builder/style and child/State adapters; fieldset.cpp contains the retained Group, lexical Form participation, measurement/layout/availability and legend paint. A separate pair from field.cpp and form.cpp; do not move child styles into this model.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `fieldset_semantic_group` : legend name, children names conservés.
-- `fieldset_form_column` : alignement avec fields extérieurs.
-- `fieldset_nested_form` : nouveau contexte isolé quand Form imbriqué.
-- `fieldset_availability` : enabled/read-only restrictifs sans effacer données.
-- `fieldset_empty_legend` : mesure/readout accessibles cohérents.
-- `fieldset_removal_fault` : contexte/subscriptions récupérés après exception.
+- `fieldset_semantic_group`: legend name and child names preserved.
+- `fieldset_form_column`: alignment with outer fields.
+- `fieldset_nested_form`: a new isolated context when Form is nested.
+- `fieldset_availability`: restrictive enabled/read-only behavior without clearing data.
+- `fieldset_empty_legend`: coherent measurement and accessible readout.
+- `fieldset_removal_fault`: context/subscriptions recover after an exception.
 
-Créer l’exemple public futur `examples/features/fieldset.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/fieldset.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

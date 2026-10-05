@@ -1,22 +1,22 @@
 # DateInput
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Champ compact de date civile optionnelle affichant ISO YYYY-MM-DD et ouvrant un Calendar. Ce premier port suit le sélecteur MyGo ; ce n’est pas un éditeur libre de date.
+A compact optional civil date field displaying ISO YYYY-MM-DD and opening a Calendar. This first port follows the MyGo picker; it is not a freeform date editor.
 
-Absent du toolkit NativeUI. [Overlay](../include/nativeui/overlay.hpp), focus et boutons existent ; [Calendar](calendar.md) et [Popover](popover.md) sont des composants cibles.
+Absent from the NativeUI toolkit. [Overlay](../include/nativeui/overlay.hpp), focus, and buttons exist; [Calendar](calendar.md) and [Popover](popover.md) are target components.
 
-MyGo : `ui/date.go`, `DateInput` et `calendarGrid` en mode moveChooses=false. Clic/Enter/Space ouvrent, navigation change le cursor, clic/Enter choisissent et rendent focus au champ. MyGo conserve heure/fuseau ; la cible ne les transporte pas.
+MyGo: `ui/date.go`, `DateInput`, and `calendarGrid` in moveChooses=false mode. Click/Enter/Space open it, navigation changes the cursor, click/Enter choose and return focus to the field. MyGo retains time/time zone; the target does not carry them.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class DateInput {
@@ -34,91 +34,91 @@ public:
 };
 ```
 
-Défauts : absence autorisée, placeholder « Choisir une date », clearable=true, bornes ouvertes, reference_day=sys_days{}. DateInputStyle couvre chrome, text et largeur préférée ; CalendarStyle hérité en configuration interne cohérente.
+Defaults: absence allowed, “Choose a date” placeholder, clearable=true, open bounds, reference_day=sys_days{}. DateInputStyle covers chrome, text, and preferred width; CalendarStyle is inherited in a consistent internal configuration.
 
-Exemple cible proposé : `ui::DateInput{"Échéance", deadline}.clearable().spec()` ; deadline est un State<Value> converti en Binding à la construction ; sa destruction ultérieure conserve le dernier snapshot sans mutation possible.
+Proposed target example: `ui::DateInput{"Deadline", deadline}.clearable().spec()`; deadline is a State<Value> converted to Binding on construction; its subsequent destruction retains the last snapshot without possible mutation.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Value externe via Binding ; surcharge State convertie immédiatement. Source détruite : Binding invalide, get dernière valeur, set ignoré/observe inactif sans notification automatique. Revalider avant edit/open et fermer popup au prochain checkpoint d’accès si indisponible, sans on_change. Open, cursor et handle d’overlay sont privés. À l’ouverture, copier valeur valide ou reference_day borné dans le cursor, sans écrire Value.
+External Value through Binding; the State overload is converted immediately. Source destruction: Binding invalid, get returns the last value, set ignored/observe inactive without automatic notification. Revalidate before edit/open and close the popup at the next access checkpoint if unavailable, without on_change. Open, cursor, and overlay handle are private. On opening, copy the valid value or bounded reference_day into the cursor without writing Value.
 
-Choisir valide appelle Binding.set puis on_change une fois si valeur acceptée diffère. Clear choisit nullopt par le même chemin. Mise à jour externe ouverte remplace sélection/cursor sans on_change.
+A valid choice calls Binding.set, then on_change once if the accepted value differs. Clear chooses nullopt through the same path. An external update while open replaces selection/cursor without on_change.
 
-La fermeture sans choix conserve la valeur externe actuelle. Éviter un second State public pour open ; le parent réutilise seulement le handle Overlay lifetime-safe.
+Closing without choosing preserves the current external value. Avoid a second public State for open; the parent reuses only the lifetime-safe Overlay handle.
 
 ## 4. Interactions
 
-Trigger : clic primaire terminé, Enter et Space ouvrent/ferment une seule fois par pression ; Tab entre dans le parcours normal. Le Calendar reçoit le focus au cursor à l’ouverture.
+Trigger: completed primary click, Enter, and Space open/close once per press; Tab enters normal navigation. Calendar receives focus at the cursor on opening.
 
-Popup : flèches/Home/End/PageUp/PageDown déplacent brouillon, Enter/Space ou clic commit et ferment. Escape et clic extérieur ferment sans commit. Clear est une vraie action nommée et désactivée si valeur absente/ReadOnly.
+Popup: arrows/Home/End/PageUp/PageDown move the draft; Enter/Space or click commit and close. Escape and outside click close without commit. Clear is a real named action, disabled if the value is absent/ReadOnly.
 
-ReadOnly ne permet ni ouverture mutatrice ni clear ; la valeur reste lisible. PointerCancel annule un trigger pressé. Molette ignorée ; aucun parsing de TextInput dans cette v1.
+ReadOnly allows neither mutating opening nor clear; the value remains readable. PointerCancel cancels a pressed trigger. The wheel is ignored; no TextInput parsing in v1.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure du trigger selon texte ISO ou placeholder, icône et clear, largeur préférée style. La grille conserve sa largeur naturelle : ne pas forcer celle du champ lorsqu’il est très large.
+Measure the trigger by ISO text or placeholder, icon and clear, and style preferred width. The grid retains its natural width: do not force it to match a very wide field.
 
-Popup ancré par NodeId, placement Auto du service Overlay, bornes viewport. Header et grille Calendar bornent leur contenu ; parent ne clone pas la politique de placement.
+Popup anchored by NodeId, Overlay service Auto placement, viewport bounds. Calendar header and grid bound their content; the parent does not clone placement policy.
 
-Resize/DPR/scroll de parent réévalue ancre. Ancre retirée ou non disponible ferme ; pas de fallback centré d’un date picker orphelin.
+Resize/DPR/parent scroll reevaluate the anchor. A removed or unavailable anchor closes it; no centered fallback for an orphan date picker.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-DateInputStyle nouveau : surface/border/text/placeholder/icon/focus et métriques. Rendu de date avec chiffres tabulaires si la police le permet, sans API de font-features inexistante dans TextStyle.
+New DateInputStyle: surface/border/text/placeholder/icon/focus and metrics. Render dates with tabular digits if the font allows, without a font-features API that does not exist in TextStyle.
 
-Binding change = texte + paint/semantics ; passage placeholder/date pouvant modifier taille = layout. Popup open = invalidation structure Overlay.
+Binding change = text + paint/semantics; placeholder/date transition that can change size = layout. Popup open = Overlay structure invalidation.
 
-Label applicatif sert au nom, pas nécessairement au texte du bouton. Aucune animation nécessaire. Icône dessinée via les primitives/IconView, sans chemin de ressource codé en dur.
+The application label serves as the name, not necessarily the button text. No animation required. Draw the icon with primitives/IconView, without a hardcoded resource path.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Button avec nom label, text_value ISO ou absence, expanded selon popup, Activate/Focus. Pas de Role::DateInput annoncé comme existant.
+Target contract: Button with label as name, ISO text_value or absence, expanded according to popup, Activate/Focus. Do not claim Role::DateInput exists.
 
-Le Calendar expose cellules/boutons ; le focus revient à l’ancre encore valide après fermeture. Action Clear nommée « Effacer la date ». Valeur invalide expliquée en description sans mentir sur le modèle.
+Calendar exposes cells/buttons; focus returns to a still-valid anchor after closing. Clear action named “Clear date”. An invalid value is explained in the description without misrepresenting the model.
 
-Ponts T068 différés. Pas de saisie texte ni preedit à cette étape ; ajout futur d’édition textuelle dépend de DESIGN17.4 et ne change pas les choix chrono.
+T068 bridges are deferred. No text entry or preedit at this stage; future text editing depends on DESIGN17.4 and does not change chrono choices.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement RAII, open handle et callbacks de popup protégés par token/génération. Fermeture idempotente et démontage enlèvent uniquement l’overlay de cette instance.
+UI/main thread; RAII subscription, open handle, and popup callbacks protected by token/generation. Idempotent closing and unmounting remove only this instance's overlay.
 
-Préparer contenu avant ouverture ; échec de création/scheduling garde le champ fermé et re-tentable. Pas de capture/focus restauré vers un NodeId stale.
+Prepare content before opening; creation/scheduling failure leaves the field closed and retryable. No capture/focus restoration to a stale NodeId.
 
-Action commit/clear terminale avant on_change ; callback qui ouvre un autre popup ne referme pas ce nouveau popup. Exception ne rejoue jamais la notification ; destruction no-throw, top-level UI différée.
+Commit/clear action is terminal before on_change; a callback opening another popup does not close that new popup. An exception never replays the notification; no-throw destruction, deferred top-level UI destruction.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de [Calendar](calendar.md), [Popover](popover.md), Button, chrono et Binding. Navigation PageUp/PageDown exige les ajouts Key et normalisation backend décrits par Calendar ; rien de spécifique Pugl dans le widget. Même règles de domaine 1..9999 et bornes inclusives que Calendar.
+Depends on [Calendar](calendar.md), [Popover](popover.md), Button, chrono, and Binding. PageUp/PageDown navigation requires the Key additions and backend normalization described by Calendar; no Pugl specifics in the widget. Same 1..9999 domain and inclusive bounds as Calendar.
 
-Date absente utilise placeholder ; externe hors domaine/plage affichée invalide, pas corrigée. Ouverture choisit une référence bornée, pas le jour courant caché.
+An absent date uses the placeholder; an external out-of-domain/out-of-range value is displayed as invalid without correction. Opening chooses a bounded reference, rather than a hidden current day.
 
-Bornes incohérentes rejetées avant montage. Retrait du modèle pendant popup sûr pour Binding ; le contenu devient non mutateur dès revalidation, sans notification de changement fictive. Mise à jour externe au dernier moment a priorité sur un brouillon stale.
+Inconsistent bounds are rejected before mount. Removing the model while the popup is open is safe for Binding; content becomes nonmutating on revalidation without a fictitious change notification. An external update at the last moment takes precedence over a stale draft.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/date_input.hpp` et `src/date_input.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/date_input.hpp` and `src/date_input.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : Button/Overlay et futur Calendar. Type Value identique à Calendar ; aucun wrapper de date natif, parsing locale implicite ou nouvelle pile popup.
+Origin to extract or reuse: Button/Overlay and future Calendar. Value type identical to Calendar; no native date wrapper, implicit locale parsing, or new popup stack.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, without an empty file or central widget switch. No Pugl, Skia, OS, or plugin SDK types belong in this API.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery is documentation only: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests required during implementation:
 
-- `date_input_open_cancel` : navigation puis Escape/outside ne modifie pas la date.
-- `date_input_choose_clear` : choix/effacement écrivent une fois et rendent focus à l’ancre.
-- `date_input_external_open` : externe ouverte remplace le brouillon sans on_change.
-- `date_input_anchor_remove` : retrait/Hidden/Disabled pendant popup retire tous les handles.
-- `date_input_invalid_date` : absence et valeur hors domaine/plage restent lisibles sans correction.
-- `date_input_reentrant_popup` : callback qui ouvre autre chose ou lève garde le service utilisable.
+- `date_input_open_cancel`: navigation then Escape/outside do not modify the date.
+- `date_input_choose_clear`: choice/clear write once and return focus to the anchor.
+- `date_input_external_open`: an external update while open replaces the draft without on_change.
+- `date_input_anchor_remove`: removal/Hidden/Disabled during popup removes every handle.
+- `date_input_invalid_date`: absence and out-of-domain/out-of-range values stay readable without correction.
+- `date_input_reentrant_popup`: a callback opening something else or throwing leaves the service usable.
 
-Créer `examples/features/date_input.cpp` et la cible `nativeui_example_date_input`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/date_input.cpp` and the `nativeui_example_date_input` target, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery after the faults described above under ASan/UBSan where lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture/registration remains after unmounting, and the published API matches these contracts. Verification performed here: reading declarations and sources; no C++ or interactive tests executed.

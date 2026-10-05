@@ -1,20 +1,20 @@
 # Collapsible
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Un header de disclosure ouvre/ferme un contenu. NativeUI ne possède pas ce builder ; [Visibility](visibility.md), [If](if.md) et focus servent de fondations.
+A disclosure header opens/closes content. NativeUI has no such builder; [Visibility](visibility.md), [If](if.md) and focus provide the foundations.
 
-MyGo `ui/collapsible.go` : `CollapsibleBase`, `Collapsible`, `disclosureArrow`. La cible propose une recette publique complète, contenu maintenu monté pour conserver les bindings et identités ; une policy explicite permet le démontage.
+MyGo `ui/collapsible.go`: `CollapsibleBase`, `Collapsible`, `disclosureArrow`. The target proposes a complete public recipe, keeping content mounted to preserve bindings and identities; an explicit policy allows unmounting.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 enum class DisclosureContentPolicy { Retain, UnmountWhenClosed };
@@ -28,73 +28,73 @@ Spec spec() &&;
 
 ```cpp
 ui::State<bool> open{false};
-auto section = ui::Collapsible{"Avancé", open, ui::Label{"Réglages"}};
+auto section = ui::Collapsible{"Advanced", open, ui::Label{"Settings"}};
 ```
 
-Defaults : closed selon binding, policy Retain, animation visuelle 150 ms respectant reduced motion ; title vide autorisé si nom accessible fourni par style/composition de header cible. Le header est une partie interne, pas un fichier autonome.
+Defaults: closed according to the binding, Retain policy, a 150 ms visual animation that respects reduced motion; an empty title is permitted if an accessible name is supplied through style/the target header composition. The header is an internal part rather than a standalone file.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Bool externe autoritaire ; gesture écrit le Binding, on_change après write effectif seulement. Write applicatif externe ajuste le contenu sans on_change utilisateur. Retain conserve enfant monté collapsed ; UnmountWhenClosed retire sa structure et remonte une nouvelle identité à l’ouverture.
+The external bool is authoritative; a gesture writes to Binding and calls on_change only after an effective write. An external application write adjusts content without a user on_change callback. Retain keeps the child mounted but collapsed; UnmountWhenClosed removes its structure and mounts a new identity when opened.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Click header/chevron ou Enter/Space bascule une fois au release ; drag hors hit target annule le press sans write. Left ferme et Right ouvre si l’état change ; Échap annule un press mais ne ferme pas une section déjà ouverte. Pas de molette. Focus header conservé ; si contenu contient focus au close, restituer au header au safe checkpoint. Read-only bloque toggle sans rendre texte illisible.
+Clicking the header/chevron or pressing Enter/Space toggles once on release; dragging outside the hit target cancels the press without a write. Left closes and Right opens if the state changes; Escape cancels a press but does not close an already open section. No wheel input. Header focus is preserved; if content holds focus when closed, return focus to the header at the safe checkpoint. Read-only blocks toggling without making text unreadable.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Header mesure label/chevron, contenu dessous avec gap/style. Fermé : métriques du header seul et aucune zone ciblable du contenu. Pendant animation, contenu clipped et non focusable dès close commencé ; layout peut animer hauteur avec borne finie. Reduced motion saute à la hauteur finale. Largeur parent contraint les descendants.
+The header measures its label/chevron, with content below using the style gap. Closed: header-only metrics and no targetable content area. During animation, content is clipped and becomes non-focusable as soon as closing begins; layout may animate height within a finite bound. Reduced motion jumps to the final height. Parent width constrains descendants.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-CollapsibleStyle détient gap/padding/chevron/radius et état hover/pressed/focus. Chevron rotation donne état, pas seule indication disponible. Animation par instance et arrêté caché/démonté ; changement de open égal ne redémarre pas timeline. Aucun slot Theme prétendu déjà présent.
+CollapsibleStyle holds gap/padding/chevron/radius and hover/pressed/focus states. Chevron rotation communicates state but is not the only available indication. Animation is per instance and stopped when hidden/unmounted; an unchanged open value does not restart the timeline. Do not claim a Theme slot already exists.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Header cible `Custom` ou `Button` avec name, expanded, Focus/Expand/Collapse. Le rôle Disclosure n’existe pas encore. Contenu fermé absent du snapshot actionable selon disponibilité ; la relation header/panel est une extension neutre future, pas un mapping natif livré.
+The header targets `Custom` or `Button` with name, expanded state and Focus/Expand/Collapse actions. The Disclosure role does not exist yet. Closed content is absent from the actionable snapshot according to availability; the header/panel relationship is a future neutral extension rather than a shipped native mapping.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer le nouveau state avant write ; après callback réentrant fermer/open, relire la valeur autoritaire sans reboucler les callbacks. Retain évite remontage pendant animation. En policy Unmount, factory/mount throwing utilise transaction Tree, sans child fantôme. Timer/pending invalidation weak annulé au teardown.
+Prepare the new state before writing; after a reentrant callback closes/opens the section, read the authoritative value again without looping through callbacks. Retain avoids remounting during animation. Under the Unmount policy, a throwing factory/mount uses a Tree transaction without a phantom child. Weak timer/pending invalidation is canceled at teardown.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Binding bool, [Visibility](visibility.md), [If](if.md), clipping et focus. Cas : contenu vide, title long, fermeture pendant text edit, state expiré, open/close rapides et exceptions on_change. Ne pas porter Local/MyGo c.context global.
+Bool Binding, [Visibility](visibility.md), [If](if.md), clipping and focus. Cases: empty content, a long title, closing during text editing, expired state, rapid open/close and on_change exceptions. Do not port Local/MyGo’s global c.context.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/collapsible.hpp` et `src/collapsible.cpp`.
+Target: `include/nativeui/collapsible.hpp` and `src/collapsible.cpp`.
 
-collapsible.hpp déclare policy, style, builder et callbacks ; conversion enfant seule template. collapsible.cpp contient header/panel, animation/mesure/layout/input/paint et adaptation au service Tree existant. Pas de wrapper .cpp vide autour de Visibility.
+collapsible.hpp declares policy, style, builder and callbacks; only child conversion is templated. collapsible.cpp contains the header/panel, animation/measurement/layout/input/paint and adaptation to the existing Tree service. No empty .cpp wrapper around Visibility.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `collapsible_keyboard_pointer` : Enter/Space/click exactly one toggle.
-- `collapsible_retain_vs_unmount` : identité/compteurs de mount conformes.
-- `collapsible_close_focus` : focus contenu revient au header.
-- `collapsible_rapid_animation` : inversions cohérentes et reduced motion.
-- `collapsible_closed_hit` : child n’est plus targetable dès close.
-- `collapsible_reentrant_change` : externe final autoritaire, callback non rejoué.
-- `collapsible_hidden_timer` : aucune invalidation après unmount.
+- `collapsible_keyboard_pointer`: Enter/Space/click produce exactly one toggle.
+- `collapsible_retain_vs_unmount`: identity/mount counters follow the contract.
+- `collapsible_close_focus`: content focus returns to the header.
+- `collapsible_rapid_animation`: coherent reversals and reduced motion.
+- `collapsible_closed_hit`: the child is no longer targetable as soon as closing begins.
+- `collapsible_reentrant_change`: the final external value is authoritative; the callback is not replayed.
+- `collapsible_hidden_timer`: no invalidation after unmount.
 
-Créer l’exemple public futur `examples/features/collapsible.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/collapsible.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

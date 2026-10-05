@@ -1,20 +1,20 @@
 # TreeView<Key>
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-TreeView compose une hiérarchie de taille modérée avec disclosures, choix par clé et navigation parent/enfant. NativeUI `Tree` est le runtime retenu, pas un widget de navigation ; le nouveau nom évite la collision. Fondations : [dynamic.hpp](../include/nativeui/dynamic.hpp) et [component_tree.hpp](../include/nativeui/component_tree.hpp).
+TreeView composes a moderate-size hierarchy with disclosures, keyed selection, and parent/child navigation. NativeUI `Tree` is the retained runtime, not a navigation widget; the new name avoids collision. Foundations: [dynamic.hpp](../include/nativeui/dynamic.hpp) and [component_tree.hpp](../include/nativeui/component_tree.hpp).
 
-MyGo `ui/tree.go` : `Tree`, `TreeItem`. MyGo construit les items imbriqués ouverts et navigue par ordre visible. La cible définit un snapshot de données stable commun à [OutlineView](outline_view.md), qui apporte la virtualisation.
+MyGo `ui/tree.go`: `Tree`, `TreeItem`. MyGo builds open nested items and navigates in visible order. The target defines a stable data snapshot shared with [OutlineView](outline_view.md), which adds virtualization.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-Modèle commun cible unique dans `collection_model.hpp` :
+One common target model in `collection_model.hpp`:
 
 ```cpp
 template<class Key> struct TreeNode {
@@ -39,7 +39,7 @@ TreeView&& style(TreeViewStyle) &&;
 Spec spec() &&;
 ```
 
-Exemple futur :
+Future example:
 
 ```cpp
 ui::State<std::vector<ui::TreeNode<std::string>>> nodes{{
@@ -50,71 +50,71 @@ ui::State<std::vector<std::string>> expanded{{"src"}};
 auto tree = ui::TreeView<std::string>{nodes,selection,expanded};
 ```
 
-Rows default Label{node.label}. Defaults Single, indentation 16 DIP, min row 24 DIP ; callbacks/factory possédés. Dataset flat parent nullable ; ordre des siblings = ordre dans snapshot. `branch=true` permet un dossier vide expandable ; un parent possédant des enfants est une branche même si flag false.
+Rows default to Label{node.label}. Defaults: Single, indentation 16 DIP, minimum row 24 DIP; owned callbacks/factory. Flat dataset with nullable parent; sibling order = snapshot order. `branch=true` permits an expandable empty folder; a parent with children is a branch even if the flag is false.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Nodes snapshot copié/validé ; key unique, parent référant une clé présente ou nullopt. Expansion externe ordered par ordre dataset et keys uniques ; unknown keys ignorées visuellement sans rewrite automatique. Selection consommée par binding copié, identités par key. Un toggle produit expanded canonique, callback après write effectif ; updates externes ne déclenchent pas gesture callback. Binding invalid de dataset = dernière génération lisible, selection/expanded invalid interdisent leur mutation.
+Copied/validated nodes snapshot; unique key, parent referring to a present key or nullopt. External expansion ordered by dataset order with unique keys; unknown keys ignored visually without automatic rewrite. Selection consumed through a copied binding, identities by key. A toggle produces canonical expanded, callback after an effective write; external updates do not trigger gesture callbacks. Invalid dataset Binding = last readable generation; invalid selection/expanded prevent their mutation.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Click chevron toggle expansion sans activation ; click row choisit ; Enter/double click active via callback. Up/Down/Home/End dans ordre visible ; Right ouvre puis sur branche ouverte va au premier child ; Left ferme puis vers parent. Modifiers selection selon ListView. Alt pointer toggle récursif ; clavier expansion récursive via policy portable (Option macOS/Shift ailleurs). Échap annule press/buffer, jamais rollback d’un expanded externe. Focus roving sur une row, Tab sort/entre l’ensemble ; child controls gardent leur focus si configurés.
+Chevron click toggles expansion without activation; row click chooses; Enter/double-click activate through callback. Up/Down/Home/End in visible order; Right opens, then on an open branch moves to the first child; Left closes, then moves to the parent. Selection modifiers follow ListView. Alt pointer toggles recursively; recursive keyboard expansion through a portable policy (Option on macOS/Shift elsewhere). Escape cancels press/buffer, never rolls back external expanded. Roving focus on one row; Tab enters/exits the group; child controls retain their focus if configured.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Traversal préordre des branches ouvertes, indentation depth*16 DIP et chevron 16 DIP. TreeView matérialise les lignes visibles logiquement (toutes les branches ouvertes), sans contrat O(viewport). Utiliser Outline pour grands arbres. Mesurer row naturelle et max width + indentation ; ScrollView interne pour overflow. Depth multiplication checked, rects finite/nonnegative. Fenêtre réduite wrap/clips contenu suivant row factory.
+Preorder traversal of open branches, indentation depth*16 DIP and 16 DIP chevron. TreeView materializes logically visible rows (all open branches), without an O(viewport) contract. Use Outline for large trees. Measure natural row and maximum width + indentation; internal ScrollView for overflow. Checked depth multiplication, finite/nonnegative rectangles. A reduced window wraps/clips content according to the row factory.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-TreeViewStyle contient padding, indentation, chevron et row styles active/selected/hover/focus. Chevron indique expanded même sans animation. Collapsed descendants exclus de layout/input ; contenu state-by-key conservé lorsque encore monté selon retained policy choisie : ici fermeture démonte les descendants visuels, modèles externalisés. Ne pas conserver Components fermés uniquement pour prétendre virtualiser.
+TreeViewStyle contains padding, indentation, chevron, and active/selected/hover/focus row styles. Chevron indicates expanded even without animation. Collapsed descendants are excluded from layout/input; keyed content state is retained while still mounted under the chosen retained policy: here, closing unmounts visual descendants and models are externalized. Do not retain closed Components merely to claim virtualization.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Tree/TreeItem sont absents des rôles actuels : cible Group/Custom avec name, selected et expanded, actions Focus/Select/Expand/Collapse/Activate éligibles. Level/parent/index-in-set requièrent extension neutre explicitement future, pas du native pointer. Snapshots de lecture possédés ; ordre préordre visible et IDs nouveaux après unmount.
+Tree/TreeItem are absent from current roles: target Group/Custom with name, selected, expanded, and eligible Focus/Select/Expand/Collapse/Activate actions. Level/parent/index-in-set require an explicitly future neutral extension, not a native pointer. Owned read snapshots; visible preorder and new IDs after unmount.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer relation parents, détection de cycles et ordre visible avant commit. Initial invalid dataset : invalid_argument à consommation ; remplacement invalide conserve dernière génération acceptée avec diagnostic, prochaine génération valide récupère. Fermer branche qui contient active/focus : active revient à ancêtre ; gesture single sélectionne ancêtre, multiple retire descendants désormais cachés de sa sélection canonique. Une fermeture externe ne réécrit pas Selection automatiquement, mais le focus runtime récupère. Callbacks reentrant sont revalidés par key/generation.
+Prepare parent relationships, cycle detection, and visible order before commit. Invalid initial dataset: invalid_argument on consumption; invalid replacement retains the last accepted generation with a diagnostic, and the next valid generation recovers. Closing a branch containing active/focus: active returns to an ancestor; a single-selection gesture selects the ancestor, while multiple selection removes now-hidden descendants from its canonical selection. External closing does not automatically rewrite Selection, but runtime focus recovers. Reentrant callbacks are revalidated by key/generation.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[ListView](list_view.md) modèles et keyboard policy, ScrollView, dynamic lifecycle. Cycles, duplicate key, parent absent : invalides ; forêt multi-roots et vide valides. Nouveau subtree pendant callback, branch supprimée, key retirée/réinsérée et expansion inconnue testés. Aucune child callback récursive demandée depuis snapshot accessible.
+[ListView](list_view.md) models and keyboard policy, ScrollView, dynamic lifecycle. Cycles, duplicate keys, absent parent: invalid; a multiroot forest and empty data are valid. Test a new subtree during a callback, removed branch, removed/reinserted key, and unknown expansion. No recursive child callback requested from an accessible snapshot.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/tree_view.hpp` et `src/tree_view.cpp`.
+Target: `include/nativeui/tree_view.hpp` and `src/tree_view.cpp`.
 
-tree_view.hpp templates adaptent TreeNode/Selection, row factory et equality des clés ; tree_view.cpp porte graphe valide, parcours, disclosure, input, mesures et paint du noyau non template. Réutiliser collection_model.hpp, jamais redéfinir ui::Tree. Toutes classes Component publiques nouvellement exposées restent déclarées dans ce header.
+tree_view.hpp templates adapt TreeNode/Selection, row factory, and key equality; tree_view.cpp contains the valid graph, traversal, disclosure, input, measurement, and painting of the non-template core. Reuse collection_model.hpp; never redefine ui::Tree. All newly exposed public Component classes remain declared in this header.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `tree_parent_child_keyboard` : Right/Left, préordre et skip disabled.
-- `tree_forest_empty_branch` : forêt, vide, branch empty.
-- `tree_key_identity` : reorder siblings maintient modèles/focus par clé.
-- `tree_cycle_orphan_duplicate` : reject initial, ancienne génération gardée ensuite.
-- `tree_recursive_expansion` : modifiers sans boucle de cycle.
-- `tree_collapse_focus_selection` : gesture/external distinction et focus ancestor.
-- `tree_dataset_during_input` : suppression/replacement reentrant safe.
-- `tree_expansion_throw` : callback unique, guards restaurés.
+- `tree_parent_child_keyboard`: Right/Left, preorder, and disabled skipping.
+- `tree_forest_empty_branch`: forest, empty dataset, empty branch.
+- `tree_key_identity`: sibling reorder retains models/focus by key.
+- `tree_cycle_orphan_duplicate`: reject initially, retain the old generation afterward.
+- `tree_recursive_expansion`: modifiers without a cycle loop.
+- `tree_collapse_focus_selection`: gesture/external distinction and ancestor focus.
+- `tree_dataset_during_input`: safe reentrant removal/replacement.
+- `tree_expansion_throw`: single callback, restored guards.
 
-Créer l’exemple public futur `examples/features/tree_view.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/tree_view.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

@@ -1,22 +1,22 @@
 # TimeInput
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Heure civile optionnelle de la journée sous forme de segments HH:MM, avec secondes en option. Aucun jour, fuseau, timestamp ou traitement de DST.
+Optional civil time of day as HH:MM segments, with optional seconds. No day, time zone, timestamp, or DST handling.
 
-Absent de NativeUI ; les chemins Input committed et le modèle State sont disponibles. Le composant gère chiffres et segments sans moteur d’édition riche.
+Absent from NativeUI; committed Input paths and the State model are available. The component handles digits and segments without a rich editing engine.
 
-MyGo : `ui/timeinput.go`, `TimeInput`, segments hours/minutes. Haut/bas tournent chaque segment, chiffres composent deux digits, gauche/droite déplacent le focus. MyGo conserve date et seconds/timezone ; la cible conserve seconds dans un entier de secondes depuis minuit.
+MyGo: `ui/timeinput.go`, `TimeInput`, hours/minutes segments. Up/down wrap each segment, digits form two-digit values, and left/right move focus. MyGo retains date and seconds/time zone; the target retains seconds as an integer number of seconds since midnight.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class TimeInput {
@@ -32,98 +32,98 @@ public:
 };
 ```
 
-Défauts : format 24h, HH:MM, secondes masquées mais conservées, valeur absente autorisée, clearable=true. Domaine de toute valeur valide : seconds{0}..seconds{86399}. TimeInputStyle décrit textes, separators, selection/focus, padding et largeur des segments.
+Defaults: 24-hour format, HH:MM, hidden but preserved seconds, absent value allowed, clearable=true. Domain of every valid value: seconds{0}..seconds{86399}. TimeInputStyle describes text, separators, selection/focus, padding, and segment widths.
 
-Exemple cible proposé :
+Proposed target example:
 
 ```cpp
 ui::State<ui::TimeInput::Value> alarm{
     std::chrono::seconds{9 * 3600 + 30 * 60}};
-auto field = ui::TimeInput{"Alarme", alarm}
+auto field = ui::TimeInput{"Alarm", alarm}
     .show_seconds(false).spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding porte la valeur entière ; surcharge State convertie immédiatement. Source détruite : valid=false, get dernière valeur, set ignoré/observe inactif sans notification automatique ; revalider avant edit et ne pas notifier on_change. Segment actif et buffer de 1–2 chiffres appartiennent à l’instance. Aucun timer global pour digits.
+Binding carries the integer value; the State overload is converted immediately. Source destruction: valid=false, get returns the last value, set ignored/observe inactive without automatic notification; revalidate before edit and do not notify on_change. The active segment and 1–2 digit buffer belong to the instance. No global digit timer.
 
-Chaque edit accepté met à jour la valeur complète puis on_change une fois si réellement changée. Focus et déplacement entre segments ne modifient pas le modèle. Externe remplace segments/buffer sans on_change.
+Every accepted edit updates the complete value, then on_change once if actually changed. Focus and segment movement do not modify the model. External changes replace segments/buffer without on_change.
 
-Absence n’est pas minuit : afficher --:--. La première modification part de 00:00:00 puis applique le chiffre ou pas ; clear remet nullopt. Masquer seconds ne les arrondit jamais.
+Absence is not midnight: display --:--. The first modification starts from 00:00:00, then applies the digit or step; clear resets nullopt. Hiding seconds never rounds them.
 
 ## 4. Interactions
 
-Clic choisit le segment, Tab/Shift+Tab parcourent segments puis contrôles voisins. Gauche/droite va au segment adjacent sans wrapping de focus. Haut/bas incrémente/décrémente avec modulo 24 ou 60 indépendant, sans retenue entre segments.
+Click chooses the segment, Tab/Shift+Tab traverse segments then neighboring controls. Left/right move to the adjacent segment without focus wrapping. Up/down increment/decrement with independent modulo 24 or 60, without carrying between segments.
 
-Chiffres committed ASCII : premier digit lance buffer ; second valide si dans domaine, sinon devient premier digit nouveau. À deux chiffres ou digit qui ne peut commencer un nombre valide, avancer au segment suivant ; au dernier rester.
+Committed ASCII digits: the first digit starts the buffer; the second validates if within the domain, otherwise it becomes a new first digit. After two digits, or a digit that cannot start a valid number, advance to the next segment; remain at the last one.
 
-Enter valide le buffer local et laisse le modèle ; Escape abandonne seulement buffer incomplet, pas les valeurs déjà publiées. Molette/glissement ignorés. ReadOnly lit/navigue mais consomme edits sans écrire ; Disabled n’est pas focusable.
+Enter validates the local buffer and retains the model; Escape discards only an incomplete buffer, not values already published. Wheel/drag ignored. ReadOnly reads/navigates but consumes edits without writing; Disabled is not focusable.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Chaque segment garde une largeur de deux chiffres max, mesurée avec TextService, padding et séparateurs non interactifs. Minimise les jumps 09→10 ; pas de largeur au rythme du buffer.
+Each segment retains a width of at most two digits, measured with TextService, padding, and noninteractive separators. Minimize 09→10 jumps; width does not follow the buffer.
 
-Place bornée : clipper segments dans les bounds ; pas de chevauchement avec clear. Place nulle interdit clic et ne produit aucune division.
+Bounded space: clip segments within bounds without overlapping clear. Zero space prevents clicks and produces no division.
 
-Coordonnées logiques ; rectangles du focus et des segments proviennent du même layout. Show_seconds modifie structure/focus au checkpoint, jamais pendant traversée active.
+Logical coordinates; focus and segment rectangles come from the same layout. Show_seconds changes structure/focus at the checkpoint, never during active traversal.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-TimeInputStyle nouveau : chrome de groupe, texte inactif, segment sélectionné, separators, focus ring et disabled/read-only. Nom label indépendant de la représentation.
+New TimeInputStyle: group chrome, inactive text, selected segment, separators, focus ring, and disabled/read-only states. Label name independent of representation.
 
-Changement externe/chiffre = paint/semantics. Édition buffer seule = paint du segment. Show_seconds et métriques style = structure/layout. Ne pas exiger API font-features absente ; choisir police de test déterministe.
+External change/digit = paint/semantics. Buffer-only editing = segment paint. Show_seconds and style metrics = structure/layout. Do not require an absent font-features API; choose a deterministic test font.
 
-Aucun curseur clignotant requis pour des segments ; aucune animation/timer continu. Valeur invalidée par externe donne une présentation invalide --:-- et description, sans writeback.
+Segments require no blinking cursor or continuous animation/timer. An externally invalid value gives an invalid --:-- presentation and description without writeback.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Group et deux/trois enfants Custom portant noms « heures », « minutes », « secondes », numeric_value/range et actions Increment/Decrement/SetValue/Focus.
+Target contract: Group and two/three Custom children named “hours”, “minutes”, “seconds”, with numeric_value/range and Increment/Decrement/SetValue/Focus actions.
 
-SemanticRole::Stepper absent ; ne pas l’annoncer comme livré. Contrat de SetValue segment borné 0..23/59, sans modification des autres segments ni de date/fuseau inexistants.
+SemanticRole::Stepper is absent; do not claim it is delivered. Segment SetValue contract bounded to 0..23/59, without modifying other segments or nonexistent date/time zone.
 
-TextInput committed disponible ; preedit/candidate rectangles non livrés DESIGN17.4. Les snapshots sont testables mais les ponts natifs T068 restent différés.
+Committed TextInput is available; preedit/candidate rectangles are not delivered under DESIGN17.4. Snapshots are testable, but T068 native bridges remain deferred.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement RAII et état buffer réinitialisé au démontage/perte de focus. Annuler input text natif lors du démontage si le segment l’active.
+UI/main thread; RAII subscription and buffer state reset on unmount/loss of focus. Cancel native text input on unmounting if the segment activates it.
 
-Avant Binding.set snapshot de valeur/options ; callbacks réentrants peuvent remplacer modèle/visibilité, donc revalider vie avant de déplacer focus. on_change commencé jamais rejoué.
+Before Binding.set, snapshot value/options; reentrant callbacks can replace model/visibility, so revalidate lifetime before moving focus. A started on_change is never replayed.
 
-Exception remet guards/segment en état cohérent sans compléter automatiquement les digits. Destruction no-throw et callback-silent. Pas de timer/read-only global ou partage de buffer entre instances.
+An exception restores guards/segment to a consistent state without automatically completing digits. No-throw, callback-silent destruction. No global timer/read-only state or buffer shared between instances.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de chrono, Binding, Input committed, Focus et TextService ; aucune boîte native ou parser locale système.
+Depends on chrono, Binding, committed Input, Focus, and TextService; no native dialog or system locale parser.
 
-Valeur externe négative ou >=86400 : diagnostic de domaine et affichage absence invalide, source intacte. Nouvel edit part du zéro sûr. Fraction de seconde absente par choix du type seconds.
+Negative external value or >=86400: domain diagnostic and invalid absence display, source intact. A new edit starts from safe zero. Fractional seconds are absent by choice of the seconds type.
 
-Externe pendant buffer écrase buffer, même si changement provient d’une normalisation de Binding. Clipboard texte arbitraire et AM/PM ne sont pas acceptés dans v1 ; seuls digits committed sont edits.
+An external change during buffering overwrites the buffer, even if caused by Binding normalization. Arbitrary clipboard text and AM/PM are not accepted in v1; only committed digits are edits.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/time_input.hpp` et `src/time_input.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/time_input.hpp` and `src/time_input.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : Input/State/Focus/TextService existants. Value est optional<chrono::seconds>, jamais time_point ; helpers de segmentation restent dans le couple non template.
+Origin to extract or reuse: existing Input/State/Focus/TextService. Value is optional<chrono::seconds>, never time_point; segmentation helpers remain in the non-template pair.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, without an empty file or central widget switch. No Pugl, Skia, OS, or plugin SDK types belong in this API.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery is documentation only: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests required during implementation:
 
-- `time_input_segment_wrap` : 23→00 et 59→00 ne modifient pas les autres segments.
-- `time_input_digits` : 0/9/2/4 et 59/60 suivent exactement les règles de buffer.
-- `time_input_hidden_seconds` : modifier HH:MM conserve seconds cachées.
-- `time_input_absent_invalid` : absence et valeurs hors domaine ne se confondent pas avec minuit.
-- `time_input_external_focus` : externe et retrait du segment actif effacent buffer/focus correctement.
-- `time_input_throw_recover` : observer qui lève ne double pas edit et permet le digit suivant.
+- `time_input_segment_wrap`: 23→00 and 59→00 do not modify other segments.
+- `time_input_digits`: 0/9/2/4 and 59/60 follow buffer rules exactly.
+- `time_input_hidden_seconds`: modifying HH:MM preserves hidden seconds.
+- `time_input_absent_invalid`: absence and out-of-domain values are distinct from midnight.
+- `time_input_external_focus`: external changes and removal of the active segment clear buffer/focus correctly.
+- `time_input_throw_recover`: a throwing observer does not duplicate the edit and allows the next digit.
 
-Créer `examples/features/time_input.cpp` et la cible `nativeui_example_time_input`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/time_input.cpp` and the `nativeui_example_time_input` target, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery after the faults described above under ASan/UBSan where lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture/registration remains after unmounting, and the published API matches these contracts. Verification performed here: reading declarations and sources; no C++ or interactive tests executed.

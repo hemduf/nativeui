@@ -1,20 +1,20 @@
 # Accordion
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Sections de disclosure regroupées, avec navigation entre headers et politique d’ouverture. Pas d’Accordion NativeUI ; cible fondée sur [Collapsible](collapsible.md).
+Grouped disclosure sections with navigation between headers and an opening policy. NativeUI has no Accordion; the target is based on [Collapsible](collapsible.md).
 
-MyGo `ui/collapsible.go` : `Accordion`, `AccordionItem`, `accordionKeys`. Les sections sont indépendantes dans MyGo ; l’application ferme les autres pour une ouverture exclusive. NativeUI explicite cette policy dans le builder.
+MyGo `ui/collapsible.go`: `Accordion`, `AccordionItem`, `accordionKeys`. MyGo sections are independent; the application closes the others to open one exclusively. NativeUI makes this policy explicit in the builder.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 enum class AccordionMode { Multiple, Single };
@@ -33,74 +33,74 @@ Spec spec() &&;
 ```cpp
 ui::State<std::vector<std::string>> open_keys{{"general"}};
 auto panels = ui::Accordion{open_keys}.mode(ui::AccordionMode::Single)
-    .section("general","Général",ui::Label{"Options"})
-    .section("advanced","Avancé",ui::Label{"Réglages"});
+    .section("general","General",ui::Label{"Options"})
+    .section("advanced","Advanced",ui::Label{"Settings"});
 ```
 
-Defaults Multiple, Retain. Section clés string non vides uniques ; items restent modèles internes du même couple.
+Defaults: Multiple, Retain. Section keys are unique, non-empty strings; items remain internal models in the same header/source pair.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Open keys ordered selon section order, duplicates removed. Multiple permet plusieurs sections ; Single ouverture remplace la seule clé et fermeture permet zéro. Snapshot externe contenant plusieurs clés en Single : première section correspondante affichée, pas de rewrite silencieux. Nouvelle gesture publie un vecteur canonique. Unknown keys ignorées visuellement.
+Open keys are ordered according to section order, with duplicates removed. Multiple allows several sections; Single opening replaces the sole key, and closing permits zero open sections. An external snapshot containing several keys in Single displays the first matching section without a silent rewrite. A new gesture publishes a canonical vector. Unknown keys are ignored visually.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Up/Down déplacent focus entre headers enabled ; Home/End premiers/derniers. Enter/Space bascule section focusée. Tab accède aux contenus ouverts ; un seul arrêt roving pour l’ensemble des headers. Pointeur header copie Collapsible. Close d’un contenu focusé retourne au header, ouverture exclusive récupère focus de l’ancien contenu sans double notification.
+Up/Down move focus between enabled headers; Home/End move to the first/last. Enter/Space toggles the focused section. Tab accesses open content; a single roving focus stop covers all headers. Header pointer behavior matches Collapsible. Closing focused content returns focus to the header; exclusive opening recovers focus from the previous content without duplicate notification.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Colonne de headers/panels avec bordure groupée et séparateurs. Chaque section utilise son header et dimensions du contenu ouvert. Fermées hors allocation contenu. En single, publier l’ouverture/fermeture ensemble pour éviter une frame vide intermédiaire. Overflow de l’accordéon n’installe pas de scroll implicite.
+A column of headers/panels with a grouped border and separators. Each section uses its header and open-content dimensions. Closed content receives no allocation. In Single, publish opening/closing together to avoid an intermediate empty frame. Accordion overflow does not install implicit scrolling.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-AccordionStyle complète CollapsibleStyle : container radius/border, separator et padding. Focus ring inset pour ne pas être clippé par bordure. Invalidation de section n’oblige pas repeindre les sections sans changement. Animation indépendante mais controller d’ouverture commun ; reduced motion identique à Collapsible.
+AccordionStyle extends CollapsibleStyle with container radius/border, separator and padding. Inset the focus ring so the border does not clip it. Invalidating a section does not require repainting unchanged sections. Animations are independent but share an opening controller; reduced motion matches Collapsible.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Group avec nom éventuel, headers Custom/Button et état expanded. Expanded keys reflètent exactement la policy effective. Les descendants des panels closed ne sont pas des cibles accessibles. Un rôle Accordion serait une extension séparée ; pas de promesse native déjà livrée.
+Group with an optional name, Custom/Button headers and expanded state. Expanded keys reflect the exact effective policy. Closed-panel descendants are not accessible targets. An Accordion role would be a separate extension; no promise of already shipped native support.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Valider clés avant consommer Spec. Changement Single prépare vecteur complet, commit unique au Binding puis callback unique. Callback réentrant modifiant la liste ouverte gagne à la prochaine reconciliation. Section retirée sous capture/focus invalide son identity et libère animations ; ne pas accéder à un ancien index.
+Validate keys before consuming Spec. A Single change prepares the complete vector, commits once to Binding and invokes one callback. A reentrant callback changing the open list wins at the next reconciliation. Removing a section during capture/focus invalidates its identity and releases animations; do not access an old index.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Collapsible, Binding<vector<string>>, navigation focus/roving et style. Sections vides/title long, toutes disabled, keys unknown, duplicates de section invalid_argument, binding expired et reentrance. State externe vit assez longtemps ; aucune liste process-global des headers.
+Collapsible, Binding<vector<string>>, focus/roving navigation and style. Cover empty sections/long titles, all disabled, unknown keys, duplicate section keys causing invalid_argument, expired binding and reentrancy. External State must live long enough; no process-global header list.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/accordion.hpp` et `src/accordion.cpp`.
+Target: `include/nativeui/accordion.hpp` and `src/accordion.cpp`.
 
-accordion.hpp contient Section interne publique au besoin, policy/style et template section ; accordion.cpp porte mode, headers roving, normalisation, layout/input/paint. Réutiliser le noyau Collapsible sans créer un fichier par AccordionItem.
+accordion.hpp contains the internal Section, public if needed, policy/style and the section template; accordion.cpp contains mode, roving headers, normalization and layout/input/paint. Reuse the Collapsible core without creating a file for each AccordionItem.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `accordion_multiple_single` : policies et zéro section ouverte.
-- `accordion_external_noncanonical` : affichage déterministe sans writes cachés.
-- `accordion_header_roving` : Up/Down/Home/End, skip disabled.
-- `accordion_exclusive_focus` : fermer l’ancien panel sous focus.
-- `accordion_keys_validation` : duplicates refusées avant commit.
-- `accordion_reentrant_change` : callback at-most-once et état final stable.
-- `accordion_section_teardown` : timers/captures propres à l’instance.
+- `accordion_multiple_single`: policies and zero open sections.
+- `accordion_external_noncanonical`: deterministic display without hidden writes.
+- `accordion_header_roving`: Up/Down/Home/End, skipping disabled headers.
+- `accordion_exclusive_focus`: closing the previous panel while it has focus.
+- `accordion_keys_validation`: duplicates rejected before commit.
+- `accordion_reentrant_change`: at-most-once callback and stable final state.
+- `accordion_section_teardown`: timers/captures are per instance.
 
-Créer l’exemple public futur `examples/features/accordion.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/accordion.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

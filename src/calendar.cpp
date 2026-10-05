@@ -10,8 +10,8 @@ namespace {
 using Day = std::chrono::sys_days;
 using Date = Calendar::Value;
 constexpr std::array<const char *, 12> months{
-    "janvier", "février", "mars",      "avril",   "mai",      "juin",
-    "juillet", "août",    "septembre", "octobre", "novembre", "décembre"};
+    "January", "February", "March",      "April",   "May",      "June",
+    "July", "August",    "September", "October", "November", "December"};
 Day first_day() { return Day{std::chrono::year{1} / 1 / 1}; }
 Day last_day() { return Day{std::chrono::year{9999} / 12 / 31}; }
 float logical(double value) {
@@ -35,7 +35,7 @@ Day month_move(Day day, int direction) {
 }
 std::string day_name(Day day) {
   if (!detail::calendar_day_valid(day))
-    return "Date hors domaine";
+    return "Date out of range";
   const auto ymd = std::chrono::year_month_day{day};
   return std::to_string(unsigned(ymd.day())) + " " +
          months[unsigned(ymd.month()) - 1] + " " +
@@ -233,7 +233,7 @@ public:
     info.read_only = effective_read_only() || !state_->source.valid();
     info.selected = state_->seen && *state_->seen == day_;
     if (state_->cursor == day_)
-      info.description = "Jour du curseur";
+      info.description = "Cursor day";
     if (info.enabled && !info.read_only)
       info.actions = {SemanticAction::Activate, SemanticAction::Select};
     return info;
@@ -308,7 +308,7 @@ public:
           {keys[direction < 0 ? 0 : 1],
            Spec{[action, direction, style] {
                   return std::make_unique<detail::InputAction>(
-                      direction < 0 ? "Mois précédent" : "Mois suivant",
+                      direction < 0 ? "Previous month" : "Next month",
                       direction < 0 ? "‹" : "›", style, action, true, true);
                 },
                 {}}});
@@ -461,10 +461,10 @@ public:
     info.focusable = true;
     info.focused = focused_;
     info.read_only = effective_read_only() || !state_->source.valid();
-    info.description = "Curseur : " + day_name(state_->cursor);
+    info.description = "Cursor: " + day_name(state_->cursor);
     if (state_->seen && (!detail::calendar_day_valid(*state_->seen) ||
                          !state_->selectable(*state_->seen)))
-      info.description += " ; sélection indisponible";
+      info.description += "; selection unavailable";
     return info;
   }
   void paint(PaintContext &context) const override {
@@ -482,8 +482,8 @@ public:
             layout.previous.y + layout.previous.h * .5f},
            title, logical(s.text_size),
            s.text.value_or(current_theme().palette.text), TextAlign::Center);
-    constexpr std::array<const char *, 7> weekdays{"lun", "mar", "mer", "jeu",
-                                                   "ven", "sam", "dim"};
+    constexpr std::array<const char *, 7> weekdays{"Mon", "Tue", "Wed", "Thu",
+                                                   "Fri", "Sat", "Sun"};
     for (std::size_t index = 0; index < 7; ++index)
       p.text({layout.grid.x +
                   (static_cast<float>(index) + .5f) * layout.cell_width +

@@ -1,20 +1,20 @@
 # Field
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Field associe label, contrôle, aide et message d’erreur ; en Form son label participe à l’alignement commun. NativeUI ne possède pas de Field actuel ; composer Label/TextInput ne relie pas automatiquement leurs sémantiques.
+Field associates a label, control, help text and error message; within Form, its label participates in shared alignment. NativeUI currently has no Field; composing Label/TextInput does not automatically link their semantics.
 
-MyGo `ui/form.go` : `Field`, `fieldControl`, `focusIn`, `namesItself`, `Description`, `Error`. La cible reprend le premier contrôle éligible par défaut, avec possibilité de cible explicite pour les compositions ambiguës.
+MyGo `ui/form.go`: `Field`, `fieldControl`, `focusIn`, `namesItself`, `Description`, `Error`. The target uses the first eligible control by default, with an explicit target option for ambiguous compositions.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 template<class Child> Field(std::string label, Child&& control);
@@ -28,81 +28,81 @@ Field&& style(FieldStyle) &&;
 Spec spec() &&;
 ```
 
-Surcharges State<string>& pour description/error délèguent au Binding. Exemple futur :
+State<string>& overloads for description/error delegate to Binding. Future example:
 
 ```cpp
 ui::State<std::string> email{""};
 ui::State<std::string> error{""};
 auto field = ui::Field{"Email",ui::TextInput{"",email}}
-    .description("Pour le reçu").error(error.binding()).required();
+    .description("For the receipt").error(error.binding()).required();
 ```
 
-`target` nomme une clé retenue applicative stable, jamais une adresse ou index ; en son absence sélectionner le premier descendant focusable éligible ou groupe de contrôle reconnu.
+`target` names a stable application-defined retained key, never an address or index; when absent, select the first eligible focusable descendant or recognized control group.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Field possède label/Spec et chaînes value-form ; Binding forms restent observées. Il ne possède ni valeur du contrôle ni règle de validation métier. Required est une indication sémantique/visuelle, pas un validateur. Error vide = absence ; changement de string invalide métriques et description seulement si effectif changé.
+Field owns the label/Spec and value-form strings; Binding forms remain observed. It owns neither the control value nor a business validation rule. Required is a semantic/visual indication rather than a validator. An empty Error means none; a string change invalidates metrics and description only when the effective value changes.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Click label focus la cible éligible. Pour checkbox/toggle/radio, déléguer Activate/Toggle/Select à la cible uniquement quand l’action est annoncée et permise ; ne pas synthétiser des events pointeur. Aucun activation du TextInput en dehors du focus. Pas d’arrêt Tab du label décoratif. Échap/Enter/molette restent au contrôle. Disabled/read-only de cible respectés au moment de la demande.
+Clicking the label focuses the eligible target. For checkbox/toggle/radio, delegate Activate/Toggle/Select to the target only when the action is advertised and permitted; do not synthesize pointer events. No TextInput activation beyond focus. No Tab stop for a decorative label. Escape/Enter/wheel input remains with the control. Respect the target’s disabled/read-only state at request time.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Hors Form, stack label/control/descriptions ; en Form, label à gauche selon contexte et contrôle à droite. Baseline hook cible du Form ; sinon première ligne label centrée sur la hauteur du contrôle. Description et erreur sous contrôle, pas sous la largeur combinée. Long labels/errors wrap selon width disponible et n’écrasent pas les minima du contrôle.
+Outside Form, stack the label/control/descriptions; within Form, place the label on the left according to the context and the control on the right. Use Form’s target baseline hook; otherwise center the label’s first line against the control height. Description and error sit below the control rather than the combined width. Long labels/errors wrap to the available width and do not override control minima.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-FieldStyle contient gaps, label/error/help typographies et couleurs. Erreur s’exprime par texte et indication visuelle, pas rouge seul ; décor d’erreur n’écrase pas les styles propres du widget. Disparition d’erreur demande layout et effacement ancien texte. Pas de blink ou alerte globale implicite.
+FieldStyle contains gaps and label/error/help typography and colors. An error is expressed through text and a visual indication rather than red alone; error decoration does not override the widget’s own styles. Removing an error requests layout and clearing the old text. No implicit blinking or global alert.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Nom composable : si contrôle possède déjà name explicite, le garder et donner label au groupe ; sinon fournir le label comme name. Ajouter aide+erreur possédées à description sans remplacer description explicite. Nécessite enrichissement scoped de sémantique dans Tree ; aucune relation labelled-by native actuelle revendiquée. Required/error riche peut nécessiter champs neutres futurs ; fallback description texte.
+Composable name: if the control already has an explicit name, preserve it and give the label to the group; otherwise provide the label as the name. Append owned help+error text to the description without replacing an explicit description. Requires scoped semantic enrichment in Tree; no current native labelled-by relationship is claimed. Rich required/error semantics may require future neutral fields; fall back to a text description.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Résoudre target par identité stable au moment du click, pas conserver Component*. Cible retirée/hidden/disabled : label click no-op déterministe, prochain layout peut résoudre une autre cible par défaut. La disparition d’un Binding aide/erreur devient texte absent sans UAF. Subscription relâchée avant teardown.
+Resolve target through stable identity at click time rather than retaining Component*. Target removed/hidden/disabled: label clicking is a deterministic no-op; the next layout may resolve another default target. An expired help/error Binding becomes absent text without UAF. Release the subscription before teardown.
 
-Comme Binding ne notifie pas la destruction de State, appliquer la politique « aide/erreur absente après expiration » à la prochaine lecture sûre de measure/input/paint, puis invalider si l’effet affiché change. Ne jamais déréférencer State ou promettre une notification instantanée de destruction.
+Because Binding does not notify State destruction, apply the “help/error absent after expiration” policy on the next safe measure/input/paint read, then invalidate if the displayed effect changes. Never dereference State or promise an immediate destruction notification.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[Form](form.md), [Fieldset](fieldset.md), focus/action sémantique UI-thread et overrides scoped cibles. Field vide ou sans focusable reste présentation légale ; target explicite manquant n’active pas un autre contrôle par surprise. Aucun parsing/validation automatique de champ.
+[Form](form.md), [Fieldset](fieldset.md), UI-thread focus/semantic actions and target scoped overrides. An empty Field or one without a focusable child remains legal presentation; a missing explicit target does not unexpectedly activate another control. No automatic field parsing/validation.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/field.hpp` et `src/field.cpp`.
+Target: `include/nativeui/field.hpp` and `src/field.cpp`.
 
-field.hpp déclare style/builder/overloads texte ; field.cpp porte résolution de cible, assistance sémantique, baseline/layout/input label et paint des textes. Field reste composant distinct de Form et Fieldset ; pas d’implémentation entièrement inline dans un helper.
+field.hpp declares style/builder/text overloads; field.cpp contains target resolution, semantic assistance, baseline/layout/label input and text paint. Field remains a separate component from Form and Fieldset; no entirely inline implementation in a helper.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `field_label_focus` : label cible premier contrôle ou clé explicite.
-- `field_checkbox_label_action` : une action permise, zéro si disabled/read-only.
-- `field_existing_name` : préserver name explicite et composer description.
-- `field_error_wrap` : erreur longue, vide puis disparition sans artefact.
-- `field_target_removed` : target absent no-op et aucune adresse stale.
-- `field_binding_expired` : aides safe après expiration.
-- `field_reentrant_action_throw` : pas de seconde activation automatique.
+- `field_label_focus`: the label targets the first control or explicit key.
+- `field_checkbox_label_action`: one permitted action, zero when disabled/read-only.
+- `field_existing_name`: preserve the explicit name and compose the description.
+- `field_error_wrap`: a long error, empty error and removal without artifacts.
+- `field_target_removed`: absent target is a no-op, with no stale address.
+- `field_binding_expired`: help text remains safe after expiration.
+- `field_reentrant_action_throw`: no automatic second activation.
 
-Créer l’exemple public futur `examples/features/field.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/field.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

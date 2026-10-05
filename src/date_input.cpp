@@ -253,7 +253,7 @@ public:
     };
     return {Spec{[action, style = style_.clear] {
                    return std::make_unique<detail::InputAction>(
-                       "Effacer la date", "×", style, action, true, false);
+                       "Clear date", "×", style, action, true, false);
                  },
                  {}}};
   }
@@ -273,7 +273,7 @@ public:
         (!detail::calendar_day_valid(*state_->seen) ||
          (state_->config.minimum && *state_->seen < *state_->config.minimum) ||
          (state_->config.maximum && *state_->seen > *state_->config.maximum)))
-      info.description = "Date indisponible";
+      info.description = "Date unavailable";
     if (info.enabled)
       info.actions = {SemanticAction::Focus};
     if (info.enabled && !info.read_only)

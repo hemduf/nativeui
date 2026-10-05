@@ -42,9 +42,9 @@ std::string meter_level_description(float value,
     return {};
   switch (meter_level(value, levels)) {
   case 1:
-    return "avertissement";
+    return "warning";
   case 2:
-    return "critique";
+    return "critical";
   default:
     return "normal";
   }

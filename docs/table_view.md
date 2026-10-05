@@ -1,20 +1,20 @@
 # TableView<Key>
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Table de lignes virtualisées et colonnes redimensionnables/réordonnables, avec demande de tri. Aucun TableView générique dans NativeUI ; [ListView](list_view.md) et [ScrollView](scroll_view.md) sont fondations.
+A table of virtualized rows and resizable/reorderable columns, with sort requests. No generic TableView in NativeUI; [ListView](list_view.md) and [ScrollView](scroll_view.md) are foundations.
 
-MyGo `ui/table.go` : `TableColumn`, `SortOrder`, `TableLayout`, `Table`, `tableHeader`, `tableFit`. Autofit mesure header/cells matérialisées ; l’application trie les rows sur demande. La cible rend persistable le layout par IDs stables et ne trie pas des objets métier opaques.
+MyGo `ui/table.go`: `TableColumn`, `SortOrder`, `TableLayout`, `Table`, `tableHeader`, `tableFit`. Autofit measures materialized header/cells; the application sorts rows on request. The target makes layout persistable through stable IDs and does not sort opaque business objects.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 using ColumnId=std::string;
@@ -58,94 +58,94 @@ TableView&& style(TableViewStyle) &&;
 Spec spec() &&;
 ```
 
-State overloads de layout/sort délèguent aux Binding. Sans binding layout/sort, layout interne par instance ; headers tri non activables sans sort binding ou on_sort_request. Exemple futur :
+State overloads of layout/sort delegate to Binding. Without layout/sort bindings, per-instance internal layout; sort headers are not activatable without a sort binding or on_sort_request. Future example:
 
 ```cpp
 ui::State<std::vector<ui::CollectionItem<int>>> rows{{{1,"Ada"},{2,"Lin"}}};
 ui::State<ui::SelectionSnapshot<int>> selected{{}};
 ui::Selection<int> selection{selected};
 auto table = ui::TableView<int>{rows,selection}
-    .columns({ui::TableColumn{.id="name",.title="Nom",.sortable=true}})
+    .columns({ui::TableColumn{.id="name",.title="Name",.sortable=true}})
     .cell([](const auto& row,const auto&){return std::move(ui::Label{row.label}).spec();});
 ```
 
-TableColumn/TableLayout/SortOrder partagés dans ce couple, réutilisés par OutlineTableView ; Selection/CollectionItem/ListRowHeights définis dans [ListView](list_view.md). Defaults sélection Single, hauteurs variables estimées 24 DIP, overscan deux.
+TableColumn/TableLayout/SortOrder are shared in this pair and reused by OutlineTableView; Selection/CollectionItem/ListRowHeights are defined in [ListView](list_view.md). Defaults: Single selection, variable heights estimated at 24 DIP, overscan two.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-- Rows Binding copié, un snapshot cohérent par génération ; clés uniques.
-- Layout order mentionne des ColumnId ; inconnus ignorés, nouveaux après les connus dans ordre de déclaration.
-- Fixed colonnes restent à leur place et largeur déclarée, sans resize/reorder utilisateur.
-- Width map utilisateur sur colonnes non fixed seulement, bornée min/max ; width=0 distribue le reste de largeur disponible.
-- selected/active/anchor suivent les clés rows, pas indices ; ancien snapshot de selection reste lisible si binding invalid, writes interdits.
-- Click sort : Ascending initial puis inverse ; set sort effectif + callback demande, dataset trié explicitement par l’application.
-- Updates externes de layout/sort/rows ne déclenchent pas leurs callbacks de geste.
-- Aucune sérialisation automatique sur disque : application sauvegarde son TableLayout.
+- Copied rows Binding, one consistent snapshot per generation; unique keys.
+- Layout order names ColumnId values; unknown IDs ignored, new ones follow known ones in declaration order.
+- Fixed columns retain their declared position and width, without user resize/reorder.
+- User width map applies only to nonfixed columns, bounded by min/max; width=0 distributes remaining available width.
+- selected/active/anchor follow row keys, not indices; an old selection snapshot remains readable if the binding is invalid, but writes are forbidden.
+- Sort click: initially Ascending, then reverse; set effective sort + request callback, dataset explicitly sorted by the application.
+- External layout/sort/row updates do not trigger their gesture callbacks.
+- No automatic disk serialization: the application saves its TableLayout.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Body reprend selection/navigation/typeahead/activation ListView ; child cell qui consomme event a priorité. Header : bord 6 DIP arme resize, threshold 4 DIP avant drag de déplacement ; les opérations ne déclenchent pas sort. Up resize publie layout final, Échap/cancel revient au snapshot initial si pas d’external update. Double-click bord auto-fit : max header+cell widths actuellement mesurés ; autofit_width optionnel fournit une mesure applicative tous rows sans construire tout le dataset. Header sort au click release et Enter/Space sous focus. Molette horizontale synchronise header/body ; vertical ne déplace pas header. Colonnes fixed peuvent encore trier si sortable.
+The body follows ListView selection/navigation/typeahead/activation; a child cell consuming the event takes priority. Header: a 6 DIP edge arms resize, 4 DIP threshold before movement dragging; these operations do not trigger sort. Resize Up publishes final layout; Escape/cancel returns to the initial snapshot if there was no external update. Double-click on the edge autofits: maximum of currently measured header+cell widths; optional autofit_width supplies an application measurement over all rows without constructing the entire dataset. Header sorts on click release and focused Enter/Space. Horizontal wheel synchronizes header/body; vertical does not move the header. Fixed columns can still sort if sortable.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Header fixe Y, translation X identique au contenu body, clip commun. Row hauteur = max cells+padding et min header style. Section header row traverse les colonnes et reçoit cell factory avec première ColumnId seulement. Largeurs effectives partagées au pixel logique près entre header/cells. Déficit crée scroll horizontal, pas réduction sous minima. Width change invalide height cache/row wrapping et garde anchor key/inset. Pas de full materialisation pour autofit default ; ordre et widths préparés avant publication.
+Fixed header Y, X translation identical to body content, common clip. Row height = maximum cells+padding and minimum header style. A section-header row spans columns and receives the cell factory with only the first ColumnId. Effective widths are shared precisely in logical pixels between header/cells. A deficit creates horizontal scrolling rather than shrinking below minima. Width change invalidates height cache/row wrapping and retains anchor key/inset. No full materialization for default autofit; prepare order and widths before publication.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-TableViewStyle : header/body typography, padding, separator, sort marker, row style, insertion marker et focus rings. Colonne active ou sélection row distinctes. Resize marque guide ; reorder marque insertion boundary. Paint/layout classés : widths/order demandent layout ; sort marker paint sauf changement de label metrics. Style issu de Theme resolved, slots nouveaux explicites.
+TableViewStyle: header/body typography, padding, separator, sort marker, row style, insertion marker, and focus rings. Active column and row selection are distinct. Resize shows a guide; reorder shows an insertion boundary. Paint/layout classification: widths/order require layout; sort marker requires paint unless label metrics change. Style comes from resolved Theme, with explicit new slots.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Table/Row/Cell/ColumnHeader n’existent pas dans SemanticRole actuel. Cible Group/Custom avec labels/range/actions permises en attendant une extension neutre séparée. Full logical rows et virtual item snapshots data-only nécessaires, derived de l’extension ListView ; aucun appel cell factory depuis bridge. Columns conservent stable IDs et name/order dans le snapshot, selection/value cohérents par génération.
+Table/Row/Cell/ColumnHeader do not exist in current SemanticRole. Target Group/Custom with labels/ranges/allowed actions pending a separate neutral extension. Full logical rows and data-only virtual item snapshots are needed, derived from the ListView extension; no cell factory calls from a bridge. Columns retain stable IDs and name/order in the snapshot, with consistent selection/value per generation.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Resize/reorder state contient ColumnId+generation, pas index ou pointer header. Colonne retirée/external layout modifié pendant drag : cancel capture, ne rollback pas externe. Callback autofit qui lève conserve widths précédentes et disarme interaction. Callback sort/layout qui lève n’est pas réessayé ; dirty committed layout reste durable. Remount reçoit bindings/layout actuels et recrée subscriptions locales.
+Resize/reorder state contains ColumnId+generation, not a header index or pointer. A removed column/external layout changed during drag: cancel capture without rolling back the external value. A throwing autofit callback retains previous widths and disarms interaction. A throwing sort/layout callback is not retried; dirty committed layout remains durable. Remount receives current bindings/layout and recreates local subscriptions.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[ListView](list_view.md) variable heights, [ScrollView](scroll_view.md), Shared Selection et metadata, TableColumn types de ce couple. Duplicate id/empty id, invalid width/min/max/non fini : invalid_argument lors config/validation avant commit. External malformed layout : ignorer inconnus, garder valeurs valides bornées et diagnostics ; pas write automatique. Aucun column = table vide de cells, aucune factory ; rows empty garde headers et offset zero.
+[ListView](list_view.md) variable heights, [ScrollView](scroll_view.md), shared Selection and metadata, and this pair's TableColumn types. Duplicate/empty ID, invalid width/min/max/nonfinite: invalid_argument during configuration/validation before commit. Malformed external layout: ignore unknowns, retain bounded valid values and diagnostics; no automatic write. No columns = table with no cells, no factory; empty rows retain headers and zero offset.
 
-Les touches `Key::PageUp` et `Key::PageDown` sont des additions cibles en fin de l’enum portable actuel, avec traduction plateforme et tests. Le source actuel ne les définit pas. Typeahead utilise les InputEvent de texte commité ; aucun support natif complet IME n’est supposé.
+`Key::PageUp` and `Key::PageDown` are target additions at the end of the current portable enum, with platform translation and tests. The current source does not define them. Typeahead uses committed-text InputEvent objects; no complete native IME support is assumed.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/table_view.hpp` et `src/table_view.cpp`.
+Target: `include/nativeui/table_view.hpp` and `src/table_view.cpp`.
 
-table_view.hpp déclare modèles columns/style/public builder ; templates Key adaptent metadata/factory au noyau non template table_view.cpp. Le .cpp porte headers, column transactions, synchronized scrolling, measure/layout/paint/input, pas un switch générique de widgets. Types de colonnes réutilisés par include, jamais dupliqués dans OutlineTableView.
+table_view.hpp declares column models/style/public builder; Key templates adapt metadata/factory to the non-template table_view.cpp core. The .cpp contains headers, column transactions, synchronized scrolling, measure/layout/paint/input, rather than a generic widget switch. Column types are reused through includes and never duplicated in OutlineTableView.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `table_column_ids_layout` : order/widths restaurés, unknown/new/fixed.
-- `table_resize_bounds_cancel` : min/max, callback counts, cancel sans externe rollback.
-- `table_header_gesture_priority` : resize/reorder ne déclenchent pas sort.
-- `table_autofit_materialized` : header+visible cells mesurés, aucune factory hors viewport.
-- `table_autofit_provider_fault` : provider throw conserve ancien layout.
-- `table_sort_request` : asc/desc, callback unique, app reorder keys stable.
-- `table_header_body_scroll` : mêmes X/bounds, header reste Y fixe.
-- `table_variable_row_resize` : wrap change anchor sans saut.
-- `table_column_removed_drag` : id stale/capture récupérés.
-- `table_empty_invalid_models` : zero columns/rows et validation atomique.
-- `table_virtual_semantics` : snapshots sans cell callbacks.
+- `table_column_ids_layout`: restored order/widths, unknown/new/fixed columns.
+- `table_resize_bounds_cancel`: min/max, callback counts, cancel without external rollback.
+- `table_header_gesture_priority`: resize/reorder do not trigger sort.
+- `table_autofit_materialized`: header+visible cells measured, no factory outside viewport.
+- `table_autofit_provider_fault`: a throwing provider retains old layout.
+- `table_sort_request`: asc/desc, single callback, application reorders stable keys.
+- `table_header_body_scroll`: same X/bounds, header retains fixed Y.
+- `table_variable_row_resize`: wrapping changes anchor without a jump.
+- `table_column_removed_drag`: stale ID/capture recovered.
+- `table_empty_invalid_models`: zero columns/rows and atomic validation.
+- `table_virtual_semantics`: snapshots without cell callbacks.
 
-Créer l’exemple public futur `examples/features/table_view.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/table_view.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

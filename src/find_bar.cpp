@@ -36,13 +36,13 @@ struct FindState : std::enable_shared_from_this<FindState> {
     std::string next_status, next_description;
     if (!query.get().empty()) {
       if (count == 0)
-        next_status = "Aucun résultat";
+        next_status = "No results";
       else {
         const auto effective = index ? std::min(*index, count - 1) : 0;
         next_status =
-            std::to_string(effective + 1) + " sur " + std::to_string(count);
+            std::to_string(effective + 1) + " of " + std::to_string(count);
         if (!index || *index >= count)
-          next_description = "Sélection externe absente ou invalide";
+          next_description = "External selection missing or invalid";
       }
     }
     const bool next_open = source_open.valid() && source_open.get();
@@ -146,7 +146,7 @@ public:
       : state_(std::move(state)), style_(std::move(style)) {}
   Size measure(const std::vector<ChildMetrics> &) const override {
     return {style_.status_width,
-            TextService::measure("Aucun résultat", style_.status).height};
+            TextService::measure("No results", style_.status).height};
   }
   SemanticInfo semantics() const override {
     SemanticInfo info;
@@ -364,7 +364,7 @@ public:
     const auto style = style_;
     const std::weak_ptr<FindState> weak = state;
     auto search =
-        detail::search_field_spec(label_, state->query, "Rechercher", 0, {},
+        detail::search_field_spec(label_, state->query, "Search", 0, {},
                                   style.search_field, state->bridge);
     Spec status{
         [state, style] { return std::make_unique<FindStatus>(state, style); },
@@ -395,9 +395,9 @@ public:
         button_style.base.minimum_width = 32.0f;
       if (!button_style.base.horizontal_padding)
         button_style.base.horizontal_padding = 6.0f;
-      const std::string name = direction < 0   ? "Précédent"
-                               : direction > 0 ? "Suivant"
-                                               : "Terminer";
+      const std::string name = direction < 0   ? "Previous"
+                               : direction > 0 ? "Next"
+                                               : "Close";
       const std::string glyph = direction < 0 ? "‹" : direction > 0 ? "›" : "×";
       result.push_back({[name, glyph, button_style, action, direction] {
                           return std::make_unique<detail::InputAction>(

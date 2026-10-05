@@ -1,26 +1,26 @@
 # EditableText
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Afficher un texte puis l’éditer sur demande, comme un nom de fichier. Le draft est privé jusqu’à
-acceptation ; Escape restaure l’affichage de dernière valeur applicative.
+Display text, then edit it on request, such as a filename. The draft is private until acceptance;
+Escape restores the display of the latest application value.
 
-NativeUI fournit Label/TextInput et collections retenues, mais aucun EditableText. Intégration aux
-lignes utilise clés stables et commandes explicites, sans retrouver un Node par label.
+NativeUI provides Label/TextInput and retained collections, but no EditableText. Row integration
+uses stable keys and explicit commands without finding a Node by label.
 
-MyGo : `ui/editable.go`, `EditableText`, `editState` et délai renameDelay=500 ms. Standalone double
-clic/Enter ; dans liste, demande F2/Enter ou clic lent sur ligne choisie, Enter/blur commit et
-Escape annule.
+MyGo: `ui/editable.go`, `EditableText`, `editState`, and renameDelay=500 ms. Standalone uses
+double-click/Enter; in a list, request through F2/Enter or a slow click on the selected row;
+Enter/blur commit and Escape cancels.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class EditableTextController {
@@ -43,200 +43,192 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<std::string> file{"Preset.oreto"};
-auto rename = ui::EditableText("Nom du preset", file).select_stem().spec();
+auto rename = ui::EditableText("Preset name", file).select_stem().spec();
 ```
 
-Controller facultatif possédé via shared_ptr, lié à une seule instance montée ; réemploi simultané
-rejeté. Sans controller, le widget en possède un privé. begin/accept/cancel sont des demandes UI
-différées au checkpoint sûr ; editing indique phase commise.
+The optional controller is owned through shared_ptr and bound to one mounted instance; simultaneous
+reuse is rejected. Without a controller, the widget owns a private one. begin/accept/cancel are UI
+requests deferred to a safe checkpoint; editing indicates the committed phase.
 
-Defaults : select_stem=false (texte générique), validator absent, label utilisé comme nom
-accessible. select_stem(true) sélectionne avant dernier point non initial, comme MyGo pour fichiers.
+Defaults: select_stem=false (generic text), no validator, label used as the accessible name.
+select_stem(true) selects before the last noninitial dot, as MyGo does for files.
 
-Validator retourne nullopt si valide, sinon message possédé. EditableTextStyle contient TextStyle
-lecture, TextInputStyle édition, et message invalid. Aucun composant rename distinct.
+Validator returns nullopt for valid input, otherwise an owned message. EditableTextStyle contains
+reading TextStyle, editing TextInputStyle, and an invalid message. No separate rename component.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<string> est texte validé ; draft, editing, just_started et error sont locaux. begin snapshot
-current value et demande focus/sélection ; frappe ne set pas la valeur.
+Binding<string> is validated text; draft, editing, just_started, and error are local. begin snapshots
+the current value and requests focus/selection; typing does not set the value.
 
-Accept valide draft et publie seulement s’il diffère ; Cancel abandonne draft et montre valeur
-courante sans set. Une valeur externe pendant editing gagne : remplacer draft/baseline et conserver
-ou réappliquer sélection stem.
+Accept validates the draft and publishes only if it differs; Cancel discards the draft and shows
+the current value without set. An external value while editing wins: replace draft/baseline and
+preserve or reapply stem selection.
 
-Enter validation invalid maintient édition/error ; blur invalid annule draft et revient lecture sans
-voler le focus. Blur valid commit mais ne restaure pas focus à l’éditeur ; validation n’est jamais
-appelée en destruction.
+Invalid Enter validation retains editing/error; invalid blur cancels the draft and returns to
+reading without stealing focus. Valid blur commits but does not restore editor focus; validation
+is never called during destruction.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Standalone : double clic ou Enter passe en édition ; simple clic donne focus. En édition Enter
-accept, Escape cancel, Tab/blur accept valide puis poursuit focus.
+Standalone: double-click or Enter starts editing; a single click provides focus. During editing,
+Enter accepts, Escape cancels, and valid Tab/blur accept before continuing focus navigation.
 
-Dans collection : controller begin depuis commande sur clé choisie ; intégration permet clic lent
-500 ms sur texte déjà choisi, annulé par deuxième clic/doubleclic, sélection différente, scroll ou
-retrait.
+In a collection: controller begin from a command on the selected key; integration allows a slow
+500 ms click on already-selected text, canceled by a second click/double-click, different selection,
+scrolling, or removal.
 
-F2 est une extension input ciblée : Key ne le contient pas actuellement ; l’ajouter en fin enum et
-traduire plateforme, sans changer valeurs préexistantes. La collection appelle controller begin avec
-son propre ID de ligne.
+F2 is a targeted input extension: Key does not currently contain it; append it to the enum and
+translate it in the platform layer without changing existing values. The collection calls
+controller begin with its own row ID.
 
-Au départ select_stem choisit UTF-8 avant dernier “.” si non initial ; fichier sans suffixe
-sélectionne tout. Édition clipboard/selection suit TextInput, mais Enter/Escape/blur politique
-locale remplace snapshot restore.
+Initially select_stem selects UTF-8 before the last “.” if it is not initial; a file without a suffix
+selects all. Clipboard/selection editing follows TextInput, but the local Enter/Escape/blur policy
+replaces snapshot restoration.
 
-ReadOnly bloque begin/accept mutation tout en montrant texte ; Disabled bloque focus. PointerCancel
-annule déclenchement lent. Molette n’édite pas et annule timer de rename si scroll réel du parent.
+ReadOnly blocks begin/accept mutation while showing text; Disabled blocks focus. PointerCancel
+cancels the slow trigger. The wheel does not edit and cancels the rename timer on actual parent scroll.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-En lecture, taille du texte sous contraintes parent ; en édition, éditeur remplace visuellement le
-texte dans la même aire avec bordure/padding compensés, sans déplacer soudain la ligne.
+While reading, text size follows parent constraints; while editing, the editor visually replaces
+text in the same area with compensated border/padding, without suddenly moving the row.
 
-Long draft utilise scroll horizontal TextInput ; la largeur de la cellule collection prime sur
-longueur du nouveau nom. Hauteur minimum commune aux deux phases.
+A long draft uses TextInput horizontal scrolling; the collection cell width takes precedence over
+the new name's length. Common minimum height for both phases.
 
-Erreur se place dans une zone réservée/description, sans agrandir arbitrairement toutes les lignes
-d’une table. Les coordonnées logiques de la clé éditée sont recalculées au checkpoint.
+The error sits in a reserved area/description without arbitrarily enlarging every row of a table.
+The edited key's logical coordinates are recalculated at the checkpoint.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Lecture TextStyle ; édition border accent et caret/selection. Ring visible sur texte focusé en
-lecture, puis sur éditeur en édition, jamais deux focus visibles.
+Reading TextStyle; accent border and caret/selection while editing. The ring is visible on focused
+text while reading, then on the editor while editing, never two visible focuses.
 
-Passage phase invalide layout si la hauteur effective diffère, sinon paint/structure ; nouveau nom
-accepté remesure texte. Timer lent arrête demande frames dès annulation.
+Phase changes invalidate layout if effective height differs, otherwise paint/structure; an accepted
+new name remeasures text. The slow timer stops requesting frames as soon as canceled.
 
-Validator et actions ne sont pas appelés dans paint ; error snapshot possédé. Le parent ne remount
-pas toute la table sur chaque frappe du draft.
+Validator and actions are not called during paint; the error snapshot is owned. The parent does not
+remount the entire table on every draft keystroke.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible lecture : Text, focusable et action Activate “Modifier” quand mutable ; phase édition
-TextInput et text_value draft. Le nom reste le label, pas uniquement le nom de fichier.
+Reading target: Text, focusable with an Activate “Edit” action when mutable; editing phase uses
+TextInput and draft text_value. The name remains the label, rather than only the filename.
 
-Annonce de phase/error via snapshot description backend-neutre. Le controller n’est pas un nœud
-sémantique ; aucun pointeur de collection conservé par un pont.
+Announce phase/error through a backend-neutral description snapshot. The controller is not a
+semantic node; no bridge retains a collection pointer.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Controller garde faible token de propriétaire et identité monotone ; commande après démontage
-devient no-op, ne garde pas le widget vivant.
+The controller holds a weak owner token and monotonic identity; a command after unmounting becomes
+a no-op and does not keep the widget alive.
 
-Avant validator, prendre draft/callback snapshot sans this emprunté survivant à appel réentrant ; si
-generation change ou widget retiré, le résultat est ignoré. Exception de validator garde draft
-editing, flags restaurés, prochaine accept possible.
+Before validator, take a draft/callback snapshot with no borrowed this surviving a reentrant call;
+if the generation changes or the widget is removed, ignore the result. A validator exception retains
+the editing draft with flags restored, allowing the next accept.
 
-Après validation réussie, phase lecture/focus policy sont cohérentes avant Binding.set ; observer
-peut retirer la ligne. Destruction ne commit pas le draft et ne rejoue aucune validation.
+After successful validation, reading phase/focus policy are consistent before Binding.set; an
+observer may remove the row. Destruction neither commits the draft nor replays validation.
 
-Rejet d’enqueue du controller conserve une demande durable pour le checkpoint du propriétaire, sans
-exécution synchrone risquée. Controller réattaché à un remplaçant ne reprend pas demandes anciennes.
+Rejected controller enqueue retains a durable request for the owner's checkpoint without risky
+synchronous execution. A controller reattached to a replacement does not resume old requests.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [label](label.md), [text_input](text_input.md), Focus/Dispatcher et collection keyed
-([list_view](list_view.md), [table_view](table_view.md)). Intégration n’importe pas Router MyGo.
+Dependencies: [Label](label.md), [TextInput](text_input.md), Focus/Dispatcher, and keyed collections
+([ListView](list_view.md), [TableView](table_view.md)). Integration does not import MyGo Router.
 
-Les demandes du controller nécessitent le Dispatcher du propriétaire actif pour exécuter
-begin/accept/cancel. Sans Dispatcher, elles restent pending et peuvent être postées lors d’une
-activation suivante qui fournit cette capacité ; aucun fallback synchrone n’est permis. Un post
-rejeté conserve la demande jusqu’au prochain checkpoint retenu, qui réessaie seulement l’enqueue.
-La désactivation annule les demandes acceptées de l’ancienne activation ; elles ne peuvent pas
-s’exécuter sur un nouveau propriétaire Dispatcher.
+Controller requests require the active owner's Dispatcher to execute begin/accept/cancel. Without a
+Dispatcher, they remain pending and may be posted on a subsequent activation that provides this
+capability; no synchronous fallback is allowed. A rejected post retains the request until the next
+retained checkpoint, which retries only enqueue. Deactivation cancels accepted requests from the
+old activation; they cannot execute on a new Dispatcher owner.
 
-Binding invalid coupe toutes demandes et reste lecture dernier snapshot ; nom vide autorisé si
-validator le permet. Points initiaux “.profile”, plusieurs extensions et UTF-8 ne doivent pas casser
-sélection stem.
+An invalid Binding stops all requests and remains in reading mode with the last snapshot; an empty
+name is allowed if validator permits it. Initial dots in “.profile”, multiple extensions, and UTF-8
+must not break stem selection.
 
-Ligne retirée/réordonnée pendant timer : rechercher key stable et génération, annuler si différente.
-Doubleclic reste action submit de la collection quand intégrée : ne lancer ni rename ni deux
+A row removed/reordered during the timer: look up stable key and generation, cancel if different.
+Double-click remains the collection's submit action when integrated: start neither rename nor two
 callbacks.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/editable_text.hpp` et `src/editable_text.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/editable_text.hpp` and `src/editable_text.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-EditableTextController, Validator et EditableTextStyle sont décrits/déclarés dans le même header ;
-editable_text.cpp possède phases, timer, commandes, validation et noyaux lecture/édition.
+EditableTextController, Validator, and EditableTextStyle are described/declared in the same header;
+editable_text.cpp owns phases, timer, commands, validation, and reading/editing cores.
 
-Les requêtes du controller passent une interface privée backend-neutre ; l’extension Key F2 respecte
-ABI des enumerators existants.
+Controller requests pass through a private backend-neutral interface; the Key F2 extension respects
+the ABI of existing enumerators.
 
-Inscrire `src/editable_text.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les
-includes collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou
-plugin dans l’API publique.
+Register `src/editable_text.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`editable_text_phases` : begin draft sans set ; Enter/blur valide commit une fois ; Escape conserve
-modèle actuel.
+`editable_text_phases`: begin creates a draft without set; valid Enter/blur commit once; Escape
+preserves the current model.
 
-`editable_text_validator` : Return invalid reste editing, blur invalid annule ; validator réentrant/
-levant récupère.
+`editable_text_validator`: invalid Return stays editing, invalid blur cancels; a reentrant/throwing
+validator recovers.
 
-`editable_text_stem` : suffixe, aucun point, point initial, multiple points et UTF-8 donnent offsets
-exacts.
+`editable_text_stem`: suffix, no dot, initial dot, multiple dots, and UTF-8 produce exact offsets.
 
-`editable_text_external` : écriture externe pendant edit gagne et devient nouveau texte.
+`editable_text_external`: an external write during editing wins and becomes the new text.
 
-`editable_text_row_delay` : 500 ms controlled ; doubleclick/reorder/removal/scroll annulent rename
-périmé.
+`editable_text_row_delay`: controlled 500 ms; double-click/reorder/removal/scroll cancel stale rename.
 
-`editable_text_controller` : commande stale no-op et enqueue rejeté ne passe pas sync ; un
-controller une instance.
+`editable_text_controller`: stale command is a no-op and rejected enqueue does not execute
+synchronously; one controller per instance.
 
-`editable_text_destroy_draft` : démontage/destroy aucun commit/validation, deux instances isolées.
+`editable_text_destroy_draft`: unmount/destruction produce no commit/validation; two isolated instances.
 
-Ajouter `examples/features/editable_text.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/editable_text.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

@@ -84,7 +84,7 @@ struct FieldState {
             if (!result.empty()) result += '\n';
             result += text;
         };
-        append(read_error()); if (required) append("Champ requis.");
+        append(read_error()); if (required) append("Required field.");
         return result;
     }
 };

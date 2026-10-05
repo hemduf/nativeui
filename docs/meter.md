@@ -1,24 +1,24 @@
 # Meter
 
-**Statut : existant à enrichir.**
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Afficher une valeur bornée et, en extension, un état normal/avertissement/critique selon deux seuils. Display-only ; aucune saisie ni progression indéterminée.
+Display a bounded value and, as an extension, normal/warning/critical state according to two thresholds. Display only; no input or indeterminate progress.
 
-Présent dans [widgets_progress_meter.inc](../include/nativeui/detail/widgets_progress_meter.inc) via Meter et BoundedDisplayComponent ; mêmes plages/orientations/formatter que ProgressBar, rayon de fill plus serré. Style dans [progress_style.hpp](../include/nativeui/progress_style.hpp).
+Available in [widgets_progress_meter.inc](../include/nativeui/detail/widgets_progress_meter.inc) through Meter and BoundedDisplayComponent; same ranges/orientations/formatter as ProgressBar, with a tighter fill radius. Style in [progress_style.hpp](../include/nativeui/progress_style.hpp).
 
-MyGo : `ui/indicators.go`, `Meter` et `MeterLevels`. Warning/Critical définissent haut mauvais ou bas mauvais selon leur ordre ; égalité désactive seuils. Cible ajoute ce comportement sans importer les couleurs Theme.Success/Warning/Danger inexistantes dans ThemePalette NativeUI.
+MyGo: `ui/indicators.go`, `Meter` and `MeterLevels`. Warning/Critical define high-is-bad or low-is-bad according to their order; equality disables thresholds. The target adds this behavior without importing Theme.Success/Warning/Danger colors absent from NativeUI ThemePalette.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle exacte : `Meter(State<float>&, float minimum=0, float maximum=1)`, rvalue `orientation(ProgressOrientation)`, `formatter(Formatter)`, `style(MeterStyle)` et `spec() &&`. Formatter prend float et retourne std::string.
+Exact current API: `Meter(State<float>&, float minimum=0, float maximum=1)`, rvalue `orientation(ProgressOrientation)`, `formatter(Formatter)`, `style(MeterStyle)`, and `spec() &&`. Formatter takes float and returns std::string.
 
-Exemple existant vérifié :
+Verified example using the existing API:
 
 ```cpp
 ui::State<float> level{0.7f};
@@ -27,89 +27,89 @@ auto display = ui::Meter{level, 0.0f, 1.0f}
     .spec();
 ```
 
-Ajouts cibles : `Meter(Binding<float>, float minimum=0, float maximum=1)` ; `struct MeterLevels { double warning; double critical; }` ; `levels(MeterLevels) &&`, `threshold_colors(Color warning, Color critical) &&`. Seuils absents par défaut ; defaults amber {1,0.65,0,1}, critical {0.85,0.15,0.15,1}. API existante reste float.
+Target additions: `Meter(Binding<float>, float minimum=0, float maximum=1)`; `struct MeterLevels { double warning; double critical; }`; `levels(MeterLevels) &&`, `threshold_colors(Color warning, Color critical) &&`. Thresholds absent by default; defaults amber {1,0.65,0,1}, critical {0.85,0.15,0.15,1}. Existing API remains float.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Source actuelle est State<float>& empruntée et doit vivre jusqu’au démontage. Cible convertit constructeur State en Binding immédiatement, gardant signatures et supprimant le borrow direct interne.
+Current source borrows State<float>&, which must live until unmounting. The target immediately converts the State constructor to Binding, preserving signatures and removing the internal direct borrow.
 
-Observer ne réécrit jamais le modèle : view clampée, non finie=min. Binding source supprimée devient invalid, get dernière valeur/set ignoré/observe inactive sans notification destruction ; aucun callback de changement Meter.
+Observation never rewrites the model: clamped view, non-finite=min. Removed Binding source becomes invalid, get retains the last value/set ignored/observe inactive without destruction notification; no Meter change callback.
 
-Les seuils options immuables sont appliqués à la valeur effective affichée, pas à un raw out-of-range. Normal/warning/critical sont dérivés et ne forment pas une seconde State publique.
+Immutable threshold options apply to the effective displayed value rather than a raw out-of-range value. Normal/warning/critical are derived and do not form a second public State.
 
 ## 4. Interactions
 
-Aucun focus, capture, pointeur actif, glissement, molette, clavier ou saisie ; input Ignored comme aujourd’hui.
+No focus, capture, active pointer interaction, dragging, wheel, keyboard, or text input; input Ignored as today.
 
-ReadOnly conserve style read-only et description. Disabled prend sa couleur disabled même quand seuil critique ; aucun clic pour acquitter une alerte implicite.
+ReadOnly retains read-only styling and description. Disabled takes its disabled color even at a critical threshold; no implicit click-to-acknowledge alert.
 
-Validation/annulation métier non applicables. Une action telle que charger/remettre un compteur à zéro appartient à un Button voisin.
+Application confirmation/cancellation does not apply. An action such as loading/resetting a counter belongs to a neighboring Button.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Tailles préférées de style conservent horizontal/vertical et variante formatted. Formatter n’est pas appelé en mesure ; pas de relayout au rythme de ses textes.
+Style preferred sizes preserve horizontal/vertical and formatted variants. Formatter is not called in measurement; no relayout at the rate of text updates.
 
-Horizontal depuis gauche, vertical depuis bas ; rayon fill historique conservé. Calcul fraction en double empêche overflow de la différence de deux floats finis.
+Horizontal from the left, vertical from the bottom; historical fill radius preserved. Double fraction calculation prevents overflow from subtracting two finite floats.
 
-View bornée et zero dimension : aucun fill hors piste. Seuils ne modifient ni la plage ni la longueur, seulement présentation/description ; clipping suit les bounds.
+Bounded view and zero dimensions: no fill outside the track. Thresholds change neither range nor length, only presentation/description; clipping follows bounds.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Sans levels, couleurs/precedence MeterStyle actuelles inchangées. Avec levels, valeur>=critical critique puis >=warning warning si critical>warning ; sinon <=critical critique puis <=warning warning.
+Without levels, current MeterStyle colors/precedence are unchanged. With levels and critical>warning, value>=critical is critical, then >=warning is warning; otherwise <=critical is critical, then <=warning is warning.
 
-Égalité warning==critical désactive seuils ; normal = resolved MeterStyle.fill. Threshold colors remplacent seulement fill pour états warning/critical, après normal style ; style disabled prévaut finalement. Bornes/texte/rayon continuent leur résolution existante.
+Equality warning==critical disables thresholds; normal=resolved MeterStyle.fill. Threshold colors replace only fill for warning/critical states after normal style; disabled style ultimately wins. Bounds/text/radius retain existing resolution.
 
-Pas d’animation ni smoothing implicitement audio ; update = paint/semantics. Formatter reçoit valeur effective float. Dénomination du niveau est incluse dans description sans forcer le texte visible.
+No animation or implicitly audio-specific smoothing; updates affect paint/semantics. Formatter receives the effective float value. Level name is included in description without forcing visible text.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Meter avec nom fourni par composition, numeric_value/range effective ; description état normal/avertissement/critique si thresholds activés. Aucun Action::SetValue.
+Target contract: Meter with a composition-supplied name and effective numeric_value/range; normal/warning/critical description when thresholds are enabled. No Action::SetValue.
 
-Comparaisons inclusives identiques aux pixels. Non finite externe présenté min, et description peut signaler source invalide sans annoncer un état métier fiable.
+Inclusive comparisons match pixels. External non-finite values display minimum, and the description may indicate an invalid source without announcing a reliable domain-specific state.
 
-Rôle Meter et hooks existent ; publication concrète actuelle non présumée. Ponts T068 différés ; aucune prise en charge native déjà annoncée.
+Meter role and hooks exist; actual current publication is not assumed. T068 bridges are deferred; no native support is already claimed.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; subscription RAII et invalidateur par instance, désarmés au démontage. Aucun timer ni history/peak global.
+UI/main thread; per-instance RAII subscription and invalidator, disarmed at unmounting. No timer or global history/peak.
 
-Formatter réentrant/throw doit garder paint scopes/dispatch guards équilibrés et son invocation commencée n’est jamais rejouée. Les modifications structurelles sont différées au checkpoint retenu.
+A reentrant/throwing formatter must keep paint scopes/dispatch guards balanced, and a started invocation is never replayed. Structural changes are deferred to the retained checkpoint.
 
-Préparation de plage/seuils/styles avant publication. Destruction no-throw sans callback applicatif ; source Binding disparue ne crée pas un UAF ni annulation fictive.
+Prepare range/thresholds/styles before publication. Destruction is no-throw with no application callback; a vanished Binding source causes neither UAF nor fictitious cancellation.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutilise domain/Theme/Painter et Binding ; les helpers bornés peuvent être privés communs avec ProgressBar, chaque composant gardant un vrai cpp.
+Reuses domain/Theme/Painter and Binding; bounded helpers may be privately shared with ProgressBar, with each component retaining a real cpp.
 
-Range min/max non finite/inversée/égale = invalid_argument à instanciation historique. Levels non finis ou hors [min,max] = invalid_argument pour ajout cible ; égalité dans plage valide et désactive.
+Non-finite/reversed/equal min/max range causes invalid_argument at historical instantiation. Non-finite levels or levels outside [min,max] cause invalid_argument for the target addition; in-range equality is valid and disables thresholds.
 
-Min==Max n’est pas un compteur zéro : domaine invalide comme avant. Externe NaN/inf/hors plage ne sont jamais corrigés. Format vide autorisé ; aucune couleur sRGB convertie en integer native dans l’API.
+Min==Max is not a zero counter: invalid domain as before. External NaN/inf/out-of-range values are never corrected. Empty formatting allowed; no sRGB color converted to a native integer in the API.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/meter.hpp` et `src/meter.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/meter.hpp` and `src/meter.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : `widgets_progress_meter.inc` et progress_style.hpp. Conserver MeterStyle/ProgressStylePatch et ProgressOrientation dans leurs points d’entrée historiques. Extraire vrai noyau du Meter dans meter.cpp, pas duplicate runtime in .inc.
+Source to extract or reuse: `widgets_progress_meter.inc` and progress_style.hpp. Preserve MeterStyle/ProgressStylePatch and ProgressOrientation in their historical entry points. Extract the actual Meter core into meter.cpp without duplicate runtime in .inc.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `meter_legacy_display` : absence de thresholds conserve pixels, orientation, formatter.
-- `meter_high_bad` : thresholds80/95 inclusifs déterminent warning/critical.
-- `meter_low_bad` : thresholds20/5 inclusifs inversent la logique sans changer fraction.
-- `meter_equal_invalid` : égalité désactive ; nonfinite/hors domaine rejeté avant publication.
-- `meter_disabled_priority` : style Disabled prévaut sur fill critique et ReadOnly reste visible.
-- `meter_formatter_throw` : exception puis valeur suivante restent récupérables.
+- `meter_legacy_display`: absent thresholds preserve pixels, orientation, and formatter.
+- `meter_high_bad`: inclusive 80/95 thresholds determine warning/critical.
+- `meter_low_bad`: inclusive 20/5 thresholds reverse logic without changing fraction.
+- `meter_equal_invalid`: equality disables; non-finite/out-of-domain rejected before publication.
+- `meter_disabled_priority`: Disabled style overrides critical fill and ReadOnly remains visible.
+- `meter_formatter_throw`: an exception and the next value remain recoverable.
 
-Créer `examples/features/meter.cpp` et la cible `nativeui_example_meter`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/meter.cpp` and target `nativeui_example_meter`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Reprendre `examples/features/t033_progress_meter.cpp` et preuves de domaines larges existantes. Ajouter seuils, snapshots et Binding sans supprimer les contrats float.
+Reuse `examples/features/t033_progress_meter.cpp` and existing wide-domain evidence. Add thresholds, snapshots, and Binding without removing float contracts.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

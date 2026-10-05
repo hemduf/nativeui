@@ -20,7 +20,7 @@ struct SplitViewStyle {
     std::optional<Color> hover_color;
     std::optional<Color> drag_color;
     std::optional<Color> focus_color;
-    std::string accessible_name{"Séparateur"};
+    std::string accessible_name{"Splitter"};
 };
 
 namespace detail { struct SplitViewState; struct SplitGeometry; }

@@ -388,11 +388,11 @@ public:
   SemanticInfo semantics() const override {
     SemanticInfo info;
     info.role = SemanticRole::Custom;
-    info.name = "Saturation et valeur";
+    info.name = "Saturation and value";
     info.description =
         "Saturation " +
         std::to_string(static_cast<int>(std::lround(state_->hsv.s * 100))) +
-        " %, valeur " +
+        " %, value " +
         std::to_string(static_cast<int>(std::lround(state_->hsv.v * 100))) +
         " %";
     info.focusable = true;
@@ -555,7 +555,7 @@ public:
   SemanticInfo semantics() const override {
     SemanticInfo info;
     info.role = SemanticRole::Slider;
-    info.name = alpha_ ? "Alpha" : "Teinte";
+    info.name = alpha_ ? "Alpha" : "Hue";
     info.numeric_value = alpha_ ? state_->view.a : state_->hsv.h;
     info.value_range = SemanticValueRange{0, 1, .01};
     info.text_value = std::to_string(static_cast<int>(
@@ -789,7 +789,7 @@ public:
     children.push_back(
         Spec{[state, style = std::move(hex_style)] {
                auto editor = std::make_unique<TextInputComponent>(
-                   "Hexadécimal", state->draft.binding(), "#rrggbb", 0,
+                   "Hexadecimal", state->draft.binding(), "#rrggbb", 0,
                    TextInputComponent::SubmitCallback{}, style);
                state->editor =
                    detail::TextInputAccess::configure(*editor, state->policy);
@@ -839,7 +839,7 @@ public:
     info.text_value = state_->hex;
     info.read_only = effective_read_only() || !state_->source.valid();
     if (!finite(state_->seen))
-      info.description = "Couleur invalide";
+      info.description = "Invalid color";
     return info;
   }
   void paint(PaintContext &context) const override {

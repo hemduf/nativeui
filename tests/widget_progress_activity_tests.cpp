@@ -54,7 +54,7 @@ void static_segment_and_semantics() {
   const auto info = component.semantics();
   NUI_CHECK(info.role == ui::SemanticRole::ProgressBar);
   NUI_CHECK(!info.numeric_value && !info.value_range);
-  NUI_CHECK(info.description == "progression indéterminée");
+  NUI_CHECK(info.description == "indeterminate progress");
 }
 void clock_cycle_and_hidden_stop() {
   Harness h;

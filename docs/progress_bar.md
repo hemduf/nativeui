@@ -1,24 +1,24 @@
 # ProgressBar
 
-**Statut : existant à enrichir.**
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Affichage de progression déterminée ou, en extension, activité indéterminée. Le contrôle ne modifie jamais la valeur et ne représente pas un niveau métier avec seuils ; ce rôle appartient à Meter.
+Display determinate progress or, as an extension, indeterminate activity. The control never modifies the value and does not represent a domain-specific level with thresholds; that role belongs to Meter.
 
-Présent dans [widgets_progress_meter.inc](../include/nativeui/detail/widgets_progress_meter.inc), ProgressBar et detail::BoundedDisplayComponent. Domaine finite min<max ; valeur vue clampée, non finite=min ; directions horizontal/vertical et formatter optionnel. Styles dans [progress_style.hpp](../include/nativeui/progress_style.hpp).
+Available in [widgets_progress_meter.inc](../include/nativeui/detail/widgets_progress_meter.inc), ProgressBar and detail::BoundedDisplayComponent. Finite min<max domain; clamped view value, non-finite=min; horizontal/vertical directions and optional formatter. Styles in [progress_style.hpp](../include/nativeui/progress_style.hpp).
 
-MyGo : `ui/widgets.go`, `Progress`, plage0..1, négatif marque indéterminé et Reverse permet RTL. Cible conserve plage float explicite et utilise un mode indéterminé séparé pour ne pas détourner une valeur négative valide.
+MyGo: `ui/widgets.go`, `Progress`, range 0..1, negative indicates indeterminate, and Reverse allows RTL. The target preserves an explicit float range and uses a separate indeterminate mode to avoid repurposing a valid negative value.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante vérifiée : `explicit ProgressBar(State<float>&, float minimum=0, float maximum=1)`, `orientation(ProgressOrientation) &&`, `formatter(Formatter) &&` avec std::function<std::string(float)>, `style(ProgressBarStyle) &&`, `spec() &&`.
+Verified existing API: `explicit ProgressBar(State<float>&, float minimum=0, float maximum=1)`, `orientation(ProgressOrientation) &&`, `formatter(Formatter) &&` with std::function<std::string(float)>, `style(ProgressBarStyle) &&`, `spec() &&`.
 
-Exemple existant vérifié :
+Verified example using the existing API:
 
 ```cpp
 ui::State<float> progress{0.4f};
@@ -28,89 +28,89 @@ auto bar = ui::ProgressBar{progress, 0.0f, 1.0f}
     .spec();
 ```
 
-Ajouts cibles : constructeur `ProgressBar(Binding<float>, float minimum=0, float maximum=1)` et fluent rvalue `indeterminate(bool=true)`, `reversed(bool=true)`, `reduced_motion(bool=true)`. Signatures float et State historiques conservées ; pas de callback on_change ni sentinel négatif.
+Target additions: constructor `ProgressBar(Binding<float>, float minimum=0, float maximum=1)` and rvalue fluent `indeterminate(bool=true)`, `reversed(bool=true)`, `reduced_motion(bool=true)`. Preserve historical float and State signatures; no on_change callback or negative sentinel.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Source actuelle emprunte directement State<float>& ; elle doit rester vivante jusqu’au démontage. Contrat enrichi : convertir la surcharge State en Binding immédiatement, de même API source mais ownership runtime plus sûr.
+Current source directly borrows State<float>&; it must stay alive until unmounting. Enhanced contract: immediately convert the State overload to Binding, with the same source API but safer runtime ownership.
 
-Le Binding de la nouvelle API tient le dernier control block. Source détruite : valid=false, dernière valeur lisible, set jamais appelé, observe inactif sans notification destruction. Revalider pour désarmer activité au prochain accès ; aucun événement utilisateur inventé.
+Binding in the new API retains the last control block. Source destroyed: valid=false, last value readable, set never called, observe inactive without destruction notification. Revalidate to disarm activity at the next access; invent no user event.
 
-La valeur effective de vue est clampée sans writeback, fraction calculée en double pour plages float larges. Mode indéterminé ignore valeur pour géométrie mais ne supprime pas la valeur du modèle. Observations invalident uniquement paint/sémantique.
+Effective view value is clamped without writeback, with fraction calculated in double for wide float ranges. Indeterminate mode ignores the value for geometry but does not remove the model value. Observations invalidate only paint/semantics.
 
 ## 4. Interactions
 
-Display-only : pas de focus, capture, survol actif, molette, glissement, clavier ou saisie. Les inputs retournent Ignored et ne se servent pas du formatter comme action.
+Display only: no focus, capture, active hover, wheel, dragging, keyboard, or text input. Inputs return Ignored and do not use formatter as an action.
 
-ReadOnly n’ajoute aucune fonction ; Disabled conserve le style disabled et une valeur descriptive. Le mode indéterminé n’est pas une validation ou opération à annuler par Escape.
+ReadOnly adds no function; Disabled retains disabled styling and a descriptive value. Indeterminate mode is not a confirmation or operation that Escape cancels.
 
-Écriture utilisateur impossible, y compris via SemanticAction::SetValue. L’annulation d’un traitement reste un Button séparé de l’application.
+User writes are impossible, including through SemanticAction::SetValue. Cancelling a process remains a separate application Button.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Chemin historique utilise tailles préférées horizontal/vertical et formatted selon le style ; formatter n’est pas appelé pour mesure. Préserver la place lorsqu’un texte change.
+The historical path uses horizontal/vertical and formatted preferred sizes according to style; formatter is not called for measurement. Preserve space when text changes.
 
-Horizontal remplit depuis gauche ; vertical depuis bas. reversed inverse l’origine de remplissage ; fraction0/1 donne vide/plein. Tous les rectangles sont bornés à la piste et logiques.
+Horizontal fills from the left; vertical from the bottom. reversed reverses the fill origin; fraction 0/1 gives empty/full. All rectangles are logical and bounded to the track.
 
-Indéterminé : segment30% de longueur traversant piste en1,4s, clip aux bords ; mode statique reduced_motion/sans timing = segment centré30%, sans saut de mesure. Dimensions zéro ne demandent pas d’animation ni pixels.
+Indeterminate: a segment covering 30% of length traverses the track in 1.4 s, clipped at edges; reduced_motion/no timing uses a static centered 30% segment without measurement changes. Zero dimensions request neither animation nor pixels.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-ProgressBarStyle/ProgressStylePatch existants conservés dans progress_style.hpp, avec leur précédence thème puis style explicite puis disponibilité. Ne pas promettre Theme slots inconnus.
+Preserve existing ProgressBarStyle/ProgressStylePatch in progress_style.hpp, with theme, then explicit style, then availability precedence. Do not promise unknown Theme slots.
 
-Déterminé : formatter reçoit valeur effective float. Indéterminé : pas d’appel formatter numérique, la piste suffit ; texte d’activité se compose par Label voisin. Reversed ne modifie pas formatter.
+Determinate: formatter receives the effective float value. Indeterminate: do not call the numeric formatter; the track is sufficient, with activity text composed through a neighboring Label. Reversed does not change formatter.
 
-Animation utilise AnimationContext existant, tween linéaire0→1 et reprise de cycle protégée par génération. reduced_motion bool explicite, défaut false ; pas de détection OS affirmée livrée. Arrêt Hidden/Collapsed/démonté et source invalide.
+Animation uses existing AnimationContext, a linear 0→1 tween, and generation-protected cycle restart. Explicit reduced_motion bool defaults to false; no claim that OS detection is delivered. Stop when Hidden/Collapsed/unmounted or the source is invalid.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : ProgressBar, range/numeric_value effective pour déterminé ; indéterminé omet numeric_value et value_range et donne description « progression indéterminée ». Pas de valeur -1 inventée dans une plage.
+Target contract: ProgressBar, effective range/numeric_value for determinate mode; indeterminate omits numeric_value and value_range and provides an “indeterminate progress” description. No invented -1 value within a range.
 
-Aucune action mutatrice ni focus. Semantics update suit données/mode et non chaque frame d’animation ; un lecteur ne doit pas être inondé de ValueChanged de phase.
+No mutating action or focus. Semantics updates follow data/mode rather than every animation frame; readers must not be flooded with phase ValueChanged events.
 
-Les hooks/rôle existent mais l’override actuel n’est pas preuve de publication. Ponts natifs T068 différés ; aucun IME.
+Hooks/role exist, but the current override is not proof of publication. Native T068 bridges are deferred; no IME.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; subscriptions/animation handles par instance RAII, arrêt au démontage/désactivation visuelle. Un invalidateur stale est no-op lifetime-safe.
+UI/main thread; per-instance RAII subscriptions/animation handles, stopped on unmounting/visual disabling. A stale invalidator is a lifetime-safe no-op.
 
-Formatter possédé peut lever/réentrer : pas de mutation structure synchronique dans paint, restoration des scopes/guards avant propagation C++. Invocation commencée jamais rejouée automatiquement.
+An owned formatter may throw/reenter: no synchronous structural mutation during paint; restore scopes/guards before C++ propagation. A started invocation is never automatically replayed.
 
-Sans DispatcherProvider valide, phase statique centrée ; aucun thread/sleep ni fallback synchronique d’un callback différé. Échec d’armement retire handle non publié puis garde un rendu statique et permet une reprise au prochain vrai accès. Destruction no-throw.
+Without a valid DispatcherProvider, use a static centered phase; no thread/sleep or synchronous fallback for a deferred callback. Arming failure removes the unpublished handle, retains static rendering, and permits recovery at the next actual access. Destruction is no-throw.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutilise Binding/Theme/Painter/AnimationContext et DispatcherProvider existants. Pas d’adapter audio ou modification de paramètres.
+Reuses existing Binding/Theme/Painter/AnimationContext and DispatcherProvider. No audio adapter or parameter changes.
 
-Domaines non finis/inversés/égaux : invalid_argument quand le composant est instancié comme actuellement. Externe NaN/inf = min visible ; modèle intact. Valeur hors plage = clamp view uniquement.
+Non-finite/reversed/equal domains: invalid_argument when the component is instantiated, as currently. External NaN/inf=min visually; model intact. Out-of-range value=clamped view only.
 
-Retour indéterminé→déterminé montre immédiatement la dernière valeur. Mise à jour externe masquée doit se voir au remontage. Format vide autorisé ; un formatter mutateur de UI doit différer ses changements selon CODE_REVIEW.
+Returning from indeterminate to determinate immediately shows the last value. A hidden external update must appear on remounting. Empty formatting is allowed; a formatter mutating UI must defer changes according to CODE_REVIEW.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/progress_bar.hpp` et `src/progress_bar.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/progress_bar.hpp` and `src/progress_bar.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : `widgets_progress_meter.inc` et progress_style.hpp. Préserver ProgressOrientation, Formatter et points d’entrée styles. Extraire noyaux réels ProgressBar et Meter dans chacun de leurs .cpp ; helpers domain/style peuvent rester privés partagés sans .cpp factice.
+Source to extract or reuse: `widgets_progress_meter.inc` and progress_style.hpp. Preserve ProgressOrientation, Formatter, and style entry points. Extract real ProgressBar and Meter cores into their respective .cpp files; domain/style helpers may stay privately shared without a fictitious .cpp.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `progress_bar_legacy_range` : domaines valides/larges et invalid_argument gardent leurs résultats.
-- `progress_bar_formatter_effective` : formatter reçoit clamp/mimimum des valeurs non finies sans writeback.
-- `progress_bar_orientation_reverse` : les quatre sens remplissent leur piste exactement.
-- `progress_bar_indeterminate_clock` : cycle1,4s, clip et passage au déterminé sous horloge manuelle.
-- `progress_bar_reduced_hidden` : motion réduite, absent timing et Hidden arrêtent wakes avec phase statique.
-- `progress_bar_formatter_throw` : exception de formatter n’empêche pas la prochaine frame ni le frère.
+- `progress_bar_legacy_range`: valid/wide domains and invalid_argument preserve their results.
+- `progress_bar_formatter_effective`: formatter receives clamp/minimum for non-finite values without writeback.
+- `progress_bar_orientation_reverse`: all four directions fill their track exactly.
+- `progress_bar_indeterminate_clock`: 1.4 s cycle, clipping, and transition to determinate under a manual clock.
+- `progress_bar_reduced_hidden`: reduced motion, absent timing, and Hidden stop wakes with a static phase.
+- `progress_bar_formatter_throw`: a formatter exception does not prevent the next frame or sibling rendering.
 
-Créer `examples/features/progress_bar.cpp` et la cible `nativeui_example_progress_bar`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/progress_bar.cpp` and target `nativeui_example_progress_bar`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Reprendre `examples/features/t033_progress_meter.cpp` et les tests Progress/Meter existants ; qualifier la surcharge Binding et l’activité indéterminée séparément.
+Reuse `examples/features/t033_progress_meter.cpp` and existing Progress/Meter tests; validate the Binding overload and indeterminate activity separately.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

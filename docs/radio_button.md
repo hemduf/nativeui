@@ -1,26 +1,22 @@
-# RadioButton<T> et RadioGroup<T>
+# RadioButton<T> and RadioGroup<T>
 
-Statut : **existant à extraire**.
+**Status: existing — extraction required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Proposer des choix exclusifs partageant un contrôleur de sélection. RadioGroup est un objet de
-modèle/focus, pas un composant à mesure indépendante.
+Offer exclusive choices sharing a selection controller. RadioGroup is a model/focus object rather than a component with independent measurement.
 
-NativeUI : [widgets_checkbox_radio.inc](../include/nativeui/detail/widgets_checkbox_radio.inc),
-RadioGroup<T>, RadioButton<T>, registry de valeurs et noyau detail::RadioButtonComponent ;
-[focus_group.hpp](../include/nativeui/detail/focus_group.hpp) définit la participation retenue.
+NativeUI: [widgets_checkbox_radio.inc](../include/nativeui/detail/widgets_checkbox_radio.inc), RadioGroup<T>, RadioButton<T>, value registry, and detail::RadioButtonComponent core; [focus_group.hpp](../include/nativeui/detail/focus_group.hpp) defines retained participation.
 
-MyGo : `ui/widgets.go`, `Radio[T]` ; `ui/toggle.go`, `RadioGroup`. Le regroupement de focus et choix
-typed existent déjà ; conserver API et contraintes effectives, sans imposer T=int.
+MyGo: `ui/widgets.go`, `Radio[T]`; `ui/toggle.go`, `RadioGroup`. Focus grouping and typed choices already exist; preserve the API and actual constraints without imposing T=int.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp
 template<class T>
@@ -38,173 +34,117 @@ public:
 };
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
 ui::State<int> size{1};
 ui::RadioGroup<int> group{size};
-auto small = ui::RadioButton(group, 1, "Petit").spec();
-auto large = ui::RadioButton(group, 2, "Grand").spec();
+auto small = ui::RadioButton(group, 1, "Small").spec();
+auto large = ui::RadioButton(group, 2, "Large").spec();
 ```
 
-Le header conserve constructeurs, deduction et la condition d’égalité de State ; le registry typed
-produit les adaptateurs is_selected/select/observe vers le noyau non template.
+The header preserves constructors, deduction, and State's equality condition; the typed registry produces is_selected/select/observe adapters for the non-template core.
 
-RadioStyle reste le style public existant. Les conteneurs Row/Column arrangent les Specs radio ; pas
-de fichier radio_group.cpp vide ni composant public supplémentaire pour le contrôleur.
+RadioStyle remains the existing public style. Row/Column containers arrange radio Specs; no empty radio_group.cpp or additional public controller component.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le group possède copies Binding<T>, token de focus et registre de valeurs partagés ; RadioButton en
-copie les contrôles internes. L’objet RadioGroup lexical peut sortir de portée après fabrication des
-Specs, sans invalider ces copies.
+The group owns shared Binding<T> copies, focus token, and value registry; RadioButton copies its internal controls. The lexical RadioGroup object may leave scope after Specs are created without invalidating these copies.
 
-T value est possédé avec identité de registry stable. Valeurs en doublon dans un groupe sont déjà
-rejetées par registre ; conserver le rejet et la durée de vie de ses identités.
+T value is owned with stable registry identity. Duplicate group values are already rejected by the registry; preserve rejection and identity lifetime.
 
-Sélection hors options : toutes les faces non selected, mais le premier participant disponible sert
-d’entrée Tab. Une écriture externe ne force aucune valeur par défaut au mount.
+Selection absent from options: all faces unselected, but the first available participant provides Tab entry. An external write forces no default value at mount.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Clic au relâchement et Espace au KeyUp choisissent value ; une valeur déjà sélectionnée ne génère
-pas de notification State supplémentaire. Entrée n’est pas activatrice dans la source actuelle.
+Click release and Space at KeyUp choose value; an already selected value generates no additional State notification. Enter does not activate in the current source.
 
-Focus de groupe : un arrêt Tab, entrée sur la valeur sélectionnée disponible ; flèches/Home/End
-parcourent et sélectionnent les participants disponibles via le runtime commun.
+Group focus: one Tab stop, entering at an available selected value; arrows/Home/End traverse and select available participants through the shared runtime.
 
-ReadOnly empêche select(), tout en permettant focus/lecture. Disabled et cachés sont exclus du choix
-par navigation ; valeurs sélectionnées disabled restent observables.
+ReadOnly prevents select() while allowing focus/reading. Disabled and hidden participants are excluded from navigation choices; disabled selected values remain observable.
 
-Molette ignorée ; PointerCancel, retrait ou perte de focus annulent l’armement sans désélectionner.
-Revenir hors puis à l’intérieur suit la machine PressActivationState existante.
+Wheel ignored; PointerCancel, removal, or loss of focus cancel arming without deselection. Leaving and returning inside follows existing PressActivationState.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure : diamètre externe, leading_padding, label_gap, mesure du label et minimum_width ; hauteur
-control_height. Conserver tous champs et résultats RadioStyle.
+Measurement: outer diameter, leading_padding, label_gap, label measurement, and minimum_width; height control_height. Preserve all RadioStyle fields and results.
 
-Le groupe logique n’a pas de mesure ; les radios peuvent être arrangées dans plusieurs conteneurs,
-mais le focus suit l’ordre retenu valide du même token.
+The logical group has no measurement; radios may be arranged in several containers, but focus follows valid retained order under the same token.
 
-La marque centrale n’entraîne pas de changement de largeur par défaut. Clipping du label et centre
-du disque utilisent l’espace réellement alloué en unités logiques.
+The central mark does not change width by default. Label clipping and disk center use the actual allocated space in logical units.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Outer/inner/mark colors et rayons sont issus du style résolu ; selected détermine la marque, pressed
-l’interaction passagère. Focus ring ne remplace pas selected.
+Outer/inner/mark colors and radii come from resolved style; selected determines the mark, pressed the transient interaction. Focus ring does not replace selected.
 
-La classification d’invalidation tient compte de visibilité de la marque même sans couleur changée.
-Patches selected à métriques différentes imposent layout.
+Invalidation classification accounts for mark visibility even without a color change. Selected patches with different metrics require layout.
 
-Deux groupes partageant même State peuvent montrer la même valeur tout en gardant des tokens focus
-différents. Aucun nom global de groupe.
+Two groups sharing State can show the same value while retaining different focus tokens. No global group name.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : RadioButton avec selected/checked et action Select, nom label ; exposer relation de group
-via le conteneur Group nommé par l’application.
+Target: RadioButton with selected/checked and Select action, label name; expose the group relationship through an application-named Group container.
 
-RadioGroup n’est pas une Spec et n’introduit aucun nœud sémantique autonome. RadioButtonComponent ne
-fournit pas actuellement semantics dans la source étudiée : ajout de publication requis avec
-extraction.
+RadioGroup is not a Spec and introduces no independent semantic node. RadioButtonComponent currently provides no semantics in the reviewed source: publication must be added during extraction.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Le registry de valeurs et token restent possédés par références partagées des Specs/composants ;
-retirer une option libère son inscription conformément au registry existant.
+Value registry and token remain owned through shared references in Specs/components; removing an option releases its registration according to the existing registry.
 
-Le noyau conserve callbacks is_selected/select/observe effacés et objets d’invalidation détachés.
-Copier select puis le lancer après fin de capture ; observer réentrant ne doit pas retrouver un nœud
-via une adresse recyclée.
+The core keeps type-erased is_selected/select/observe callbacks and detached invalidation objects. Copy select and invoke it after capture ends; a reentrant observer must not rediscover a node through a recycled address.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : State, focus de groupe commun, TextService, ThemeBinding.
-[segmented_control](segmented_control.md) est un autre rendu exclusif, pas une réécriture de
-RadioGroup.
+Dependencies: State, shared group focus, TextService, ThemeBinding. [segmented_control](segmented_control.md) is another exclusive presentation rather than a RadioGroup rewrite.
 
-T utilisateur peut lever lors de copy/equals : les inscriptions et montage doivent être
-transactionnels. Un échec d’égalité pendant paint/layout ne publie pas une demi-frame.
+User T may throw during copy/equals: registration and mounting must be transactional. Equality failure during paint/layout does not publish a partial frame.
 
-Vide/tous disabled : aucun arrêt navigable ; retirer la sélection ne réécrit pas le Binding. Les
-labels identiques n’affectent pas le registry fondé sur value.
+Empty/all-disabled: no navigable stop; removing selection does not rewrite Binding. Identical labels do not affect the value-based registry.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/radio_button.hpp` et `src/radio_button.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/radio_button.hpp` and `src/radio_button.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Conserver RadioGroup<T>, RadioButton<T>, guides/surcharges et registry typed dans le header ; le
-véritable noyau detail::RadioButtonComponent et peinture/interactions sont déplacés au .cpp.
+Keep RadioGroup<T>, RadioButton<T>, guides/overloads, and typed registry in the header; move the real detail::RadioButtonComponent core and painting/interactions to the .cpp.
 
-widgets_checkbox_radio.inc devient un point d’entrée de compatibilité sans duplicata
-d’implémentation ; ne pas déplacer les types publics déjà utilisés dans un namespace privé.
+widgets_checkbox_radio.inc becomes a compatibility entry point without duplicate implementation; do not move already used public types into a private namespace.
 
-Inscrire `src/radio_button.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/radio_button.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`radio_button_exclusive` : sélectionne un choix ; valeur identique ne repasse pas les observateurs.
+`radio_button_exclusive`: selects one choice; an identical value does not rerun observers.
 
-`radio_button_roving` : un arrêt Tab ; flèches/Home/End sélectionnent en sautant disabled.
+`radio_button_roving`: one Tab stop; arrows/Home/End select while skipping disabled participants.
 
-`radio_button_duplicates` : valeurs duplicate refusées ; labels duplicate avec valeurs distinctes
-admis.
+`radio_button_duplicates`: duplicate values rejected; duplicate labels with distinct values allowed.
 
-`radio_button_group_lifetime` : Specs restent valides après destruction lexicale du contrôleur.
+`radio_button_group_lifetime`: Specs remain valid after lexical controller destruction.
 
-`radio_button_generic_value` : type utilisateur compile sans instanciations explicites prédéfinies.
+`radio_button_generic_value`: a user type compiles without predefined explicit instantiations.
 
-`radio_button_observer_copy_throw` : exception equality/copy/select et retrait réentrant restaurent
-registry/focus et next action.
+`radio_button_observer_copy_throw`: equality/copy/select exceptions and reentrant removal restore registry/focus and the next action.
 
-Ajouter `examples/features/radio_button.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/radio_button.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

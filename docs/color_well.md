@@ -1,22 +1,22 @@
 # ColorWell
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Échantillon de couleur compact ouvrant un ColorPicker portable ancré. Valeur publique sRGB ui::Color ; aucune boîte système de couleurs ni service global.
+A compact color sample opening a portable anchored ColorPicker. Public sRGB ui::Color value; no system color dialog or global service.
 
-Absent de NativeUI ; Color, Button et [Overlay](../include/nativeui/overlay.hpp) existent. [ColorPicker](color_picker.md) et [Popover](popover.md) sont les dépendances cibles.
+Absent from NativeUI; Color, Button, and [Overlay](../include/nativeui/overlay.hpp) exist. [ColorPicker](color_picker.md) and [Popover](popover.md) are target dependencies.
 
-MyGo : `ui/colorpicker.go`, `ColorWell`, preview sur checker, valeur hex, Enter/Space/clic ouvrant et Escape/outside fermant. La couleur du picker est publiée pendant l’ouverture.
+MyGo: `ui/colorpicker.go`, `ColorWell`, preview on checker, hex value, Enter/Space/click opening, and Escape/outside closing. The picker color is published while open.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class ColorWell {
@@ -31,91 +31,91 @@ public:
 };
 ```
 
-Défauts : alpha activé, palette vide, popup ColorPicker largeur naturelle 280 DIP et preview 36 × 20 DIP plus padding. ColorWellStyle couvre preview/chrome/focus/size, pas les préférences globales du picker.
+Defaults: alpha enabled, empty palette, ColorPicker popup natural width 280 DIP and preview 36 × 20 DIP plus padding. ColorWellStyle covers preview/chrome/focus/size, rather than global picker preferences.
 
-Exemple cible proposé : `ui::ColorWell{"Couleur de piste", trackColor}.spec()`. ColorSwatch est défini dans color_picker.hpp et réutilisé, pas redéfini.
+Proposed target example: `ui::ColorWell{"Track color", trackColor}.spec()`. ColorSwatch is defined in color_picker.hpp and reused, not redefined.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<Color> unique partagé entre preview et ColorPicker ; open/handle privés. Surcharge State convertie en Binding. Source détruite : valid false, get dernière valeur, set ignoré et observe inactif sans notification automatique ; revalider avant ouverture/edit et ne pas émettre on_change pour un set ignoré.
+One Binding<Color> shared between preview and ColorPicker; private open/handle. The State overload is converted to Binding. Source destruction: valid false, get returns the last value, set ignored and observe inactive without automatic notification; revalidate before opening/edit and do not emit on_change for an ignored set.
 
-Mutations du picker notifiées une fois par ColorWell.on_change ; aucune seconde subscription qui réémet chaque update. Externe repaint preview/picker mais ne notifie pas on_change.
+Picker mutations are notified once through ColorWell.on_change; no second subscription reemits every update. External changes repaint preview/picker but do not notify on_change.
 
-Valeurs publiées en continu ; fermer popup ne rétablit pas la couleur initiale. L’annulation Escape concerne l’ouverture/le brouillon hex, pas un transaction rollback de Color.
+Values publish continuously; closing the popup does not restore the initial color. Escape cancellation concerns opening/the hex draft, not a Color transaction rollback.
 
 ## 4. Interactions
 
-Clic primaire terminé, Enter et Space basculent popup une fois par pression. Focus va au premier contrôle du picker ; fermeture normale rend focus à l’ancre encore disponible.
+Completed primary click, Enter, and Space toggle the popup once per press. Focus goes to the picker's first control; normal closing returns focus to the still-available anchor.
 
-Escape/clic extérieur ferment. PointerCancel annule trigger pressé ; glissement/molette sur preview ignorés. Glissement dans picker suit ses règles de capture.
+Escape/outside click close it. PointerCancel cancels a pressed trigger; drag/wheel on the preview are ignored. Dragging in the picker follows its capture rules.
 
-ReadOnly/Disabled empêchent ouverture mutatrice ; une transition ReadOnly/Disabled/Hidden pendant popup ferme et annule capture. Aucun double clic de reset ou drag/drop couleur ajouté implicitement.
+ReadOnly/Disabled prevent mutating opening; a ReadOnly/Disabled/Hidden transition while open closes it and cancels capture. No implicit double-click reset or color drag/drop.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Preview rectangulaire dans chrome avec dimensions style, ratio conservé. Clipping arrondi inclut le checker et le remplissage ; bounds nuls ne donnent aucun input.
+Rectangular preview in chrome with style dimensions and preserved ratio. Rounded clipping includes checker and fill; zero bounds accept no input.
 
-Popup ancré par NodeId, Auto et clamp du service Overlay, taille naturelle du picker indépendante de preview. Le parent déplace/scroll l’ancre sans coordonnées OS.
+Popup anchored by NodeId, Overlay service Auto and clamping, natural picker size independent of preview. The parent moves/scrolls the anchor without OS coordinates.
 
-Viewport plus petit que picker : borne/clip son contenu selon Popover/Calendar conventions sans agrandir la fenêtre ni déborder des interactions.
+Viewport smaller than picker: bound/clip its content under Popover/Calendar conventions without enlarging the window or overflowing interactions.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-ColorWellStyle : bordure, focus, padding/radius ; preview dessine checker puis Color normalisé de vue. L’alpha ne réduit pas la couleur de la bordure/chrome.
+ColorWellStyle: border, focus, padding/radius; preview draws checker then view-normalized Color. Alpha does not reduce border/chrome color.
 
-Update couleur = repaint/semantics ; style métrique = layout ; open/close = structure Overlay. Aucun flash de couleur par défaut avant la première lecture Binding.
+Color update = repaint/semantics; metric style = layout; open/close = Overlay structure. No default-color flash before the first Binding read.
 
-Une couleur invalide externe est signalée textuellement et rendue en repli du picker ; source préservée. Pas d’animation obligatoire ni nouvelle palette de thème.
+An invalid external color is signaled textually and rendered with the picker's fallback; preserve the source. No mandatory animation or new theme palette.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Button nommé label, description/valeur hex de la couleur, expanded, Activate/Focus. SemanticRole::ColorWell absent ; ne pas le prétendre livré.
+Target contract: Button named by label, color hex description/value, expanded, Activate/Focus. SemanticRole::ColorWell is absent; do not claim it is delivered.
 
-Le contenu ouvert porte le nom du champ et les noms de canaux ; les actions sémantiques empruntent les règles du picker. Preview ne génère pas une deuxième Image inutile.
+Open content carries the field name and channel names; semantic actions use picker rules. Preview does not generate an unnecessary second Image.
 
-Ponts T068 différés. La seule saisie texte est le champ hex du picker : committed text actuel, preedit natif futur DESIGN17.4.
+T068 bridges are deferred. The only text entry is the picker's hex field: current committed text, future native preedit under DESIGN17.4.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread, subscription RAII, callback popup protégé par token/génération. Le démontage retire uniquement son overlay et ne ferme pas celui d’un autre ColorWell.
+UI/main thread, RAII subscription, popup callback protected by token/generation. Unmounting removes only its own overlay and does not close another ColorWell's overlay.
 
-Échec show/panel laisse open false et un prochain clic utilisable. Fermeture idempotente, restauration de focus seulement si ancre valide.
+Show/panel failure leaves open false and the next click usable. Idempotent closing; focus restoration only if the anchor is valid.
 
-on_change réentrant peut rouvrir autre popup ; handle/génération précise interdit de fermer le nouveau. Callback commencé jamais rejoué ; destruction no-throw, aucun callback applicatif d’annulation improvisé.
+Reentrant on_change may reopen another popup; exact handle/generation prevents closing the new one. A started callback is never replayed; no-throw destruction, no improvised application cancellation callback.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de ColorPicker/Popover/Binding et chrome Button. Aucun appel audio, filesystem ou OS color-panel.
+Depends on ColorPicker/Popover/Binding and Button chrome. No audio, filesystem, or OS color-panel calls.
 
-Alpha désactivé conserve le canal source selon ColorPicker. Externe pendant drag annule le geste du picker ; clôture de popup avec hex invalide l’abandonne sans nouvelle couleur.
+Disabled alpha preserves the source channel under ColorPicker rules. An external change during dragging cancels the picker's gesture; popup closing with invalid hex discards it without a new color.
 
-Palette vide valide ; ids dupliqués refusés par picker. Source Binding supprimée devient non mutatrice à la prochaine revalidation ; ancre retirée = fermeture, pas relocalisation au centre.
+Empty palette valid; duplicate IDs rejected by the picker. A removed Binding source becomes nonmutating at the next revalidation; removed anchor = closing, not relocation to the center.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/color_well.hpp` et `src/color_well.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/color_well.hpp` and `src/color_well.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : Color/Overlay existants et ColorPicker cible. Importer ColorSwatch depuis son parent ; le noyau du well possède ouverture/preview, tandis que HSV/parser restent exclusifs au picker.
+Origin to extract or reuse: existing Color/Overlay and target ColorPicker. Import ColorSwatch from its parent; the well core owns opening/preview, while HSV/parser remain exclusive to the picker.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, without an empty file or central widget switch. No Pugl, Skia, OS, or plugin SDK types belong in this API.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery is documentation only: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests required during implementation:
 
-- `color_well_live_color` : preview et picker partagent une valeur avec une seule notification.
-- `color_well_escape_keeps` : fermeture Escape garde dernière couleur validée.
-- `color_well_focus_anchor` : open/close et ancre supprimée ne focalisent jamais un nœud stale.
-- `color_well_alpha_preview` : alpha zéro/partiel laisse checker visible.
-- `color_well_two_instances` : deux wells simultanés isolent handles, teinte et subscriptions.
-- `color_well_show_failure` : échec d’ouverture puis nouveau clic fonctionnent.
+- `color_well_live_color`: preview and picker share one value with a single notification.
+- `color_well_escape_keeps`: Escape closing preserves the last validated color.
+- `color_well_focus_anchor`: open/close and removed anchor never focus a stale node.
+- `color_well_alpha_preview`: zero/partial alpha leaves the checker visible.
+- `color_well_two_instances`: two simultaneous wells isolate handles, hue, and subscriptions.
+- `color_well_show_failure`: opening failure then a new click work.
 
-Créer `examples/features/color_well.cpp` et la cible `nativeui_example_color_well`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/color_well.cpp` and the `nativeui_example_color_well` target, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery after the faults described above under ASan/UBSan where lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture/registration remains after unmounting, and the published API matches these contracts. Verification performed here: reading declarations and sources; no C++ or interactive tests executed.

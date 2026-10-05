@@ -1,22 +1,22 @@
 # Avatar
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Avatar circulaire montrant une image raster si valide, sinon des initiales du nom sur un fond déterministe. Couvre profils, auteurs et items de collaboration sans service utilisateur réseau.
+A circular avatar displaying a valid raster image, otherwise name initials on a deterministic background. Covers profiles, authors, and collaboration items without a network user service.
 
-Absent de NativeUI ; [Image](../include/nativeui/image.hpp), TextService et Painter fournissent les fondations. [ImageView](image_view.md) permet le crop Cover mais Avatar possède sa propre logique de fallback.
+Absent from NativeUI; [Image](../include/nativeui/image.hpp), TextService, and Painter provide foundations. [ImageView](image_view.md) supports Cover cropping, but Avatar owns its fallback logic.
 
-MyGo : `ui/indicators.go`, `Avatar`, `initials`, `hslColor`, hash FNV-1a du nom pour hue. Cible conserve image Cover, fallback stable et rôle image ; Unicode doit être explicitement sûr plutôt qu’un slice byte.
+MyGo: `ui/indicators.go`, `Avatar`, `initials`, `hslColor`, name FNV-1a hash for hue. The target preserves Cover images, stable fallback, and image role; Unicode must be explicitly safe rather than byte-sliced.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class Avatar {
@@ -34,91 +34,91 @@ public:
 };
 ```
 
-Défauts : diamètre32 DIP, image absente, initials automatique, sémantique informative avec nom. AvatarStyle nouveau : TextStyle initials_text, optional background/foreground, border_width/color ; foreground automatique garantit contraste avec fond choisi.
+Defaults: diameter 32 DIP, no image, automatic initials, informative semantics with name. New AvatarStyle: TextStyle initials_text, optional background/foreground, border_width/color; automatic foreground ensures contrast with the chosen background.
 
-Exemple cible proposé : `ui::Avatar{"Camille Martin"}.size(32.0).spec()` ; name et image dynamiques peuvent observer deux Bindings indépendants.
+Proposed target example: `ui::Avatar{"Camille Martin"}.size(32.0).spec()`; dynamic name and image can observe two independent Bindings.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Name/image/static initials/style sont possédés ; overload State convertissent aussitôt en Binding. Données du compte/contact externes restent à l’application.
+Name/image/static initials/style are owned; State overloads convert immediately to Binding. External account/contact data remains with the application.
 
-Observer name recalcule initiales/fond/semantics ; image update choisit view/fallback. Les deux observers publient snapshots indépendants au checkpoint ; pas de callback on_change ou loader intégré.
+Name observation recalculates initials/background/semantics; image updates choose image/fallback. Both observers publish independent snapshots at the checkpoint; no on_change callback or built-in loader.
 
-Source Binding détruite : get garde dernière name/image, valid=false et observe inactive sans notification destruction. Aucune tentative de dereference utilisateur ou reset des initials à zéro ; backing Image encore partagé peut rester visible.
+Binding source destroyed: get retains the last name/image, valid=false and observe inactive without destruction notification. No user-data dereference or resetting initials to zero; shared Image backing may remain visible.
 
 ## 4. Interactions
 
-Display-only : aucun focus, capture, activation, molette, glissement ni drop. Tous les inputs Ignored ; Button/ContextMenu peuvent l’envelopper explicitement.
+Display only: no focus, capture, activation, wheel, dragging, or drop. All inputs Ignored; Button/ContextMenu may explicitly wrap it.
 
-Pas d’action « changer photo » automatique ni fichier ouvert au double clic. La validation d’identité/login est hors du composant.
+No automatic “change photo” action or file opened on double-click. Identity/login validation is outside the component.
 
-Annulation non applicable. ReadOnly/Disabled du parent n’effacent pas le nom ; Disabled peut atténuer bordure/texte de fallback via style.
+Cancellation does not apply. Parent ReadOnly/Disabled does not erase the name; Disabled may attenuate border/fallback text through style.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure carré diamètre ; layout centre un disque de diamètre min(bounds.w,bounds.h,diamètre). Image Cover recadre au centre dans un clip circulaire, jamais un carré aux coins visibles.
+Square diameter measurement; layout centers a disk of diameter min(bounds.w,bounds.h,diameter). Cover image crops centrally within a circular clip, never a square with visible corners.
 
-Initiales centrées avec TextService, taille automatique0,4×diamètre lorsque initials_text ne fournit pas d’override ; longue override initials est clipée et n’élargit pas Avatar.
+Initials centered through TextService, automatic size 0.4×diameter when initials_text supplies no override; a long initials override clips without widening Avatar.
 
-Dimensions logiques ; diamètre zéro donne aucune pixel/mesure et aucune opération de clip invalide. Place rectangulaire n’étire pas le cercle en ellipse.
+Logical dimensions; zero diameter gives no pixels/measurement or invalid clipping operation. Rectangular space does not stretch the circle into an ellipse.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Fallback initiales automatiques v1 : découper mots par espaces/punctuation ASCII et frontières Unicode valides ; prendre premier grapheme du premier/dernier mot, un seul si un mot. Capitaliser ASCII a-z seulement, laisser autres graphemes sans transformation approximative.
+Automatic initials fallback v1: split words on ASCII whitespace/punctuation and valid Unicode boundaries; take the first grapheme of the first/last word, only one for a single word. Uppercase only ASCII a-z, leaving other graphemes without approximate transformations.
 
-Nom sans grapheme de lettre/chiffre utilisable ou vide : « ? ». Override initials explicite, y compris chaîne vide, remplace l’auto ; la valeur sémantique reste name.
+Empty name or no usable letter/digit grapheme: “?”. Explicit initials override, including an empty string, replaces automatic initials; semantic value remains name.
 
-Fond automatique = hue FNV-1a32 des bytes UTF-8 réparés du name, saturation0,45/lightness0,55 ; calcul interne sRGB. Foreground automatique noir ou blanc selon meilleur contraste WCAG de ces deux candidats ; style explicite peut remplacer ces choix sans cache global.
+Automatic background=hue from FNV-1a32 of repaired name UTF-8 bytes, saturation 0.45/lightness 0.55; internal sRGB calculation. Automatic foreground is black or white according to the better WCAG contrast of these candidates; explicit style may replace these choices without a global cache.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : SemanticRole::Image nommé name ; pas de Text séparé pour initials déjà représentant ce nom. Image/fallback ne changent pas identité sémantique à chaque remplacement.
+Target contract: SemanticRole::Image named by name; no separate Text for initials already representing that name. Image/fallback do not change semantic identity on every replacement.
 
-Nom vide = description « avatar sans nom » et valeur name vide ; l’application doit fournir nom informatif. Ne pas annoncer « Camille Martin » deux fois avec le Label voisin si composition l’exclut explicitement.
+Empty name gives “unnamed avatar” description and empty name value; the application should supply an informative name. Do not announce “Camille Martin” twice with a neighboring Label if composition explicitly excludes it.
 
-Ponts T068 différés. Aucun IME, données de profil native ou annonce de changement photo implicitement livrés.
+T068 bridges are deferred. No IME, native profile data, or implicitly delivered photo-change announcement.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; subscriptions séparées RAII, copy Image backing et name snapshot avant paint. Contextes de paint/measure sont empruntés pendant callback seulement.
+UI/main thread; separate RAII subscriptions, copy Image backing and name snapshot before paint. Paint/measure contexts are borrowed only during the callback.
 
-Fallback préparé avant publication name ; allocation/mesure échouée laisse dernier snapshot cohérent. Crop clip/scopes doivent s’équilibrer si backend image ou text lève.
+Prepare fallback before publishing name; failed allocation/measurement leaves the last consistent snapshot. Crop clip/scopes must balance if image or text backend throws.
 
-Destruction no-throw sans notification/load cancel métier ; chargeur async externe utilise token applicatif avant State update. Retrait du nœud rend invalidateurs stale no-op et ne conserve pas application en vie indéfiniment.
+Destruction is no-throw without application notification/load cancellation; external async loader uses an application token before State update. Node removal makes stale invalidators no-ops and does not retain the application indefinitely.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de Image/TextService/Binding et clip Painter, pas du modèle de comptes/Sidebar. Decode/ResourceProvider préparés en amont, pas à la première paint.
+Depends on Image/TextService/Binding and Painter clipping rather than account/Sidebar models. Decode/ResourceProvider are prepared upstream, not at first paint.
 
-Image invalide après échec load = initials ; remplacement valide revient à image sans cache d’erreur global. Image alpha transparent montre fond fallback ; image valide même totalement transparente ne redonne pas initials.
+Invalid Image after load failure uses initials; a valid replacement returns to the image without a global error cache. Transparent image alpha reveals fallback background; a valid even fully transparent image does not restore initials.
 
-Diamètre/border_width nonfinis ou négatifs = invalid_argument ; zéro valide. UTF-8 invalide réparé pour hash/initials/texte identiquement. Grapheme composé/emoji peut être utilisé comme override initials ; la détection auto respecte frontières et ne coupe pas les bytes.
+Non-finite/negative diameter/border_width cause invalid_argument; zero is valid. Invalid UTF-8 is repaired identically for hash/initials/text. A combining grapheme/emoji may be used as an initials override; automatic detection respects boundaries without splitting bytes.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/avatar.hpp` et `src/avatar.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/avatar.hpp` and `src/avatar.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : Image/State/TextService/Painter existants. AvatarStyle et options restent dans avatar.hpp ; vrai fallback/crop/layout/observe dans avatar.cpp. Réutiliser draw_image Cover sans dupliquer decode/cache ni introduire types Skia publics.
+Source to extract or reuse: existing Image/State/TextService/Painter. AvatarStyle and options stay in avatar.hpp; actual fallback/crop/layout/observation in avatar.cpp. Reuse Cover draw_image without duplicating decode/cache or introducing public Skia types.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `avatar_image_fallback` : Image valide/invalide update choisit crop ou initials sans decode paint.
-- `avatar_initials_unicode` : nom vide,un/deux mots,accents composés,UTF-8 invalide et override vide sont stables.
-- `avatar_hash_contrast` : même nom donne même fond et choix noir/blanc le plus contrasté.
-- `avatar_circle_clip` : Cover et ratio parent différent restent cercle sans pixels hors clip.
-- `avatar_sources_lifetime` : name/image Binding sources disparues gardent derniers snapshots sûrs.
-- `avatar_multi_instance` : updates/caches/styles d’un avatar n’influencent pas les autres.
+- `avatar_image_fallback`: valid/invalid Image update chooses crop or initials without paint-time decoding.
+- `avatar_initials_unicode`: empty name, one/two words, combining accents, invalid UTF-8, and empty override are stable.
+- `avatar_hash_contrast`: the same name gives the same background and the highest-contrast black/white choice.
+- `avatar_circle_clip`: Cover and differing parent ratio remain circular without pixels outside the clip.
+- `avatar_sources_lifetime`: vanished name/image Binding sources retain safe last snapshots.
+- `avatar_multi_instance`: one avatar's updates/caches/styles do not affect others.
 
-Créer `examples/features/avatar.cpp` et la cible `nativeui_example_avatar`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/avatar.cpp` and target `nativeui_example_avatar`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

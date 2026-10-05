@@ -21,10 +21,10 @@ constexpr ui::Color kAccent{0.27f, 0.76f, 0.72f, 1.0f};
 constexpr ui::Color kMuted{0.58f, 0.65f, 0.74f, 1.0f};
 constexpr ui::Color kSurface{0.085f, 0.11f, 0.16f, 1.0f};
 constexpr std::array<std::string_view, 8> kPages{
-    "Contrôles & actions", "Saisie & formulaires",
-    "Dates & couleurs",    "Collections",
-    "Conteneurs",          "Composition",
-    "Texte & dessin",      "Messages & indicateurs"};
+    "Controls & actions", "Input & forms",
+    "Dates & colors",    "Collections",
+    "Containers",          "Composition",
+    "Text & drawing",      "Messages & indicators"};
 
 // A small example-only adapter for public factories which already return Spec.
 // The retained tree owns the resulting components; this adapter owns no runtime
@@ -75,11 +75,11 @@ ui::SvgIcon make_symbol() {
 std::vector<ui::CollectionItem<int>> make_items() {
   std::vector<ui::CollectionItem<int>> rows;
   for (int i = 1; i <= 120; ++i)
-    rows.push_back({i, "Composant " + std::to_string(i), true, false});
+    rows.push_back({i, "Component " + std::to_string(i), true, false});
   return rows;
 }
 std::vector<ui::TreeNode<int>> make_nodes() {
-  return {{1, {}, "Projet NativeUI", true, true},
+  return {{1, {}, "NativeUI project", true, true},
           {2, 1, "include/nativeui", true, true},
           {3, 2, "button.hpp"},
           {4, 2, "slider.hpp"},
@@ -93,7 +93,7 @@ std::vector<ui::TreeNode<int>> make_nodes() {
 struct Model {
   ui::State<int> page{0};
   ui::State<std::optional<int>> navigation{0};
-  ui::State<std::string> status{"Prêt — explorez les composants"};
+  ui::State<std::string> status{"Ready — explore the components"};
   ui::State<bool> checked{true}, notify{true}, export_audio{true},
       export_midi{false};
   ui::State<bool> bold{true}, italic{false}, underline{false}, bypass{false};
@@ -103,12 +103,12 @@ struct Model {
   ui::State<float> value{0.62f}, knob{0.42f};
   ui::State<ui::RangeValue> range{ui::RangeValue{0.2f, 0.8f}};
   ui::State<double> number{12.5}, rating{3.5};
-  ui::State<std::string> name{"Mon premier projet"},
-      notes{"NativeUI : une interface native, construite en C++.\nNativeUI "
-            "conserve les composants et leurs états.\nSélectionnez le texte, "
-            "ajoutez des lignes, essayez les raccourcis."};
+  ui::State<std::string> name{"My first project"},
+      notes{"NativeUI: a native interface, built in C++.\nNativeUI "
+            "retains components and their state.\nSelect text, "
+            "add rows and try shortcuts."};
   ui::State<std::string> query{"NativeUI"}, font{"Inter"}, city{""},
-      filename{"Projet.nativeui"};
+      filename{"Project.nativeui"};
   ui::State<std::vector<std::string>> tokens{
       std::vector<std::string>{"C++", "Interface"}};
   ui::State<bool> find_open{true};
@@ -138,14 +138,14 @@ struct Model {
   ui::GridViewState<int> grid_state;
   ui::State<std::optional<int>> list_selection{1};
   ui::State<std::vector<ui::BreadcrumbItem>> path{
-      std::vector<ui::BreadcrumbItem>{{"home", "Galerie"},
+      std::vector<ui::BreadcrumbItem>{{"home", "Gallery"},
                                       {"collections", "Collections"},
-                                      {"project", "Projet"}}};
+                                      {"project", "Project"}}};
   ui::State<bool> can_back{true};
   ui::State<std::vector<ui::HistoryEntry>> history{
-      std::vector<ui::HistoryEntry>{{"controls", "Contrôles"},
-                                    {"input", "Saisie"},
-                                    {"colors", "Couleurs"}}};
+      std::vector<ui::HistoryEntry>{{"controls", "Controls"},
+                                    {"input", "Input"},
+                                    {"colors", "Colors"}}};
   ui::State<double> split{250.0};
   ui::State<bool> disclosure{true};
   ui::State<std::vector<std::string>> accordion{
@@ -190,7 +190,7 @@ struct Model {
   void add_row() {
     auto rows = items.get();
     const auto id = next_row_id;
-    rows.push_back({id, "Nouvel élément " + std::to_string(id)});
+    rows.push_back({id, "New item " + std::to_string(id)});
     items.set(std::move(rows));
     ++next_row_id;
   }
@@ -222,36 +222,36 @@ struct Model {
     if (!dialogs)
       return;
     const auto shown = dialogs->show_alert(
-        {.title = "Enregistrer le projet ?",
-         .message = "Cette démonstration conserve vos modifications dans la "
-                    "fenêtre courante.",
-         .actions = {{"save", "Enregistrer", true,
+        {.title = "Save the project?",
+         .message = "This demonstration keeps your changes in the "
+                    "current window.",
+         .actions = {{"save", "Save", true,
                       ui::DialogActionRole::Default},
-                     {"cancel", "Annuler", true,
+                     {"cancel", "Cancel", true,
                       ui::DialogActionRole::Cancel}}},
         [this](ui::DialogResult result) {
           ++dialog_completions;
-          report(result.action_id == "save" ? "Projet enregistré"
-                                            : "Dialogue fermé");
+          report(result.action_id == "save" ? "Project saved"
+                                            : "Dialog closed");
         });
     if (shown != ui::DialogShowResult::Shown)
-      report("Un dialogue est déjà ouvert");
+      report("A dialog is already open");
   }
   void notify_toast() {
     if (toasts)
       (void)toasts->show(
-          {.message = "Votre projet est enregistré",
-           .action_label = "Compris",
-           .action = [this] { report("Notification confirmée"); }});
+          {.message = "Your project is saved",
+           .action_label = "Got it",
+           .action = [this] { report("Notification acknowledged"); }});
   }
 };
 
 std::vector<ui::PopupMenuItem> menu(Model &m) {
-  return {ui::PopupMenuItem::action("Enregistrer", [&m] { m.notify_toast(); }),
-          ui::PopupMenuItem::action("Modifier le projet",
+  return {ui::PopupMenuItem::action("Save", [&m] { m.notify_toast(); }),
+          ui::PopupMenuItem::action("Edit project",
                                     [&m] { m.select_page(1); }),
           ui::PopupMenuItem::separator(),
-          ui::PopupMenuItem::action("Explorer les couleurs",
+          ui::PopupMenuItem::action("Explore colors",
                                     [&m] { m.select_page(2); })};
 }
 
@@ -259,20 +259,20 @@ ui::Spec controls(Model &m) {
   return ui::Column{
       pair(card("Button · Link · PopupMenu · ContextMenu",
                 ui::Column{
-                    ui::Row{ui::Button{"Action principale",
+                    ui::Row{ui::Button{"Primary action",
                                        [&m] {
                                          ++m.clicks;
                                          m.report("Activation " +
                                                   std::to_string(m.clicks));
                                        }},
-                            ui::PopupMenu{"Plus d’actions", menu(m)}}
+                            ui::PopupMenu{"More actions", menu(m)}}
                         .gap(10.0f),
-                    ui::Link{"Explorer les formulaires →", "input",
+                    ui::Link{"Explore forms →", "input",
                              [&m](const auto &) { m.select_page(1); }},
                     View{ui::ContextMenu{
                         ui::Padding{
                             14.0f,
-                            ui::Label{"Clic droit ici pour ouvrir le menu"}}
+                            ui::Label{"Right-click here to open the menu"}}
                             .spec(),
                         menu(m)}
                              .spec()}}
@@ -282,28 +282,28 @@ ui::Spec controls(Model &m) {
            card("ToggleButton · ToggleGroup · SegmentedControl",
                 ui::Column{
                     View{ui::ToggleGroup{
-                        "Mise en forme",
-                        {ui::ToggleButton{"Gras", m.bold}.spec(),
-                         ui::ToggleButton{"Italique", m.italic}.spec(),
-                         ui::ToggleButton{"Souligné", m.underline}.spec()}}
+                        "Formatting",
+                        {ui::ToggleButton{"Bold", m.bold}.spec(),
+                         ui::ToggleButton{"Italic", m.italic}.spec(),
+                         ui::ToggleButton{"Underline", m.underline}.spec()}}
                              .spec()},
                     ui::SegmentedControl<int>{
-                        "Affichage",
+                        "View",
                         m.segment,
-                        {{0, "Liste"}, {1, "Grille"}, {2, "Détails"}}},
-                    hint("Sélection par clic ou flèches du clavier")}
+                        {{0, "List"}, {1, "Grid"}, {2, "Details"}}},
+                    hint("Select by click or arrow keys")}
                     .padding(0)
                     .gap(14)
                     .align(ui::Align::Stretch))),
       pair(
           card("Checkbox · CheckboxGroup · RadioButton · Toggle",
-               ui::Column{ui::Checkbox{m.checked, "Recevoir les notifications"},
+               ui::Column{ui::Checkbox{m.checked, "Receive notifications"},
                           ui::CheckboxGroup{
-                              "Formats à exporter",
+                              "Export formats",
                               {{"audio", "Audio", m.export_audio.binding()},
                                {"midi", "MIDI", m.export_midi.binding()}}},
                           ui::Row{ui::RadioButton{m.radio_group, 1, "Standard"},
-                                  ui::RadioButton{m.radio_group, 2, "Avancé"}}
+                                  ui::RadioButton{m.radio_group, 2, "Advanced"}}
                               .gap(14),
                           ui::Toggle{"Bypass", m.bypass}}
                    .padding(0)
@@ -312,11 +312,11 @@ ui::Spec controls(Model &m) {
               "ComboBox · Slider · RangeSlider · Knob",
               ui::Column{ui::ComboBox<int>{
                              m.combo,
-                             {{1, "Équilibré"}, {2, "Doux"}, {3, "Intense"}}},
+                             {{1, "Balanced"}, {2, "Soft"}, {3, "Intense"}}},
                          ui::Slider{m.value}.step(0.01f),
                          ui::RangeSlider{m.range}.step(0.01f),
-                         ui::Row{ui::Knob{"Intensité", m.knob},
-                                 ui::Column{hint("Curseur et progression liés"),
+                         ui::Row{ui::Knob{"Intensity", m.knob},
+                                 ui::Column{hint("Slider and progress are linked"),
                                             ui::ProgressBar{m.value}}
                                      .padding(0)
                                      .gap(12)}
@@ -326,16 +326,16 @@ ui::Spec controls(Model &m) {
                   .align(ui::Align::Stretch))),
       card("Stepper · NumberInput · Rating",
            ui::Row{
-               ui::Column{hint("Réglage numérique partagé"),
-                          ui::NumberInput{"Quantité", m.number}
+               ui::Column{hint("Shared numeric value"),
+                          ui::NumberInput{"Quantity", m.number}
                               .range(0, 100)
                               .step(0.5)
                               .precision(1)}
                    .padding(0)
                    .gap(8),
-               ui::Stepper{m.number}.label("Quantité").range(0, 100).step(0.5),
-               ui::Column{hint("Votre évaluation"),
-                          ui::Rating{"Évaluation", m.rating}.step(0.5)}
+               ui::Stepper{m.number}.label("Quantity").range(0, 100).step(0.5),
+               ui::Column{hint("Your rating"),
+                          ui::Rating{"Rating", m.rating}.step(0.5)}
                    .padding(0)
                    .gap(8)}
                .gap(24)
@@ -350,51 +350,51 @@ ui::Spec inputs(Model &m) {
   return ui::Column{
       pair(card("Form · Field · Fieldset · TextInput · NumberInput",
                 ui::Form{
-                    ui::Field{"Nom du projet", ui::TextInput{"", m.name}
-                                                   .placeholder("Votre projet")
+                    ui::Field{"Project name", ui::TextInput{"", m.name}
+                                                   .placeholder("Your project")
                                                    .max_length(120)}
                         .required()
-                        .description("Une valeur partagée avec l’avatar"),
+                        .description("Shared with the avatar"),
                     ui::Field{
-                        "Quantité",
+                        "Quantity",
                         ui::NumberInput{"", m.number}.range(0, 100).step(0.5)},
-                    ui::Field{"Police",
+                    ui::Field{"Font",
                               ui::EditableComboBox{
                                   "", m.font,
                                   std::vector<std::string>{"Inter", "Georgia",
                                                            "Menlo", "Arial"}}},
-                    ui::Field{"Ville",
+                    ui::Field{"City",
                               ui::Autocomplete{"", m.city,
                                                std::vector<std::string>{
                                                    "Paris", "Lyon", "Nantes",
                                                    "Bordeaux", "Toulouse"}}
-                                  .placeholder("Commencez à écrire")}}
+                                  .placeholder("Start typing")}}
                     .layout(ui::FormLayout::Responsive)
                     .stacked_below(370)
-                    .on_submit([&m] { m.report("Formulaire validé"); })),
+                    .on_submit([&m] { m.report("Form submitted"); })),
            card("SearchField · TokenField · EditableText",
-                ui::Column{ui::SearchField{"Recherche", m.query}
-                               .placeholder("Rechercher un composant")
+                ui::Column{ui::SearchField{"Search", m.query}
+                               .placeholder("Search components")
                                .on_submit([&m](const auto &text) {
-                                 m.report("Recherche : " + text);
+                                 m.report("Search: " + text);
                                }),
-                           hint("Tags : Entrée ajoute, Retour arrière retire"),
+                           hint("Tags: Enter adds, Backspace removes"),
                            ui::TokenField{"Tags",
                                           m.tokens,
                                           {"C++", "Interface", "Audio",
-                                           "Graphisme", "Natif"}}
+                                           "Graphics", "Native"}}
                                .maximum_tokens(8)
-                               .placeholder("Ajouter un tag"),
-                           ui::EditableText{"Nom de fichier", m.filename}
+                               .placeholder("Add a tag"),
+                           ui::EditableText{"Filename", m.filename}
                                .controller(m.rename)
                                .select_stem()
                                .validator([](std::string_view value)
                                               -> std::optional<std::string> {
                                  if (value.empty())
-                                   return "Un nom est requis";
+                                   return "A name is required";
                                  return {};
                                }),
-                           ui::Button{"Renommer le fichier",
+                           ui::Button{"Rename file",
                                       [&m] { m.rename->begin(); }}}
                     .padding(0)
                     .gap(14)
@@ -402,13 +402,13 @@ ui::Spec inputs(Model &m) {
       card(
           "TextArea · FindBar",
           ui::Column{
-              ui::Row{hint("Notes multiligne · sélection · copier/coller"),
-                      ui::Button{"Afficher la recherche",
+              ui::Row{hint("Multiline notes · selection · copy/paste"),
+                      ui::Button{"Show find bar",
                                  [&m] { m.find_open.set(true); }}}
                   .gap(20),
               ui::FindBar{m.find_open, m.query, m.matches, m.match}.on_navigate(
                   [&m](std::size_t index) {
-                    m.report("Résultat " + std::to_string(index + 1));
+                    m.report("Result " + std::to_string(index + 1));
                   }),
               frame(185, ui::TextArea{"Notes", m.notes})}
               .padding(0)
@@ -424,20 +424,20 @@ ui::Spec dates(Model &m) {
   const auto reference =
       std::chrono::sys_days{std::chrono::year{2026} / 10 / 5};
   const std::vector<ui::ColorSwatch> swatches{
-      {"mint", "Menthe", kAccent},
-      {"sky", "Ciel", {0.3f, 0.6f, 0.95f, 1}},
-      {"orange", "Abricot", {0.98f, 0.6f, 0.32f, 1}},
-      {"purple", "Lavande", {0.68f, 0.48f, 0.95f, 1}}};
+      {"mint", "Mint", kAccent},
+      {"sky", "Sky", {0.3f, 0.6f, 0.95f, 1}},
+      {"orange", "Apricot", {0.98f, 0.6f, 0.32f, 1}},
+      {"purple", "Lavender", {0.68f, 0.48f, 0.95f, 1}}};
   return pair(card("Calendar · DateInput · TimeInput",
-                   ui::Column{hint("Le calendrier et le champ de date "
-                                   "partagent leur sélection"),
-                              ui::Calendar{"Calendrier du projet", m.date}
+                   ui::Column{hint("The calendar and date field "
+                                   "share their selection"),
+                              ui::Calendar{"Project calendar", m.date}
                                   .reference_day(reference)
                                   .today(reference),
-                              ui::DateInput{"Date du projet", m.date}
+                              ui::DateInput{"Project date", m.date}
                                   .reference_day(reference)
                                   .clearable(),
-                              ui::TimeInput{"Heure du projet", m.time}
+                              ui::TimeInput{"Project time", m.time}
                                   .show_seconds()
                                   .clearable()}
                        .padding(0)
@@ -445,14 +445,14 @@ ui::Spec dates(Model &m) {
                        .align(ui::Align::Stretch)),
               card("ColorPicker · ColorWell",
                    ui::Column{
-                       hint("Canaux, transparence, hexadécimal et nuancier"),
+                       hint("Channels, transparency, hexadecimal and swatches"),
                        ui::Grid{ui::GridTracks{{ui::Track::fixed(280)},
                                                {ui::Track::auto_size()}},
-                                ui::ColorPicker{"Couleur d’accent", m.color}
+                                ui::ColorPicker{"Accent color", m.color}
                                     .alpha_enabled()
                                     .swatches(swatches)},
-                       ui::Row{hint("Ouvrir le sélecteur :"),
-                               ui::ColorWell{"Couleur du projet", m.color}
+                       ui::Row{hint("Open the picker:"),
+                               ui::ColorWell{"Project color", m.color}
                                    .swatches(swatches)}
                            .gap(12)
                            .align(ui::Align::Center)}
@@ -463,31 +463,31 @@ ui::Spec dates(Model &m) {
 }
 
 std::vector<ui::TableColumn> columns() {
-  return {{"name", "Nom", 245, 100, {}, ui::Align::Start, true, false},
-          {"id", "Identifiant", 125, 70}};
+  return {{"name", "Name", 245, 100, {}, ui::Align::Start, true, false},
+          {"id", "Identifier", 125, 70}};
 }
 ui::Spec collections(Model &m) {
   auto activated = [&m](const int &key) {
-    m.report("Élément activé : " + std::to_string(key));
+    m.report("Item activated: " + std::to_string(key));
   };
   return ui::Column{
       ui::Row{ui::HistoryButton{ui::HistoryDirection::Backward, m.can_back,
                                 [&m](int steps) {
-                                  m.report("Retour de " +
+                                  m.report("Back by " +
                                            std::to_string(-steps) +
-                                           " étape(s)");
+                                           " step(s)");
                                 }}
                   .entries(m.history),
               ui::Breadcrumbs{m.path}
-                  .label("Chemin du projet")
+                  .label("Project path")
                   .on_navigate([&m](const auto &key) {
-                    m.report("Destination : " + key);
+                    m.report("Destination: " + key);
                   }),
-              ui::Button{"Ajouter une ligne", [&m] { m.add_row(); }}}
+              ui::Button{"Add row", [&m] { m.add_row(); }}}
           .gap(12)
           .align(ui::Align::Center),
-      hint("120 éléments · sélection, navigation clavier, défilement et tri "
-           "des colonnes"),
+      hint("120 items · selection, keyboard navigation, scrolling and "
+           "column sorting"),
       frame(
           370,
           ui::Tabs<int>{m.collection_tab}
@@ -553,8 +553,8 @@ ui::Spec collections(Model &m) {
                                 ui::Label{"Alice Martin — Design"}}
                             .gap(12)
                             .align(ui::Align::Center))
-               .item(2, ui::Row{ui::Avatar{"Benoît Leroy"},
-                                ui::Label{"Benoît Leroy — Développement"}}
+               .item(2, ui::Row{ui::Avatar{"Ben Leroy"},
+                                ui::Label{"Ben Leroy — Development"}}
                             .gap(12)
                             .align(ui::Align::Center))
                .item(3, ui::Row{ui::Avatar{"Camille Durand"},
@@ -585,52 +585,53 @@ ui::Spec containers(Model &m) {
                ui::SplitView{
                    m.split,
                    ui::Padding{
-                       18, ui::Column{ui::Label{"Panneau de navigation"}.bold(),
-                                      hint("Glissez le séparateur →")}
+                       18, ui::Column{ui::Label{"Navigation pane"}.bold(),
+                                      hint("Drag the splitter →")}
                                .padding(0)
                                .gap(12)},
                    ui::Padding{
                        18,
                        ui::Column{
-                           ui::Label{"Espace de travail"}.bold(),
-                           hint("Redimensionnement à la souris et au clavier")}
+                           ui::Label{"Workspace"}.bold(),
+                           hint("Resize with pointer or keyboard")}
                            .padding(0)
                            .gap(12)}}
                    .minimum_panes(170, 210))),
       pair(
           card("Collapsible · Accordion",
                ui::Column{
-                   ui::Collapsible{"Options du projet", m.disclosure,
-                                   ui::Row{ui::Checkbox{m.notify, "Activer"},
+                   ui::Collapsible{"Project options", m.disclosure,
+                                   ui::Row{ui::Checkbox{m.notify, "Enable"},
                                            ui::Toggle{"Bypass", m.bypass}}
                                        .gap(18)},
                    ui::Accordion{m.accordion}
                        .mode(ui::AccordionMode::Single)
                        .section(
-                           "first", "À propos de NativeUI",
+                           "first", "About NativeUI",
                            ui::Label{
-                               "Composants retenus, rendu Skia, fenêtres Pugl"})
+                               "Retained components, Skia "
+                                          "rendering, Pugl windows"})
                        .section(
                            "second", "Interactions",
                            ui::Label{
-                               "Pointeur, clavier, focus et états observables"})
-                       .section("third", "Ressources",
-                                ui::Label{"Images, SVG et typographie"})}
+                               "Pointer, keyboard, focus and observable state"})
+                       .section("third", "Resources",
+                                ui::Label{"Images, SVG and typography"})}
                    .padding(0)
                    .gap(14)
                    .align(ui::Align::Stretch)),
           card("Row · Column · Flex · Spacer · Padding",
                ui::Column{
-                   ui::Row{tile("Fixe", {0.16f, 0.28f, 0.36f, 1}, 90),
-                           ui::Flex{tile("Flex : espace restant",
+                   ui::Row{tile("Fixed", {0.16f, 0.28f, 0.36f, 1}, 90),
+                           ui::Flex{tile("Flex: remaining space",
                                          {0.11f, 0.36f, 0.35f, 1})}
                                .grow(1)}
                        .gap(10),
                    ui::Spacer{8},
                    ui::Padding{14,
-                               ui::Label{"14 points de marge autour du texte"}},
-                   hint("Les espaces et les proportions suivent la taille du "
-                        "panneau")}
+                               ui::Label{"14 points of padding around the text"}},
+                   hint("Spacing and proportions follow the "
+                        "panel size")}
                    .padding(0)
                    .gap(10)
                    .align(ui::Align::Stretch))),
@@ -639,12 +640,12 @@ ui::Spec containers(Model &m) {
                ui::Grid{ui::GridTracks{
                             {ui::Track::flex(), ui::Track::flex()},
                             {ui::Track::fixed(100), ui::Track::fixed(80)}},
-                        tile("Cellule A", {0.2f, 0.25f, 0.4f, 1}),
-                        tile("Cellule B", {0.35f, 0.23f, 0.4f, 1}),
+                        tile("Cell A", {0.2f, 0.25f, 0.4f, 1}),
+                        tile("Cell B", {0.35f, 0.23f, 0.4f, 1}),
                         ui::Clip{ui::Stack{
-                            tile("Fond empilé", {0.1f, 0.35f, 0.3f, 1}),
-                            ui::Padding{16, ui::Badge{"SUPERPOSITION"}}}},
-                        tile("Cellule D", {0.2f, 0.3f, 0.4f, 1})}
+                            tile("Stacked background", {0.1f, 0.35f, 0.3f, 1}),
+                            ui::Padding{16, ui::Badge{"OVERLAY"}}}},
+                        tile("Cell D", {0.2f, 0.3f, 0.4f, 1})}
                    .gap(10)),
           card("Scroll · ScrollView",
                ui::Column{
@@ -660,16 +661,16 @@ ui::Spec containers(Model &m) {
                                   [&m] { m.horizontal.scroll_by({-160, 0}); }},
                        ui::Button{"→",
                                   [&m] { m.horizontal.scroll_by({160, 0}); }},
-                       hint("Scroll piloté par l’application")}
+                       hint("Application-controlled Scroll")}
                        .gap(12),
                    frame(100,
                          ui::ScrollView{
                              m.plain_scroll,
                              ui::Column{
-                                 ui::Label{"ScrollView : molette et barre"},
-                                 ui::Label{"Ligne 2"}, ui::Label{"Ligne 3"},
-                                 ui::Label{"Ligne 4"}, ui::Label{"Ligne 5"},
-                                 ui::Label{"Ligne 6"}}
+                                 ui::Label{"ScrollView: wheel and scrollbar"},
+                                 ui::Label{"Row 2"}, ui::Label{"Row 3"},
+                                 ui::Label{"Row 4"}, ui::Label{"Row 5"},
+                                 ui::Label{"Row 6"}}
                                  .padding(8)
                                  .gap(18)})}
                    .padding(0)
@@ -690,8 +691,8 @@ ui::Spec composition(Model &m) {
           card("Visibility · Enabled · ReadOnly",
                ui::Column{
                    ui::Row{ui::Checkbox{m.visible, "Visible"},
-                           ui::Checkbox{m.enabled, "Actif"},
-                           ui::Checkbox{m.read_only, "Lecture seule"}}
+                           ui::Checkbox{m.enabled, "Active"},
+                           ui::Checkbox{m.read_only, "Read only"}}
                        .gap(12),
                    ui::Visibility{
                        m.visible,
@@ -700,39 +701,39 @@ ui::Spec composition(Model &m) {
                            ui::ReadOnly{
                                m.read_only,
                                ui::Column{
-                                   ui::TextInput{"Champ contrôlé", m.name},
+                                   ui::TextInput{"Controlled field", m.name},
                                    ui::Slider{m.value},
                                    ui::Button{
-                                       "Action contrôlée",
-                                       [&m] { m.report("Action autorisée"); }}}
+                                       "Controlled action",
+                                       [&m] { m.report("Action allowed"); }}}
                                    .padding(0)
                                    .gap(12)}}}
                        .mode(ui::VisibilityMode::Collapsed),
-                   hint("Chaque option agit sur le sous-arbre ci-dessus")}
+                   hint("Each option affects the subtree above")}
                    .padding(0)
                    .gap(14)
                    .align(ui::Align::Stretch)),
           card("If · Switch",
                ui::Column{ui::Checkbox{m.conditional,
-                                       "Afficher la branche conditionnelle"},
-                          ui::If{m.conditional, ui::Badge{"Branche If montée"}},
+                                       "Show conditional branch"},
+                          ui::If{m.conditional, ui::Badge{"If branch mounted"}},
                           ui::SegmentedControl<int>{
-                              "Branche",
+                              "Branch",
                               m.branch,
-                              {{0, "Repos"}, {1, "Actif"}, {2, "Terminé"}}},
+                              {{0, "Idle"}, {1, "Active"}, {2, "Done"}}},
                           ui::Switch<int>{m.branch}
-                              .when(0, ui::Label{"En attente d’une action"})
+                              .when(0, ui::Label{"Waiting for an action"})
                               .when(1, ui::ProgressBar{m.value})
-                              .when(2, ui::Badge{"Terminé"})}
+                              .when(2, ui::Badge{"Done"})}
                    .padding(0)
                    .gap(14)
                    .align(ui::Align::Stretch))),
       pair(
           card("ForEach",
                ui::Column{
-                   ui::Row{ui::Button{"Ajouter", [&m] { m.add_chip(); }},
+                   ui::Row{ui::Button{"Add", [&m] { m.add_chip(); }},
                            ui::Button{
-                               "Retirer",
+                               "Remove",
                                [&m] {
                                  auto values = m.chips.get();
                                  if (!values.empty())
@@ -748,35 +749,35 @@ ui::Spec composition(Model &m) {
                          // position.
                          return ui::Column{
                              ui::Spacer{0, static_cast<float>(id - 1) * 30},
-                             ui::Badge{"Élément " + std::to_string(id)}}
+                             ui::Badge{"Item " + std::to_string(id)}}
                              .padding(0)
                              .gap(0);
                        }},
-                   hint("L’identité stable préserve les composants conservés")}
+                   hint("Stable identity preserves retained components")}
                    .padding(0)
                    .gap(14)
                    .align(ui::Align::Stretch)),
           card("FocusScope · CommandScope · StyleScope",
                ui::Column{
-                   ui::Checkbox{m.focus_scope, "Limiter le focus au groupe"},
+                   ui::Checkbox{m.focus_scope, "Keep focus within the group"},
                    ui::FocusScope{
                        m.focus_scope,
-                       ui::Row{ui::Button{"Premier",
-                                          [&m] { m.report("Premier bouton"); }},
+                       ui::Row{ui::Button{"First",
+                                          [&m] { m.report("First button"); }},
                                ui::Button{"Second",
-                                          [&m] { m.report("Second bouton"); }}}
+                                          [&m] { m.report("Second button"); }}}
                            .gap(12)},
                    ui::CommandScope{
                        [&m](ui::Command command) {
-                         m.report("Commande reçue : " +
+                         m.report("Command received: " +
                                   std::to_string(static_cast<int>(command)));
                          return ui::EventResult::Ignored;
                        },
-                       ui::TextInput{"Commandes d’édition", m.filename}},
+                       ui::TextInput{"Editing commands", m.filename}},
                    ui::StyleScope{
-                       scope, ui::Column{ui::Label{"Accent local lavande"},
+                       scope, ui::Column{ui::Label{"Local lavender accent"},
                                          ui::Slider{m.knob},
-                                         ui::Toggle{"Style local", m.notify}}
+                                         ui::Toggle{"Local style", m.notify}}
                                   .padding(0)
                                   .gap(10)}}
                    .padding(0)
@@ -795,22 +796,22 @@ ui::Spec drawing(Model &m) {
   return ui::Column{
       pair(card("Label · Header · RichText",
                 ui::Column{
-                    ui::Header{"Une interface expressive"}.subtitle(
-                        "Hiérarchie, typographie et contenu enrichi"),
-                    ui::Label{"Titre en gras"}.size(20).bold(),
-                    ui::Label{"Texte secondaire en italique"}.italic().color(
+                    ui::Header{"An expressive interface"}.subtitle(
+                        "Hierarchy, typography and rich content"),
+                    ui::Label{"Bold heading"}.size(20).bold(),
+                    ui::Label{"Secondary text in italics"}.italic().color(
                         kMuted),
                     ui::RichText{std::vector<ui::RichTextSpan>{
-                        {.text = "NativeUI associe texte courant, "},
+                        {.text = "NativeUI combines regular text, "},
                         {.id = "interactive",
-                         .text = "lien interactif",
+                         .text = "interactive link",
                          .style = accent,
                          .underline = true,
                          .on_activate =
-                             [&m] { m.report("Lien RichText activé"); }},
-                        {.text = " et contenu multilingue.\nFrançais · "
-                                 "Ελληνικά · العربية · 日本語\nLe paragraphe "
-                                 "s’adapte à la largeur disponible."}}}}
+                             [&m] { m.report("RichText link activated"); }},
+                        {.text = " and multilingual content.\nEnglish · "
+                                 "Ελληνικά · العربية · 日本語\nThe paragraph "
+                                 "adapts to the available width."}}}}
                     .padding(0)
                     .gap(14)
                     .align(ui::Align::Stretch)),
@@ -819,24 +820,25 @@ ui::Spec drawing(Model &m) {
                     ui::Row{ui::ImageView{m.icon}.size({130, 130}),
                             ui::Column{
                                 ui::IconView{m.symbol}.size(50).color(kAccent),
-                                ui::Badge{"SVG VECTORIEL"}}
+                                ui::Badge{"SVG VECTOR"}}
                                 .padding(0)
                                 .gap(16)}
                         .gap(30)
                         .align(ui::Align::Center),
                     ui::Row{ui::Avatar{m.name}.size(52),
                             ui::Avatar{"Alice Martin"}.size(42),
-                            ui::Avatar{"Benoît Leroy"}.size(36),
+                            ui::Avatar{"Ben Leroy"}.size(36),
                             ui::Avatar{"Camille"}.size(30)}
                         .gap(16)
                         .align(ui::Align::Center),
-                    hint("L’avatar du projet suit le nom saisi dans le "
-                         "formulaire")}
+                    hint("The project avatar follows the name entered in "
+                            "the "
+                            "form.")}
                     .padding(0)
                     .gap(18)
                     .align(ui::Align::Stretch))),
-      card("Canvas · Divider", ui::Column{hint("Cliquez sur la toile : le "
-                                               "motif et le compteur changent"),
+      card("Canvas · Divider", ui::Column{hint("Click the canvas: the "
+                       "pattern and counter change"),
                                           ui::Canvas{880, 200,
                                                      [&m](ui::CanvasContext2D
                                                               &g) {
@@ -897,7 +899,7 @@ ui::Spec drawing(Model &m) {
                                                           Ignored;
                                                     ++m.strokes;
                                                     context.invalidate();
-                                                    m.report("Toile : " +
+                                                    m.report("Canvas: " +
                                                              std::to_string(
                                                                  m.strokes));
                                                     return ui::EventResult::
@@ -905,8 +907,8 @@ ui::Spec drawing(Model &m) {
                                                   }),
                                           ui::Divider{},
                                           hint(
-                                              "Dessin en coordonnées logiques, "
-                                              "sans accès au backend")}
+                                              "Drawing in logical coordinates, "
+                       "without backend access")}
                                    .padding(0)
                                    .gap(14)
                                    .align(ui::Align::Stretch))}
@@ -919,15 +921,15 @@ ui::Spec drawing(Model &m) {
 ui::Spec messages(Model &m) {
   return ui::Column{
       pair(card("Dialog · Toast",
-                ui::Column{hint("Ouvrez un dialogue modal ou une notification "
-                                "temporaire"),
-                           ui::Row{ui::Button{"Ouvrir le dialogue",
+                ui::Column{hint("Open a modal dialog or "
+                        "temporary notification"),
+                           ui::Row{ui::Button{"Open dialog",
                                               [&m] { m.open_dialog(); }},
-                                   ui::Button{"Afficher le toast",
+                                   ui::Button{"Show toast",
                                               [&m] { m.notify_toast(); }}}
                                .gap(12),
-                           hint("Échap ferme le dialogue · le toast disparaît "
-                                "après son délai")}
+                           hint("Escape closes the dialog · the toast disappears "
+                        "after its timeout")}
                     .padding(0)
                     .gap(18)
                     .align(ui::Align::Stretch)),
@@ -935,20 +937,20 @@ ui::Spec messages(Model &m) {
                 ui::Column{
                     ui::Popover{
                         m.popover,
-                        ui::Button{"Ouvrir le popover",
+                        ui::Button{"Open popover",
                                    [&m] { m.popover.set(!m.popover.get()); }},
-                        ui::Column{ui::Label{"Réglages rapides"}.bold(),
+                        ui::Column{ui::Label{"Quick settings"}.bold(),
                                    ui::Toggle{"Notifications", m.notify},
                                    ui::Slider{m.value},
-                                   ui::Button{"Fermer",
+                                   ui::Button{"Close",
                                               [&m] { m.popover.set(false); }}}
                             .padding(18)
                             .gap(12)}
                         .match_anchor_width(),
                     ui::Tooltip{
-                        "Une aide s’affiche au survol ou au focus après 400 ms",
-                        ui::Button{"Survolez pour obtenir de l’aide",
-                                   [&m] { m.report("Bouton avec infobulle"); }}}
+                        "Help appears on hover or focus after 400 ms",
+                        ui::Button{"Hover for help",
+                                   [&m] { m.report("Button with tooltip"); }}}
                         .delay(400ms)}
                     .padding(0)
                     .gap(18)
@@ -957,19 +959,19 @@ ui::Spec messages(Model &m) {
                 ui::Column{ui::Slider{m.value}.step(0.01f),
                            ui::ProgressBar{m.value},
                            ui::Meter{m.value}.levels({0.65f, 0.85f}),
-                           hint("Le curseur pilote les deux indicateurs")}
+                           hint("The slider controls both indicators")}
                     .padding(0)
                     .gap(18)
                     .align(ui::Align::Stretch)),
            card("Spinner · Badge",
                 ui::Column{
-                    ui::Toggle{"Animation active", m.spinning},
+                    ui::Toggle{"Animation enabled", m.spinning},
                     ui::Row{
-                        ui::Spinner{"Chargement"}.active(m.spinning).size(42),
-                        ui::Badge{"83 COMPOSANTS"}, ui::Badge{"NATIVE / C++20"}}
+                        ui::Spinner{"Loading"}.active(m.spinning).size(42),
+                        ui::Badge{"83 COMPONENTS"}, ui::Badge{"NATIVE / C++20"}}
                         .gap(20)
                         .align(ui::Align::Center),
-                    hint("Animation liée au dispatcher de la fenêtre")}
+                    hint("Animation uses the window dispatcher.")}
                     .padding(0)
                     .gap(18)
                     .align(ui::Align::Stretch)))}
@@ -993,8 +995,8 @@ ui::Spec page(Model &m, int index, ui::Spec content) {
                       ui::Badge{"0" + std::to_string(index + 1) + " / 08"}}
                   .align(ui::Align::Center)
                   .gap(16),
-              hint("Cliquez, saisissez et naviguez au clavier pour explorer "
-                   "les composants."),
+              hint("Click, type and use the keyboard to explore "
+                   "the components."),
               View{std::move(content)}}
               .padding(24)
               .gap(18)
@@ -1013,7 +1015,7 @@ ui::UI gallery(Model &m) {
                    .when(7, View{page(m, 7, messages(m))});
   auto sidebar =
       ui::Sidebar<int>{m.navigation}
-          .section("library", "EXPLORER")
+          .section("library", "EXPLORE")
           .item(0, std::string{kPages[0]})
           .item(1, std::string{kPages[1]})
           .item(2, std::string{kPages[2]})
@@ -1024,11 +1026,11 @@ ui::UI gallery(Model &m) {
           .item(7, std::string{kPages[7]})
           .on_navigate([&m](const int &value) { m.select_page(value); });
   std::vector<ui::ToolbarItem> tools{
-      {"Enregistrer",
-       ui::Button{"Enregistrer", [&m] { m.notify_toast(); }}.spec(),
-       ui::PopupMenuItem::action("Enregistrer", [&m] { m.notify_toast(); })},
-      {"À propos", ui::Button{"À propos", [&m] { m.select_page(7); }}.spec(),
-       ui::PopupMenuItem::action("À propos", [&m] { m.select_page(7); })}};
+      {"Save",
+       ui::Button{"Save", [&m] { m.notify_toast(); }}.spec(),
+       ui::PopupMenuItem::action("Save", [&m] { m.notify_toast(); })},
+      {"About", ui::Button{"About", [&m] { m.select_page(7); }}.spec(),
+       ui::PopupMenuItem::action("About", [&m] { m.select_page(7); })}};
   ui::Theme theme = ui::default_theme();
   theme.palette.background = {0.055f, 0.075f, 0.11f, 1};
   theme.palette.surface = kSurface;
@@ -1052,12 +1054,12 @@ ui::UI gallery(Model &m) {
               ui::Padding{
                   18, ui::Row{ui::IconView{m.icon}.size(48).monochrome(false),
                               ui::Column{ui::Label{"NativeUI"}.size(25).bold(),
-                                         hint("LE LABORATOIRE DES COMPOSANTS")}
+                                         hint("THE COMPONENT LAB")}
                                   .padding(0)
                                   .gap(4),
                               ui::Flex{ui::Spacer{0}}.grow(1),
-                              ui::Badge{"83 COMPOSANTS"},
-                              ui::Toolbar{"Actions du laboratoire",
+                              ui::Badge{"83 COMPONENTS"},
+                              ui::Toolbar{"Component lab actions",
                                           std::move(tools)}}
                           .gap(20)
                           .align(ui::Align::Center)},
@@ -1066,7 +1068,7 @@ ui::UI gallery(Model &m) {
                                  {ui::Track::flex()}},
                   ui::Padding{12, ui::Column{std::move(sidebar), ui::Spacer{16},
                                              hint("C++20 · Skia · Pugl"),
-                                             hint("8 écrans interactifs")}
+                                             hint("8 interactive screens")}
                                       .padding(0)
                                       .gap(8)
                                       .align(ui::Align::Stretch)},
@@ -1074,8 +1076,8 @@ ui::UI gallery(Model &m) {
               ui::Padding{10,
                           ui::Row{ui::Badge{m.status},
                                   ui::Flex{ui::Spacer{0}}.grow(1),
-                                  hint("Tab : focus   ·   Échap : fermer   ·   "
-                                       "Molette : défiler")}
+                                  hint("Tab: focus   ·   Escape: close   ·   "
+                                       "Wheel: scroll")}
                               .gap(12)
                               .align(ui::Align::Center)}},
       },
@@ -1160,7 +1162,7 @@ int self_test(const std::filesystem::path &snapshots = {}) {
   model.query.set("NativeUI");
   if (model.matches.get() != 2)
     return example::fail("find bar count does not follow the notes");
-  model.notes.set("Sans correspondance");
+  model.notes.set("No matches");
   if (model.matches.get() != 0 || model.match.get())
     return example::fail("find bar retained a missing result");
   model.select_page(5);
@@ -1231,7 +1233,7 @@ int main(int argc, char **argv) {
       return example::fail("application initialization failed");
     ui::StandaloneWindow window{
         application, tree,
-        ui::WindowDesc{.title = "NativeUI — Le laboratoire des composants",
+        ui::WindowDesc{.title = "NativeUI — The Component Lab",
                        .size = {1380, 940},
                        .resizable = true,
                        .min_size = ui::Size{780, 600},

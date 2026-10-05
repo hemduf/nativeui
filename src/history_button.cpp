@@ -115,7 +115,7 @@ struct HistoryRuntime : std::enable_shared_from_this<HistoryRuntime> {
         accepted = std::move(owned);
         diagnostic.clear();
       } else {
-        diagnostic = "Clés d'historique invalides";
+        diagnostic = "Invalid history keys";
       }
       entries_revision = revision;
       if (invalidate)
@@ -459,7 +459,7 @@ HistoryButton::HistoryButton(HistoryDirection direction, Binding<bool> can,
                              std::function<void(int)> navigate)
     : direction_(direction), can_(std::move(can)),
       navigate_(std::move(navigate)),
-      label_(direction == HistoryDirection::Backward ? "Retour" : "Avance") {}
+      label_(direction == HistoryDirection::Backward ? "Back" : "Forward") {}
 HistoryButton::HistoryButton(HistoryDirection direction, State<bool> &can,
                              std::function<void(int)> navigate)
     : HistoryButton(direction, can.binding(), std::move(navigate)) {}

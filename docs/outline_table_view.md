@@ -1,20 +1,20 @@
 # OutlineTableView<Key>
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Hiérarchie virtualisée avec cellules en colonnes : disclosure dans la colonne principale, tri/resize/reorder dans le header. NativeUI ne possède pas ce composant. Il combine les contrats d’[OutlineView](outline_view.md) et [TableView](table_view.md).
+Virtualized hierarchy with column cells: disclosure in the main column, sort/resize/reorder in the header. NativeUI has no such component. It combines the [OutlineView](outline_view.md) and [TableView](table_view.md) contracts.
 
-MyGo `ui/outline.go` : `OutlineTable`, `prefix`, `keys`, et `ui/table.go` : `table`, `tableHeader`. La première colonne déclarée porte le disclosure. La cible donne un ID explicite pour que déplacer les colonnes ne déplace pas arbitrairement la hiérarchie.
+MyGo `ui/outline.go`: `OutlineTable`, `prefix`, `keys`, and `ui/table.go`: `table`, `tableHeader`. The first declared column carries disclosure. The target provides an explicit ID so moving columns does not arbitrarily move the hierarchy.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 template<class Key>
@@ -38,86 +38,86 @@ OutlineTableView&& style(OutlineTableViewStyle) &&;
 Spec spec() &&;
 ```
 
-State overloads de layout/sort conservés dans cette cible. Exemple futur :
+State overloads of layout/sort retained in this target. Future example:
 
 ```cpp
-ui::State<std::vector<ui::TreeNode<int>>> nodes{{{1,std::nullopt,"Dossier",true,true}}};
+ui::State<std::vector<ui::TreeNode<int>>> nodes{{{1,std::nullopt,"Folder",true,true}}};
 ui::State<ui::SelectionSnapshot<int>> chosen{{}};
 ui::Selection<int> selection{chosen};
 ui::State<std::vector<int>> expanded{{}};
 auto outline = ui::OutlineTableView<int>{nodes,selection,expanded}
-    .columns({ui::TableColumn{.id="name",.title="Nom"}}).tree_column("name")
+    .columns({ui::TableColumn{.id="name",.title="Name"}}).tree_column("name")
     .cell([](const auto& node,const auto&){return std::move(ui::Label{node.label}).spec();});
 ```
 
-Default tree column = première déclarée si non vide ; IDs/types sont ceux de TableView, TreeNode de TreeView et Selection de ListView, jamais duplications.
+Default tree column = first declared if nonempty; IDs/types come from TableView, TreeNode from TreeView, and Selection from ListView, never duplicated.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Graph, expansion, selection et column layout sont quatre domaines séparés. Row keys suivent les nodes, columns suivent IDs. Demande de tri ne produit pas un tri global brisant parents : l’application renvoie un snapshot triant siblings tout en conservant parents. Aucune persistence fichier interne. Un Binding invalide de domaine interdit ses mutations, sans émettre callback fictif.
+Graph, expansion, selection, and column layout are four separate domains. Row keys follow nodes; columns follow IDs. A sort request does not globally sort and break parents: the application returns a snapshot sorting siblings while retaining parents. No internal file persistence. An invalid domain Binding forbids its mutations without a fictitious callback.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Header gestures TableView : resize/reorder/click sort/autofit distincts. Body gestures OutlineView : disclosure click, navigation Right/Left, activation row. Le disclosure conserve la même tree_column quand son header est déplacé. Keys Left/Right vont à la hiérarchie si focus sur row ; cell editor qui consomme ses touches conserve priorité. PointerCancel/Échap annule column drag sans fermer nodes. Wheel X header/body synchronisée, Y body uniquement.
+TableView header gestures: resize/reorder/click sort/autofit are distinct. OutlineView body gestures: disclosure click, Right/Left navigation, row activation. Disclosure retains the same tree_column when its header moves. Left/Right keys navigate the hierarchy when focus is on the row; a cell editor consuming its keys retains priority. PointerCancel/Escape cancel column drag without closing nodes. X wheel synchronized across header/body, Y only in body.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Flatten visible tree metadata avant fenêtre virtuelle. Cell tree_column réserve depth*indent + chevron dans sa largeur, les autres gardent padding normal. Height row = max cell metrics ; width change remeasure variable heights tout en conservant key/inset. Header Y fixe et X commun. Tree_column narrow clippe content avec chevron hit target borné, sans déplacer les autres colonnes. Zero columns signifie aucune cell factory, graph state gardé mais body presentation vide.
+Flatten visible tree metadata before the virtual window. The tree_column cell reserves depth*indent + chevron within its width; others retain normal padding. Row height = maximum cell metrics; width changes remeasure variable heights while retaining key/inset. Fixed header Y and shared X. A narrow tree_column clips content with a bounded chevron hit target without moving other columns. Zero columns means no cell factory, preserved graph state but empty body presentation.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-OutlineTableViewStyle réutilise les types row/header/disclosure des deux parents, avec composition owned et priorité explicite locale ; ne pas copier slots Theme imaginaires. Guide de resize/reorder et chevron sont peints par le .cpp. Selected/expanded/sort marker et focus distincts ; invalidations classées par domaine.
+OutlineTableViewStyle reuses row/header/disclosure types from both parents, with owned composition and explicit local priority; do not copy imaginary Theme slots. Resize/reorder guide and chevron painted by the .cpp. Selected/expanded/sort marker and focus are distinct; invalidations classified by domain.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-TreeTable/Cell/ColumnHeader absents des rôles actuels ; Group/Custom provisoires, extension neutre future pour relations hiérarchiques et colonnes. Logical metadata et geometry generation immutables ; aucun cell/row factory depuis lecteur. Expansion, selection et columns publiés dans une génération cohérente, pas mélange ancien ordre avec nouveaux widths.
+TreeTable/Cell/ColumnHeader are absent from current roles; provisional Group/Custom, with a future neutral extension for hierarchical relationships and columns. Immutable logical metadata and geometry generation; no cell/row factory from a reader. Expansion, selection, and columns published in one consistent generation, without mixing old order with new widths.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Un changement dataset et layout pendant input prépare une nouvelle vue cohérente au checkpoint. ColumnId/tree_column supprimée : si nouvelle config ne la contient plus, default première colonne et diagnostic ; explicit tree_column invalide initial refuse config. Retrait node capturé/focus récupéré via Outline. Callback sort/expansion réentrant peut modifier graph ; la pile termine sans référence cell stale. Failure provider fit conserve widths antérieurs.
+Dataset and layout changes during input prepare a new consistent view at the checkpoint. Removed ColumnId/tree_column: if the new configuration no longer contains it, default to the first column and diagnose; an initially invalid explicit tree_column rejects configuration. Removed captured node/focus recovered through Outline. A reentrant sort/expansion callback may modify the graph; the stack finishes without a stale cell reference. Fit provider failure retains previous widths.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend kernels OutlineView/TableView/ListView et modèles communs. Valider graph et column IDs ; cycles/duplicate/orphan refusés selon Outline. Min/max finites, tree_column absente initial invalid_argument. Empty graph/columns, très grande depth, largeur nulle, colonne fixée ou déplacée et external sort invalid sont couverts. Pas de Router ou lazy I/O.
+Depends on OutlineView/TableView/ListView cores and common models. Validate graph and column IDs; cycles/duplicates/orphans rejected under Outline rules. Finite min/max, initially absent tree_column throws invalid_argument. Empty graph/columns, great depth, zero width, fixed or moved column, and invalid external sort are covered. No Router or lazy I/O.
 
-Les touches `Key::PageUp` et `Key::PageDown` sont des additions cibles en fin de l’enum portable actuel, avec traduction plateforme et tests. Le source actuel ne les définit pas. Typeahead utilise les InputEvent de texte commité ; aucun support natif complet IME n’est supposé.
+`Key::PageUp` and `Key::PageDown` are target additions at the end of the current portable enum, with platform translation and tests. The current source does not define them. Typeahead uses committed-text InputEvent objects; no complete native IME support is assumed.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/outline_table_view.hpp` et `src/outline_table_view.cpp`.
+Target: `include/nativeui/outline_table_view.hpp` and `src/outline_table_view.cpp`.
 
-outline_table_view.hpp expose son builder/style et adaptateurs typed ; outline_table_view.cpp est le noyau orchestration de graphe visible/columns/gestures/layout/paint. Partager algorithmes non templates des deux composants sans maintenir deux caches concurrents de hauteur ou scroll. Aucun fichier supplémentaire par cell, disclosure ou header.
+outline_table_view.hpp exposes its builder/style and typed adapters; outline_table_view.cpp is the orchestration core for visible graph/columns/gestures/layout/paint. Share non-template algorithms from both components without maintaining competing height or scroll caches. No additional file per cell, disclosure, or header.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `outline_table_tree_column_id` : reorder conserve disclosure dans son ID.
-- `outline_table_sibling_sort` : callback tri, parents préservés par snapshot app.
-- `outline_table_header_body_sync` : horizontal exact et vertical header fixe.
-- `outline_table_indent_autofit` : inclut indent/chevron dans largeur de la colonne.
-- `outline_table_resize_anchor` : variable rows avec anchor stable.
-- `outline_table_editor_keys` : Left/Right consommés par edit cell respectés.
-- `outline_table_remove_column_node` : capture/focus safe, fallback explicite.
-- `outline_table_combined_fault` : pas de génération mixte lors failure graph/layout.
-- `outline_table_semantics_no_factory` : snapshots sans callback cell.
+- `outline_table_tree_column_id`: reorder retains disclosure in its ID.
+- `outline_table_sibling_sort`: sort callback, parents retained by the application snapshot.
+- `outline_table_header_body_sync`: exact horizontal movement and fixed vertical header.
+- `outline_table_indent_autofit`: includes indent/chevron in column width.
+- `outline_table_resize_anchor`: variable rows with stable anchor.
+- `outline_table_editor_keys`: respect Left/Right consumed by cell editing.
+- `outline_table_remove_column_node`: safe capture/focus, explicit fallback.
+- `outline_table_combined_fault`: no mixed generation on graph/layout failure.
+- `outline_table_semantics_no_factory`: snapshots without cell callback.
 
-Créer l’exemple public futur `examples/features/outline_table_view.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/outline_table_view.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

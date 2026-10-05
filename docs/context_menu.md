@@ -1,25 +1,22 @@
 # ContextMenu
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Ajouter à un contenu retenu un menu contextuel portable. Le contenu garde sa mesure et ses
-interactions normales jusqu’à la demande explicite de menu.
+Add a portable context menu to retained content. The content keeps its normal measurement and interactions until an explicit menu request.
 
-NativeUI fournit [combo_popup.hpp](../include/nativeui/combo_popup.hpp) et
-[overlay.hpp](../include/nativeui/overlay.hpp), mais pas de décorateur ContextMenu.
+NativeUI provides [combo_popup.hpp](../include/nativeui/combo_popup.hpp) and [overlay.hpp](../include/nativeui/overlay.hpp) but no ContextMenu decorator.
 
-MyGo : `ui/menu.go`, méthode `Element.ContextMenu`, puis `menuPress`, `menuRelease`, `menuKey`. Elle
-compose des menus plateforme ; cible NativeUI réutilise les panneaux de PopupMenu en overlay.
+MyGo: `ui/menu.go`, method `Element.ContextMenu`, then `menuPress`, `menuRelease`, `menuKey`. It composes platform menus; the NativeUI target reuses PopupMenu panels in an overlay.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class ContextMenu {
@@ -31,171 +28,114 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 auto text = ui::Label("Document").spec();
 auto contextual = ui::ContextMenu(
     std::move(text),
-    std::vector<ui::PopupMenuItem>{ui::PopupMenuItem::action("Copier", [] {})})
+    std::vector<ui::PopupMenuItem>{ui::PopupMenuItem::action("Copy", [] {})})
     .spec();
 ```
 
-Les items, checked, shortcut_label et children suivent exactement [PopupMenu](popup_menu.md). Le
-provider n’est appelé que lorsqu’une demande contextuelle est acceptée.
+Items, checked, shortcut_label, and children follow [PopupMenu](popup_menu.md) exactly. The provider is called only when a context-menu request is accepted.
 
-Le décorateur est un conteneur à un enfant ; il ne synthétise pas un nouveau bouton visuel. Le nom
-accessible de l’enfant est conservé.
+The decorator is a single-child container; it does not synthesize a new visual button. Preserve the child's accessible name.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Posséder child Spec, provider et style ; session séparée par décorateur et par UI. Le point
-d’ouverture est un Point logique copié, jamais un événement natif conservé.
+Own the child Spec, provider, and style; separate session per decorator and UI. The opening point is a copied logical Point, never a retained native event.
 
-Un menu ouvert capture le snapshot courant ; reconstruire la source des items ne retargete pas une
-action déjà visible. Démontage du contenu ferme le menu de cette ancre.
+An open menu captures the current snapshot; rebuilding the item source does not retarget an already visible action. Unmounting content closes the menu for this anchor.
 
-L’identité utilisée pour fermer/restaurer le focus est celle du décorateur et du descendant
-précédemment ciblé ; l’absence de descendant invalide fait revenir à la politique normale de Focus.
+Identity used to close/restore focus belongs to the decorator and previously targeted descendant; if no valid descendant remains, return to normal Focus policy.
 
 ## 4. Interactions
 
-Demande normalisée existante : InputType::ContextMenu transporte position logique/modifiers ; le
-routage choisit la cible hit-test puis remonte si Ignored. Il termine une capture active avant
-livraison sans déplacer le focus clavier ni armer un nouveau PointerDown. Le décorateur consomme
-cette demande, pas un clic primaire synthétique.
+Existing normalized request: InputType::ContextMenu carries logical position/modifiers; routing selects the hit-tested target and then bubbles if Ignored. It ends active capture before delivery without moving keyboard focus or arming a new PointerDown. The decorator consumes this request rather than a synthesized primary click.
 
-Clavier cible : ajouter Key::Menu et Key::F10 en fin enum Key, sans renuméroter les valeurs
-actuelles ; normaliser Menu/Shift+F10 en InputType::ContextMenu à la position du rectangle focusé
-via le runtime. Ces touches et leur traduction plateforme ne sont pas livrées actuellement. F10
-simple ne déclenche pas la demande.
+Keyboard target: append Key::Menu and Key::F10 to enum Key without renumbering current values; normalize Menu/Shift+F10 to InputType::ContextMenu at the focused rectangle position through the runtime. These keys and their platform translation are not currently delivered. Plain F10 does not trigger the request.
 
-Ne pas déclencher d’action principale enfant à partir du même clic secondaire ; consommer seulement
-la demande acceptée. Clic principal, sélection/glissement, molette et Tab suivent l’enfant tant que
-le menu est fermé.
+Do not trigger the child's primary action from the same secondary click; consume only the accepted request. Primary click, selection/dragging, wheel, and Tab follow the child while the menu is closed.
 
-Navigation et annulation du panneau suivent PopupMenu. Une demande refusée par le décorateur est
-Ignored ; la capture précédente a néanmoins déjà été annulée par le routage normalisé existant. Une
-demande acceptée avec liste vide ouvre le panneau vide fermable comme PopupMenu.
+Panel navigation and cancellation follow PopupMenu. A request refused by the decorator is Ignored; previous capture has nevertheless already been cancelled by existing normalized routing. An accepted request with an empty list opens the closable empty panel, as in PopupMenu.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure du décorateur égale celle de l’enfant, sans padding obligatoire. Son enfant est arrangé dans
-les mêmes limites ; clipping et transformations du parent s’appliquent au point d’ouverture.
+Decorator measurement equals the child's, with no mandatory padding. Arrange its child within the same bounds; parent clipping and transforms apply to the opening point.
 
-Le menu est placé à l’emplacement de la demande ou au bord du descendant clavier ;
-clamp/retournement utilisent service overlay retenu (OverlaySpec/OverlayHandle,
-detail::OverlayService). L’overlay ne participe pas à la mesure du document.
+Place the menu at the request position or the keyboard descendant's edge; clamping/flipping use the retained overlay service (OverlaySpec/OverlayHandle, detail::OverlayService). The overlay does not contribute to document measurement.
 
-Resize et scroll de l’enfant peuvent invalider la géométrie d’ancre ; recalculer via identité sûre,
-ou fermer si la cible disparaît.
+Resizing and scrolling the child can invalidate anchor geometry; recalculate using safe identity, or close if the target disappears.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Le décorateur n’ajoute ni bordure ni survol à l’enfant. MenuItemStyle affecte uniquement le panneau
-; la présentation du contenu reste issue de ses composants.
+The decorator adds neither a border nor hover styling to the child. MenuItemStyle affects only the panel; content presentation still comes from its components.
 
-Ouverture/fermeture invalident overlay paint ; ne reconstruire le contenu que si ses données
-changent. Garder des états de focus cohérents pendant le menu modal de commandes.
+Opening/closing invalidate overlay paint; rebuild content only when its data changes. Keep focus states consistent during the modal command menu.
 
-Les sous-menus et timer 200 ms sont ceux de PopupMenu ; aucune seconde animation ou seconde pile de
-menus.
+Submenus and the 200 ms timer are those of PopupMenu; no second animation or menu stack.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Conserver la sémantique de l’enfant ; le décorateur expose Group/None selon son rôle de composition,
-et la disponibilité du menu dans description ou action de commande.
+Preserve child semantics; the decorator exposes Group/None according to its composition role, with menu availability in its description or a command action.
 
-Le modèle SemanticAction actuel n’a pas ShowContextMenu ; ne pas prétendre Activate équivalent à
-l’action principale enfant. Une extension ShowContextMenu peut être ajoutée séparément et routée
-vers le même noyau.
+The current SemanticAction model has no ShowContextMenu; do not claim Activate is equivalent to the child's primary action. A ShowContextMenu extension may be added separately and routed to the same core.
 
-Le panneau ouvert publie PopupMenu/MenuItem comme la spécification de PopupMenu, sans exposer de
-références natives.
+The open panel publishes PopupMenu/MenuItem as specified by PopupMenu, without exposing native references.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Les commandes d’ouverture sont préparées avant publication. Aucun menu n’est lancé après démontage,
-même si une demande différée est déjà en file.
+Prepare opening commands before publication. No menu launches after unmounting, even if a deferred request is already queued.
 
-La fermeture commet le handle terminal avant l’action. Échec de provider ou d’enqueue : rester
-fermé, garder l’enfant utilisable et annuler la commande non acceptée ; aucune ouverture synchrone
-de secours.
+Closure commits the terminal handle before the action. Provider or enqueue failure: remain closed, keep the child usable, and cancel the unaccepted command; no synchronous fallback opening.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [popup_menu](popup_menu.md), Overlay, Focus, input backend-neutre. La traduction du
-geste secondaire existant et des nouvelles touches clavier doit être couverte au niveau input, pas
-dans chaque décorateur.
+Dependencies: [popup_menu](popup_menu.md), Overlay, Focus, backend-neutral input. Translation of the existing secondary gesture and new keyboard keys must be covered at the input layer rather than in every decorator.
 
-Décorateurs imbriqués : le plus proche décorateur monté/enabled avec provider accepte et devient
-propriétaire, même si snapshot vide ou inactif ; un seul menu s’ouvre. Un décorateur indisponible ou
-provider nul ignore, permettant au parent de recevoir la demande.
+Nested decorators: the nearest mounted/enabled decorator with a provider accepts and takes ownership, even for an empty or inactive snapshot; only one menu opens. An unavailable decorator or null provider ignores the request, allowing the parent to receive it.
 
-Contenu vide, retiré ou caché : aucune demande ; coordonnées hors viewport bornées par overlay. La
-liste MyGo des commandes système d’édition n’est pas ajoutée automatiquement.
+Empty, removed, or hidden content: no request; overlay bounds coordinates outside the viewport. MyGo's system editing commands are not added automatically.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/context_menu.hpp` et `src/context_menu.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/context_menu.hpp` and `src/context_menu.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Réutiliser un noyau privé de popup_menu.cpp pour la session et les panneaux ; context_menu.cpp porte
-le décorateur, son routage et sa géométrie d’ancre. Les deux fichiers ont un comportement réel
-distinct.
+Reuse a private popup_menu.cpp core for the session and panels; context_menu.cpp contains the decorator, its routing, and anchor geometry. Both files contain distinct real behavior.
 
-Inscrire `src/context_menu.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/context_menu.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`context_menu_secondary` : un clic secondaire ouvre au point logique sans activer le contenu.
+`context_menu_secondary`: a secondary click opens at the logical point without activating content.
 
-`context_menu_keyboard` : commande normalisée Menu/Shift+F10 ouvre près du focus ; F10 simple ne
-fait rien.
+`context_menu_keyboard`: normalized Menu/Shift+F10 opens near focus; plain F10 does nothing.
 
-`context_menu_nested` : un seul décorateur accepte ; parent peut traiter une demande refusée.
+`context_menu_nested`: only one decorator accepts; a parent can handle a refused request.
 
-`context_menu_layout` : mesure/clip identiques au contenu avant et après ouverture.
+`context_menu_layout`: content measurement/clipping remain identical before and after opening.
 
-`context_menu_stale_request` : demande différée après retrait devient inopérante ; échec
-provider/queue récupère.
+`context_menu_stale_request`: a deferred request after removal becomes inert; provider/queue failure recovers.
 
-`context_menu_action_throw` : menu fermé avant callback même si ancre supprimée ou exception.
+`context_menu_action_throw`: the menu closes before the callback even if the anchor is removed or an exception occurs.
 
-Ajouter `examples/features/context_menu.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/context_menu.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

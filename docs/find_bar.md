@@ -1,25 +1,25 @@
 # FindBar
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Barre de recherche dans un document, avec champ query, count, précédent/suivant et fermeture.
-L’application calcule les matches et applique le déplacement ; le widget ne parcourt aucun texte.
+A document search bar with a query field, count, previous/next, and closing. The application
+computes matches and applies movement; the widget traverses no text.
 
-NativeUI possède CommandScope et TextInput mais pas de FindBar. Le nouveau composant assemble des
-contrôles et observations, sans moteur de recherche ou index global.
+NativeUI has CommandScope and TextInput but no FindBar. The new component assembles controls and
+observations without a search engine or global index.
 
-MyGo : `ui/feedback.go`, `FindBar`. Open/query externes, count/current, navigation circulaire,
-Enter/Shift+Enter, Cmd+G sur macOS et F3 ailleurs ; ouverture focus et sélection du query.
+MyGo: `ui/feedback.go`, `FindBar`. External open/query, count/current, circular navigation,
+Enter/Shift+Enter, Cmd+G on macOS and F3 elsewhere; opening focuses and selects the query.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class FindBar {
@@ -35,202 +35,194 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<bool> open{true};
 ui::State<std::string> query{"gain"};
 ui::State<std::size_t> matches{3};
 ui::State<std::optional<std::size_t>> current{std::optional<std::size_t>{0}};
-auto find = ui::FindBar(open, query, matches, current).label("Rechercher")
+auto find = ui::FindBar(open, query, matches, current).label("Find")
     .on_navigate([](std::size_t) {}).spec();
 ```
 
-matches est lu/observé mais jamais écrit par le widget. current optionnel exprime absence de choix ;
-remplacer l’index MyGo 0 artificiel en absence de matches par un contrat explicite.
+matches is read/observed but never written by the widget. Optional current expresses the absence of
+a choice; replace MyGo's artificial index 0 when there are no matches with an explicit contract.
 
-FindBarStyle cible : SearchFieldStyle/TextInputStyle, ButtonStyle navigation/fermeture, TextStyle
-status, gap/padding et largeur maximum du champ ; default label “Rechercher”.
+Target FindBarStyle: SearchFieldStyle/TextInputStyle, navigation/close ButtonStyle, status TextStyle,
+gap/padding, and maximum field width; default label “Find”.
 
-on_navigate reçoit l’index cible après publication current, même s’il reste identique avec un seul
-match ; l’application peut alors centrer la vue à nouveau. Aucun on_change de query additionnel.
+on_navigate receives the target index after current publication, even if unchanged with one match;
+the application can recenter the view. No additional query on_change.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-open/query/current sont bindings mutables, matches source externe read-only par usage. Phases
-opened/closed et ID de focus précédent sont locaux à la barre.
+open/query/current are mutable bindings; matches is an external source used read-only. Opened/closed
+phases and the previous focus ID are local to the bar.
 
-Query edit publie live ; l’application met à jour matches/current. Au rendu, current inconnu ou hors
-plage n’est pas réécrit : utiliser un index effectif clamp pour status/navigation, absence quand
-matches=0.
+Query editing publishes live; the application updates matches/current. During rendering, an unknown
+or out-of-range current is not rewritten: use a clamped effective index for status/navigation, with
+absence when matches=0.
 
-La première navigation en absence de current choisit 0 pour suivant et count-1 pour précédent ;
-sinon modulo count. Matches count change annule une action armée si ancienne génération cible
-devenue invalide.
+The first navigation without current chooses 0 for next and count-1 for previous; otherwise use
+modulo count. A match count change cancels an armed action if its old generation target becomes
+invalid.
 
-Fermer publie open=false, conserve query/current ; rouvrir conserve ces valeurs et sélectionne query
-pour remplacement. Le widget ne remet pas defaults à ouverture.
+Closing publishes open=false and preserves query/current; reopening retains these values and
+selects the query for replacement. The widget does not reset defaults on opening.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-À passage false->true, demander focus de champ et sélectionner query. Enter/Shift+Enter vont
-suivant/précédent ; boutons mêmes actions, circulaires aux extrémités.
+On a false-to-true transition, request field focus and select query. Enter/Shift+Enter move
+next/previous; buttons use the same actions, circular at the ends.
 
-Raccourcis de navigation : CommandScope reçoit nouvelles commandes portables FindNext/FindPrevious ;
-ajouter les enumerators à la fin de Command et traduire Cmd+G/Shift+Cmd+G ou F3/Shift+F3 dans couche
-input privée.
+Navigation shortcuts: CommandScope receives new portable FindNext/FindPrevious commands; append
+the enumerators to Command and translate Cmd+G/Shift+Cmd+G or F3/Shift+F3 in the private input layer.
 
-Key::F3 n’existe pas actuellement : ajouter en fin enum sans renuméroter l’existant, avec tests
-mapping. Le composant ne teste pas des types OS ni n’enregistre un hook clavier process-wide.
+Key::F3 does not currently exist: append it to the enum without renumbering existing values, with
+mapping tests. The component neither tests OS types nor registers a process-wide keyboard hook.
 
-Escape ferme barre depuis champ (après annulation composition si active), bouton Terminer pareil.
-Tab parcourt champ, précédent, suivant, terminer ; directions désactivées count=0.
+Escape closes the bar from the field (after canceling active composition), as does the Done button.
+Tab traverses field, previous, next, done; directions are disabled when count=0.
 
-Sur fermeture, restaurer focus précédent s’il est valide et si le focus appartient encore à la barre
-; sinon laisser focus applicatif. Molette ne navigue pas ; ReadOnly empêche query/current mutations,
-la fermeture reste une action de visibilité.
+On closing, restore previous focus if valid and if focus still belongs to the bar; otherwise leave
+application focus alone. The wheel does not navigate; ReadOnly prevents query/current mutations,
+while closing remains a visibility action.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Quand closed : aucun enfant peint ni arrêt focus, mesure nulle. Ouvert : Row champ flex, status de
-largeur réservée, boutons navigation/fin ; hauteur contrôle + padding.
+Closed: no painted child or focus stop, zero measurement. Open: Row with flexible field,
+reserved-width status, navigation/done buttons; control height plus padding.
 
-Largeur étroite privilégie champ et fin ; status peut clipper avant d’écraser zones d’action,
-boutons gardent taille minimum. Pas d’overflow implicite ni popup.
+Narrow width prioritizes field and done; status may clip before shrinking action areas; buttons
+retain minimum size. No implicit overflow or popup.
 
-Text status utilise chiffres tabulaires si service le permet, sans changer nombre de matches.
-Coordonnées logiques et clipping suivent parent.
+Status text uses tabular digits if the service supports them, without changing the match count.
+Logical coordinates and clipping follow the parent.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Fond surface et bordure de séparation, status muted. Query vide affiche status vide ; query non
-vide/count0 “Aucun résultat” ; sinon “n sur count” avec n effectif+1.
+Surface background and separating border, muted status. An empty query shows empty status;
+a nonempty query/count0 shows “No results”; otherwise “n of count” with n=effective+1.
 
-Une valeur current invalide n’apparaît pas comme indice impossible ; marquer absence/valeur externe
-invalide en description sans set implicite.
+An invalid current value does not appear as an impossible index; mark absence/invalid external value
+in the description without implicit set.
 
-Query/count/current change paint ; transition open ou style métrique layout/structure. Pas de timer
-ou boucle de recalcul de recherche automatique.
+Query/count/current changes require paint; an open transition or metric style requires
+layout/structure. No timer or automatic search recalculation loop.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Group nommé (Toolbar absent dans SemanticRole), champ TextInput, status Text, boutons
-Previous/Next/Done avec actions réelles.
+Target: named Group (Toolbar is absent from SemanticRole), TextInput field, Text status, and
+Previous/Next/Done buttons with real actions.
 
-SemanticRole n’a pas Status ni live region ; fournir description/current text snapshot et prévoir
-extension d’annonce separately si exigée par pont natif. Aucun résultat AT natif revendiqué.
+SemanticRole has neither Status nor a live region; provide a description/current text snapshot and
+plan a separate announcement extension if required by a native bridge. No native AT result is claimed.
 
-Closed enlève ses descendants accessibles. Query, count et current exposés comme données immutable
-backend-neutres, jamais callbacks de recherche depuis lecture native.
+Closed removes accessible descendants. Expose query, count, and current as immutable backend-neutral
+data, never invoking search callbacks from native reads.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Une navigation prépare target à partir snapshot count/current puis publie current et appelle
-on_navigate copié si propriétaire/génération encore vivants et Bindings valides. Callback commencé
-ne sera jamais rejoué.
+Navigation prepares the target from a count/current snapshot, then publishes current and calls a
+copied on_navigate if the owner/generation still live and Bindings are valid. A started callback is
+never replayed.
 
-L’observateur current peut retirer barre ou remplacer count ; revérifier token/génération avant
-on_navigate, annuler l’action obsolete plutôt que envoyer mauvais index.
+The current observer may remove the bar or replace count; recheck token/generation before
+on_navigate, canceling an obsolete action rather than sending a wrong index.
 
-open false ferme text input/composition et capture avant publication de descendants cachés.
-Destruction n’appelle ni close action ni navigate ; Focus précédent est un handle sûr, pas Node*.
+open false closes text input/composition and capture before publishing hidden descendants.
+Destruction calls neither the close action nor navigate; previous focus is a safe handle, not Node*.
 
-Échec demande focus/commande différée reste pending au checkpoint sans fallback sync ; observer
-levant conserve valeurs déjà commises et dispatch réutilisable.
+Failure of a focus/deferred command request remains pending at the checkpoint without a synchronous
+fallback; a throwing observer retains already-committed values and reusable dispatch.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), [search_field](search_field.md), [button](button.md),
-[command_scope](command_scope.md), Focus/State. Recherche/replace/options regex appartiennent à
-l’application.
+Dependencies: [TextInput](text_input.md), [SearchField](search_field.md), [Button](button.md),
+[CommandScope](command_scope.md), Focus/State. Search/replace/regex options belong to the application.
 
-count=0 : aucune navigation/callback et current préservé ; count=1 : navigation peut callback même
-index. Count variant pendant geste utilise génération pour annuler cible retirée.
+count=0: no navigation/callback and current is preserved; count=1: navigation may call back with the
+same index. Count changes during a gesture use generation to cancel a removed target.
 
-Bindings invalid : dernier snapshot peut être affiché mais plus de mutation/callback ; si open
-invalid, barre se cache au checkpoint. Query extrêmement long et counts de grande taille ne
-débordent pas modulo arithmetic.
+Invalid bindings: the last snapshot may be displayed, but no further mutation/callback; an invalid
+open hides the bar at the checkpoint. Extremely long queries and large counts do not overflow
+modulo arithmetic.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/find_bar.hpp` et `src/find_bar.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/find_bar.hpp` and `src/find_bar.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-FindBarStyle et tous modèles/status restent dans le couple ; find_bar.cpp possède phases,
-observations, commandes, navigation et layout.
+FindBarStyle and all models/status remain in the pair; find_bar.cpp owns phases, observations,
+commands, navigation, and layout.
 
-Les nouvelles commandes et touches sont ajoutées au modèle input partagé et normalisées en backend
-privé ; leurs tests de compatibilité enums sont un prérequis de l’implémentation du composant.
+New commands and keys are added to the shared input model and normalized in the private backend;
+enum compatibility tests are a prerequisite for component implementation.
 
-Inscrire `src/find_bar.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/find_bar.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`find_bar_opening` : open true demande focus/select query ; closed nul sans desc focusables.
+`find_bar_opening`: open true requests focus/query selection; closed measures zero with no focusable
+descendants.
 
-`find_bar_navigate_wrap` : forward/back/modulo et absence current donnent indices attendus ; one
-match callback possible.
+`find_bar_navigate_wrap`: forward/back/modulo and absent current give the expected indices; a
+one-match callback is possible.
 
-`find_bar_count_change` : count0 ignore et retire directions ; cible supprimée pendant appui
-annulée.
+`find_bar_count_change`: count0 ignores navigation and removes directions; a target removed during
+a press is canceled.
 
-`find_bar_shortcuts` : Enter/Shift+Enter et commandes normalisées macOS/autres aboutissent même
-action, enums stables.
+`find_bar_shortcuts`: Enter/Shift+Enter and normalized macOS/other commands reach the same action,
+with stable enums.
 
-`find_bar_closing` : Escape/Done conservent query ; restauration focus seulement si encore
-propriétaire.
+`find_bar_closing`: Escape/Done retain query; focus is restored only if still owned.
 
-`find_bar_reentrant` : current observer remplace count/retire barre/ lève : aucune mauvaise
-navigation ni retry.
+`find_bar_reentrant`: the current observer replaces count/removes the bar/throws: no wrong navigation
+or retry.
 
-`find_bar_invalid_state` : suppression d’un State garde dernier snapshot sûr et coupe
-action/callback.
+`find_bar_invalid_state`: removing a State retains the last safe snapshot and stops actions/callbacks.
 
-Ajouter `examples/features/find_bar.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/find_bar.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

@@ -1,115 +1,115 @@
 # Tooltip
 
-**Statut : existant à enrichir.**
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Décorateur texte d’une ancre, présenté au repos de pointeur ou au focus sans capter input/focus. Pas de contenu interactif ; un panneau interactif utilise Popover.
+Text decorator for an anchor, presented while the pointer is idle or on focus without capturing input/focus. No interactive content; an interactive panel uses Popover.
 
-Présent dans [tooltip.hpp](../include/nativeui/tooltip.hpp), Tooltip builder, detail::TooltipController et TooltipComponent. Le controller possède un timer Dispatcher et un overlay NonModal/Ignore/Auto.
+Present in [tooltip.hpp](../include/nativeui/tooltip.hpp): the Tooltip builder, detail::TooltipController and TooltipComponent. The controller owns a Dispatcher timer and a NonModal/Ignore/Auto overlay.
 
-MyGo : `ui/widgets.go`, `Element.Tooltip`. Delay600ms, panneau près du pointeur, description accessible et innermost tooltip. NativeUI a déjà son propre délai500ms, ancre NodeId et déclenchement focus ; garder ces choix plutôt que copier les temporisations globales Go.
+MyGo: `ui/widgets.go`, `Element.Tooltip`. A 600 ms delay, panel near the pointer, accessible description and innermost tooltip. NativeUI already has its own 500 ms delay, NodeId anchor and focus trigger; retain these choices rather than copying Go's global timing.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante exacte : `template<class Child> Tooltip(std::string text, Child&& child)`, `delay(milliseconds) &&`, `delay(milliseconds) &`, getter `delay() const noexcept`, getter `text() const noexcept`, `spec() &&`, constantes kDefaultDelay=500ms et kDefaultMaxWidth.
+Exact existing API: `template<class Child> Tooltip(std::string text, Child&& child)`, `delay(milliseconds) &&`, `delay(milliseconds) &`, getter `delay() const noexcept`, getter `text() const noexcept`, `spec() &&`, constants kDefaultDelay=500ms and kDefaultMaxWidth.
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
-auto help = ui::Tooltip{"Enregistrer le document",
-    ui::Button{"Enregistrer", [] {}}}
+auto help = ui::Tooltip{"Save the document",
+    ui::Button{"Save", [] {}}}
     .delay(std::chrono::milliseconds{500})
     .spec();
 ```
 
-Ajout cible proposé : `Tooltip&& style(TooltipStyle value) &&` ; type nouveau avec background/text/border/radius/padding/max_width et TextStyle. Préserver les deux ref-qualified delay et leurs clamping négatif à zéro.
+Proposed target addition: `Tooltip&& style(TooltipStyle value) &&`; a new type with background/text/border/radius/padding/max_width and TextStyle. Preserve both ref-qualified delay overloads and their clamping of negative values to zero.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Texte/Spec enfant/style possédés, pas de Binding pour texte dans cette version. Le controller possède hover/focus/available/suppressed/pointer_active et timer ; un overlay handle précis par ancre.
+Owned text/child Spec/style, without a text Binding in this version. The controller owns hover/focus/available/suppressed/pointer_active and the timer; one specific overlay handle per anchor.
 
-Éligibilité = ancre disponible et (hover ou focus) et absence de pointer interaction. Visible et pending restent distincts ; delay ne s’écoule qu’à partir d’une vraie transition d’éligibilité.
+Eligibility = an available anchor and (hover or focus) and no pointer interaction. Visible and pending remain distinct; the delay starts only at a real eligibility transition.
 
-PointerDown ou perte disponibilité supprime une présentation continue : retrouver disponibilité sous pointeur immobile ne relance pas. Transition false puis true déclenche de nouveau le délai complet. Aucun callback utilisateur de shown/hidden ajouté.
+PointerDown or loss of availability suppresses a continuous presentation: regaining availability under a stationary pointer does not restart it. A false then true transition starts the full delay again. No shown/hidden user callback is added.
 
 ## 4. Interactions
 
-Tooltip observe hover/focus de l’ancre sans gérer son activation. Tab/clavier appartiennent à l’enfant ; panneau Ignore n’est ni targetable ni focusable.
+Tooltip observes anchor hover/focus without managing activation. Tab/keyboard belong to the child; the Ignore panel is neither targetable nor focusable.
 
-PointerDown dismiss la tooltip, toute gesture dans l’arbre supprime hover eligibility ; fin de gesture seule ne relance pas sous pointeur stationary. Focus alone peut armer le délai selon controller actuel.
+PointerDown dismisses the tooltip; any gesture in the tree suppresses hover eligibility. Ending the gesture alone does not restart it under a stationary pointer. Focus alone may arm the delay under the current controller.
 
-La source fixe dismiss_on_escape=false et dismiss_on_outside_pointer_down=false : Escape n’est pas intercepté par Tooltip et suit le routage de l’ancre. PointerDown dismiss passe par son controller, pas par une deuxième politique outside. Aucun glissement, molette ou validation dans le panneau.
+The source sets dismiss_on_escape=false and dismiss_on_outside_pointer_down=false: Tooltip does not intercept Escape, which follows anchor routing. PointerDown dismissal uses its controller rather than a second outside policy. No dragging, wheel interaction or validation in the panel.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Décorateur mesure et place son enfant comme auparavant. Panneau texte enveloppé par `wrap_tooltip_text`, padding et max width ; tailles en coordonnées logiques.
+The decorator measures and places its child as before. The text panel wraps through `wrap_tooltip_text`, with padding and maximum width; sizes use logical coordinates.
 
-Overlay Auto depuis NodeId ; placement/clamp entièrement gérés par service existant. Pas de réservations de place ni copie de coordonnées écran OS.
+Overlay Auto from NodeId; placement/clamping are handled entirely by the existing service. No reserved space or copied OS screen coordinates.
 
-Texte très long sans espaces : envelopper aux frontières UTF-8 selon helper ; v1 n’annonce pas layout multirun. Viewport plus petit clippe selon les services, sans produire taille négative.
+Very long text without spaces: wrap at UTF-8 boundaries according to the helper; v1 does not claim multi-run layout. A smaller viewport clips through the services without producing negative size.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-TooltipStyle nouveau matérialise champs aujourd’hui privés de TooltipSurfaceComponent ; défaut conserve palette et métriques exactes. Aucun slot Theme nouveau prétendu livré.
+The new TooltipStyle exposes fields currently private to TooltipSurfaceComponent; defaults preserve the exact palette and metrics. No new Theme slot is claimed to have shipped.
 
-Style métrique/text width = layout panneau ; couleurs = paint. L’ancre ne remonte pas lors de mutation du thème ou de fermeture tooltip.
+Metric style/text width = panel layout; colors = paint. The anchor does not remount on theme changes or tooltip closure.
 
-Texte vide : aucune présentation. Pas d’animation/fade par défaut, ni process-global warmup/current-tooltip. Style d’un Tooltip n’altère pas les suivants.
+Empty text: no presentation. No default animation/fade or process-global warmup/current-tooltip. One Tooltip's style does not affect subsequent instances.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : description de l’ancre renseignée par texte si sa description explicite est vide ; ne pas écraser description applicative. Le panneau décoratif ne crée pas de focus ni lecture double.
+Target contract: populate the anchor description from the text if its explicit description is empty; do not overwrite the application's description. The decorative panel creates neither focus nor duplicate reading.
 
-SemanticRole::Tooltip absent ; utiliser Group/Text dans snapshot si panneau publié, ou description de l’ancre seule selon contrat d’exclusion existant. Ici défaut choisi : description ancre, panneau exclu.
+SemanticRole::Tooltip is absent; use Group/Text in the snapshot if publishing the panel, or the anchor description alone under the existing exclusion contract. The default chosen here is the anchor description with the panel excluded.
 
-Ponts natifs T068 différés. Aucun IME/édition. Un texte affiché dans tooltip reste owned même après disparition visuelle de l’overlay.
+Native T068 bridges are deferred. No IME/editing. Text displayed in a tooltip remains owned even after the overlay disappears visually.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement/observation de disponibilité et timer annulés au démontage. Controller et handlers sont par instance et protégés weak ; invocation différée stale = no-op.
+UI/main thread; availability subscription/observation and timer are canceled on unmount. Controller and handlers are per instance and weakly protected; a stale deferred invocation is a no-op.
 
-Échec schedule_after ne lance jamais la présentation synchroniquement. Échec show remet visible=false ; échec hide conserve handle/état de reprise de fermeture, conformément à la transaction actuelle.
+Failed schedule_after never presents synchronously. Failed show restores visible=false; failed hide preserves the handle/closure-recovery state under the current transaction.
 
-Destruction no-throw, shutdown sans callback applicatif. Les scopes busy/suppressed restent cohérents après exception ; un callback d’intégration commencé n’est pas rejoué. Le prochain cycle false/true reste utilisable.
+No-throw destruction, shutdown without application callbacks. Busy/suppressed scopes remain consistent after exceptions; a started integration callback is not replayed. The next false/true cycle remains usable.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend du DispatcherProvider/Dispatcher existant, Overlay et focus/hover retained. Pas de nouveau timing service, OS tooltip ou stack overlay.
+Depends on existing DispatcherProvider/Dispatcher, Overlay and retained focus/hover. No new timing service, OS tooltip or overlay stack.
 
-Sans Dispatcher valide, conserver une ancre normale et aucun tooltip ; pas de thread/sleep fallback. Delay négatif clamp0, texte vide inéligible.
+Without a valid Dispatcher, preserve a normal anchor and no tooltip; no thread/sleep fallback. Negative delay clamps to zero; empty text is ineligible.
 
-Ancre Hidden/Collapsed/Disabled retire pending/visible ; read-only reste admissible pour information. UI deactivate ferme et laisse observation cohérente. Tooltip imbriquées ne partagent pas une variable « courant » globale.
+Hidden/Collapsed/Disabled anchors remove pending/visible presentations; read-only remains eligible for information. UI deactivation closes and leaves observation consistent. Nested tooltips do not share a global “current” variable.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/tooltip.hpp` et `src/tooltip.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/tooltip.hpp` and `src/tooltip.cpp`. The header contains public declarations; the `.cpp` contains a real retained kernel, measurement, layout, applicable events and rendering.
 
-Origine à extraire ou réutiliser : `tooltip.hpp` existant. Conserver constantes/getters/ref-qualifiers/template enfant et includes historiques ; controller et surface réelle dans tooltip.cpp. Garder le seam de tests de controller ou adapter sa visibilité sans casser ses consommateurs.
+Source to extract or reuse: existing `tooltip.hpp`. Preserve constants/getters/ref-qualifiers/the child template and historical includes; the actual controller and surface belong in tooltip.cpp. Keep the controller test seam or adapt its visibility without breaking consumers.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters stay in the header and delegate to the non-template kernel. Preserve historical includes through their collective headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, without an empty file or central widget switch. This API exposes no Pugl, Skia, OS or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery is documentation: no extraction or CMake change is performed in this documentation phase.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement with the component:
 
-- `tooltip_legacy_delay` : 500ms défaut et les deux overloads delay gardent leurs résultats.
-- `tooltip_pointer_suppression` : PointerDown/release stationary ne réarme pas.
-- `tooltip_availability` : Hidden/Disabled puis retour stationary ne réarme pas.
-- `tooltip_style_wrap` : max width/padding/enveloppe influent mesure et pixels ensemble.
-- `tooltip_description` : description explicite préservée et absence de lecture double.
-- `tooltip_timer_fault` : échec timer/show/hide puis prochain cycle restent récupérables.
+- `tooltip_legacy_delay`: the 500 ms default and both delay overloads retain their results.
+- `tooltip_pointer_suppression`: PointerDown/release under a stationary pointer does not rearm.
+- `tooltip_availability`: Hidden/Disabled followed by return under a stationary pointer does not rearm.
+- `tooltip_style_wrap`: maximum width/padding/wrapping affect measurement and pixels together.
+- `tooltip_description`: preserve an explicit description and avoid duplicate reading.
+- `tooltip_timer_fault`: timer/show/hide failure followed by the next cycle remains recoverable.
 
-Créer `examples/features/tooltip.cpp` et la cible `nativeui_example_tooltip`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/tooltip.cpp` and the `nativeui_example_tooltip` target, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a clock, works headlessly and returns a nonzero code on the first failure.
 
-Réutiliser `tests/t062_tooltip_tests.cpp` et `examples/features/t062_tooltip.cpp` ; enrichir style/sémantique sans réécrire les scénarios de suppression actuels.
+Reuse `tests/t062_tooltip_tests.cpp` and `examples/features/t062_tooltip.cpp`; enhance style/semantics without rewriting current suppression scenarios.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: all named tests pass, no capture/registration survives unmounting, and the published API matches these contracts. Verification performed here: reading declarations and sources; no C++ or interactive test was executed for this specification.

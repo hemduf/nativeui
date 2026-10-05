@@ -60,7 +60,7 @@ void source_lifetime_semantics_and_zero() {
   NUI_CHECK(before.r == after.r && before.g == after.g && before.b == after.b);
   ui::detail::AvatarComponent empty{"", {}, {}, {}, 32.0, {}, {}};
   NUI_CHECK(empty.semantics().role == ui::SemanticRole::Image);
-  NUI_CHECK(empty.semantics().description == "avatar sans nom");
+  NUI_CHECK(empty.semantics().description == "Unnamed avatar");
   NUI_CHECK(!empty.focusable() && !empty.pointer_targetable());
   ui::detail::AvatarComponent repaired{
       std::string{"\xff"} + "Alice Martin", {}, {}, {}, 32.0, {}, {}};

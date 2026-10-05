@@ -1,20 +1,20 @@
 # ForEach<T>
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`ForEach<T>` construit une liste dynamique d’enfants dont l’identité suit la clé, mais ne définit pas un layout ni une virtualisation. Source : [dynamic.hpp](../include/nativeui/dynamic.hpp), `ForEach<T>`, `ForEachComponent<T>` ; [dynamic_key.hpp](../include/nativeui/detail/dynamic_key.hpp), `encode_dynamic_key`.
+`ForEach<T>` constructs a dynamic child list whose identities follow keys, but defines neither layout nor virtualization. Source: [dynamic.hpp](../include/nativeui/dynamic.hpp), `ForEach<T>`, `ForEachComponent<T>`; [dynamic_key.hpp](../include/nativeui/detail/dynamic_key.hpp), `encode_dynamic_key`.
 
-MyGo utilise les clés d’Element dans la composition immédiate ; aucun composant catalogue autonome équivalent. La cible conserve les contraintes NativeUI de clés et la récupération transactionnelle.
+MyGo uses Element keys in immediate composition; no equivalent independent catalog component exists. The target preserves NativeUI key constraints and transactional recovery.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle :
+Current API:
 
 ```cpp
 using Items = std::vector<T>;
@@ -25,7 +25,7 @@ ForEach(State<Items>& state, KeyFunction key, ChildFunction child);
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<std::vector<int>> ids{{1,2,3}};
@@ -33,70 +33,70 @@ auto items = ui::ForEach<int>{ids, [](int id){return id;},
     [](int id){return ui::Label{std::to_string(id)};}};
 ```
 
-Factory prend `const T&` et retourne Spec ou builder convertissable par make_spec. Clés actuelles : string/string_view-convertible, intégrales signées/non signées, enum ; autres types refusés à compilation. Conserver guides de déduction actuels.
+The factory takes `const T&` and returns Spec or a builder convertible through make_spec. Current keys: string/string_view-convertible types, signed/unsigned integral types and enums; other types are rejected at compile time. Preserve the current deduction guides.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Binding Items possédé ; fonctions adaptées en std::function possédées. Clé encodée copiée avec préfixes s:/i:/u:, pas adresse de T ni indice implicite. Identité survit au reorder. Même clé conserve la sous-arborescence retenue : les données affichées évolutives doivent être bindées, une factory n’est pas une promesse de replacement de child à chaque valeur.
+The Items Binding is owned; functions adapted into std::function are owned. The encoded key is copied with s:/i:/u: prefixes rather than using T’s address or an implicit index. Identity survives reordering. The same key preserves the retained subtree: changing displayed data must be bound, as a factory does not promise child replacement for every value.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun focus propre ; wrappers générés gardent leurs interactions. Retrait d’une clé récupère focus/capture via Tree. Ajout/reorder ne génère pas de click. Validation du contenu enfant reste locale. Pas de raccourcis de sélection ou molette virtualisée.
+No focus of its own; generated wrappers retain their interactions. Removing a key recovers focus/capture through Tree. Addition/reordering generates no click. Child-content validation remains local. No selection shortcuts or virtualized wheel handling.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Le host dynamique mesure actuellement le maximum des enfants sur chaque axe et les superpose sur bounds. Il ne faut pas le documenter comme Column automatique. Utiliser les modèles de composition/layout appropriés pour disposer les items. Les mutations de dataset déclenchent structure/layout au checkpoint.
+The dynamic host currently measures the maximum child size on each axis and layers children within its bounds. Do not document it as an automatic Column. Use the appropriate composition/layout models to arrange items. Dataset mutations trigger structure/layout at the checkpoint.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Paint vide ; paint des children géré par Tree. Same keys/order n’oblige pas à reconstruire des recipes ; mises à jour internes bindées invalident leur propre widget. Les factories ne doivent pas dessiner ou modifier le thème global.
+No painting; Tree manages child paint. Identical keys/order do not require rebuilding recipes; internally bound updates invalidate their own widget. Factories must not draw or change the global theme.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Wrapper `None` et enfants dans l’ordre logique accepté. Clés dupliquées n’exposent pas deux semantic nodes avec même identité. Retrait/réinsertion d’une même clé après destruction reçoit un nouvel ID vivant, sans résurrection d’un proxy périmé.
+Wrapper `None`, with children in the accepted logical order. Duplicate keys do not expose two semantic nodes with the same identity. Removing/reinserting the same key after destruction receives a new live ID without resurrecting a stale proxy.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Valider toutes les clés d’un snapshot avant commit. Duplicates : éviter publication initiale ambiguë, conserver la politique runtime de diagnostic/quarantaine et permettre une génération ultérieure valide. Une factory/key-function qui lève restaure guards, ne publie pas des enfants partiels et ne rejoue pas un callback commencé automatiquement.
+Validate all snapshot keys before commit. Duplicates: avoid ambiguous initial publication, preserve the runtime diagnostic/quarantine policy and allow a subsequent valid generation. A throwing factory/key-function restores guards, publishes no partial children and does not automatically replay a started callback.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Source dynamique, encode_dynamic_key et safe reconciliation. Cas : vide, duplicate encodé, type enum, changement de données à clé égale, reorder/removal sous callback, factory modifiant le dataset. Lire un snapshot stable par passe ; ne pas garder `const T&` après callback.
+Dynamic source, encode_dynamic_key and safe reconciliation. Cases: empty content, an encoded duplicate, enum type, data changes with the same key, reorder/removal within a callback and a factory changing the dataset. Read a stable snapshot per pass; do not retain `const T&` after the callback.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/for_each.hpp` et `src/for_each.cpp`.
+Target: `include/nativeui/for_each.hpp` and `src/for_each.cpp`.
 
-for_each.hpp garde adaptation de clé/factory et liaison typée au Binding ; for_each.cpp porte le host/source dynamique non template, identity strings et reconciliation demandée. Pas de restriction aux int/string instanciés explicitement. dynamic.hpp et le comportement de conservation par clé restent compatibles.
+for_each.hpp retains key/factory adaptation and the typed Binding connection; for_each.cpp contains the non-template dynamic host/source, identity strings and requested reconciliation. No restriction to explicitly instantiated int/string types. dynamic.hpp and preservation-by-key behavior remain compatible.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `foreach_key_types` : signed/unsigned/string/enum encodés distinctement.
-- `foreach_reorder_identity` : focus/état suivent clé, pas index.
-- `foreach_equal_key_data` : child conservé, Binding interne mis à jour.
-- `foreach_duplicate_recovery` : dataset invalide puis nouvelle génération valide.
-- `foreach_factory_throw` : aucun demi-mount, reprise sans replay.
-- `foreach_reentrant_replace` : snapshot cohérent même si factory modifie state.
-- Préserver tests dynamic recovery et quarantine epoch existants.
+- `foreach_key_types`: signed/unsigned/string/enum keys are encoded distinctly.
+- `foreach_reorder_identity`: focus/state follows the key rather than the index.
+- `foreach_equal_key_data`: the child is preserved and its internal Binding updated.
+- `foreach_duplicate_recovery`: invalid dataset followed by a new valid generation.
+- `foreach_factory_throw`: no partial mount; recovery without replay.
+- `foreach_reentrant_replace`: a coherent snapshot even when the factory changes state.
+- Preserve existing dynamic recovery and quarantine epoch tests.
 
-Créer l’exemple public futur `examples/features/for_each.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/for_each.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

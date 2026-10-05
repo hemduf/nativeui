@@ -1,27 +1,22 @@
 # SegmentedControl<T>
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Choisir une valeur exclusive parmi des segments : mode Liste/Grille ou plage de vue. Le groupe
-conserve une sélection applicative stable, pas un index imposé au montage.
+Choose one exclusive value among segments: List/Grid mode or a view range. The group retains a stable application selection rather than an index imposed at mounting.
 
-NativeUI propose RadioGroup<T>/RadioButton<T> dans
-[widgets_checkbox_radio.inc](../include/nativeui/detail/widgets_checkbox_radio.inc), mais pas de
-SegmentedControl visuel.
+NativeUI offers RadioGroup<T>/RadioButton<T> in [widgets_checkbox_radio.inc](../include/nativeui/detail/widgets_checkbox_radio.inc) but no visual SegmentedControl.
 
-MyGo : `ui/toggle.go`, `SegmentedBase`, `Segment`, `Segmented`. MyGo borne son index lors de
-construction ; cible NativeUI utilise valeurs T et ne réécrit jamais l’état externe simplement pour
-rendre.
+MyGo: `ui/toggle.go`, `SegmentedBase`, `Segment`, `Segmented`. MyGo clamps its index at construction; the NativeUI target uses T values and never rewrites external state merely to render.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 template<class T>
@@ -43,175 +38,114 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<int> mode{0};
 auto mode_picker = ui::SegmentedControl<int>(
-    "Vue", mode, {{0, "Liste", true}, {1, "Grille", true}}).spec();
+    "View", mode, {{0, "List", true}, {1, "Grid", true}}).spec();
 ```
 
-SegmentedControlStyle cible : track padding/gap/radius/border, ButtonStyle segment et patch
-selected. T n’est pas limité à int/string ; les adaptateurs typed value/equals/set/observe sont
-effacés pour le noyau non template.
+Target SegmentedControlStyle: track padding/gap/radius/border, segment ButtonStyle, and a selected patch. T is not limited to int/string; typed value/equals/set/observe adapters are type-erased for the non-template core.
 
-Les variantes avec icônes restent des options du même composant ; elles peuvent être ajoutées via
-une fabrique de contenu par option, en gardant label pour le nom, sans composant Segment public
-autonome.
+Icon variants remain options of the same component; they may be added through a per-option content factory while preserving label as the name, without a standalone public Segment component.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<T> est la sélection ; options T sont possédées et comparées par égalité. Une valeur hors
-options n’est pas corrigée au montage : aucun segment selected, mais le premier disponible peut
-recevoir focus.
+Binding<T> holds selection; T options are owned and compared for equality. A value absent from the options is not corrected at mounting: no segment is selected, but the first available segment may receive focus.
 
-Le vector options constitue un snapshot immuable de génération ; remplacer les options nécessite
-nouvelle Spec au checkpoint, sans setter d’options en place dans cette v1. Une valeur sélectionnée
-disabled reste visiblement selected mais ne peut être choisie par l’utilisateur. La sélection
-externement modifiée déplace la cible d’entrée Tab, sans voler le focus déjà dans un autre contrôle.
+The options vector is an immutable generation snapshot; replacing options requires a new Spec at the checkpoint, with no in-place options setter in this v1. A disabled selected value remains visibly selected but cannot be chosen by the user. External selection changes move the Tab entry target without stealing focus already in another control.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Clic au relâchement sur un segment enabled sélectionne sa valeur ; sélectionner la valeur courante
-ne republie pas. PointerCancel annule l’action.
+A click released on an enabled segment selects its value; selecting the current value does not republish. PointerCancel cancels the action.
 
-Tab est un arrêt sur le segment sélectionné disponible, sinon dernier actif/ premier disponible.
-Gauche/Droite ou Haut/Bas, Home/End déplacent focus et sélectionnent en même temps ; bouclage
-flèches et saut disabled.
+Tab is one stop on the selected available segment, otherwise the last active/first available one. Left/Right or Up/Down and Home/End move focus and select simultaneously; arrows wrap and skip disabled segments.
 
-Espace sélectionne au relâchement et Entrée à la première pression ; répétitions d’activation
-supprimées. ReadOnly laisse lire/focus mais flèches ne publient aucune sélection.
+Space selects on release and Enter on the first press; activation repeats are suppressed. ReadOnly permits reading/focus but arrows publish no selection.
 
-Molette ignore ; glisser hors du segment annule, sans transformer le contrôle en slider. Réduction
-de largeur ne modifie pas le choix.
+Wheel is ignored; dragging outside the segment cancels without turning the control into a slider. Reduced width does not change the choice.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Track horizontal ; largeur naturelle somme des segments et paddings. Hauteur commune égale la plus
-grande mesure enfant ; conserver largeur variable par label plutôt qu’imposer texte tronqué
-uniforme.
+Horizontal track; natural width is the sum of segments and paddings. Common height equals the largest child measurement; keep variable widths by label instead of imposing uniformly truncated text.
 
-Un espace étroit clippe visuellement selon parent ; chaque hit-test utilise le rectangle réellement
-arrangé, aucun choix de segment invisible. Pas d’overflow implicite.
+Narrow space clips visually according to the parent; each hit test uses the actually arranged rectangle, with no selection of an invisible segment. No implicit overflow.
 
-Sélection constante en taille à style identique ; un patch selected à métrique différente invalide
-layout explicitement.
+Selection preserves size for identical styles; a selected patch with different metrics explicitly invalidates layout.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Selected a une face distincte au sein du track ; pressed momentané et selected persistante sont deux
-états. Focus reste visible sur le segment actif.
+Selected has a distinct face within the track; momentary pressed and persistent selected are separate states. Focus remains visible on the active segment.
 
-Styles proviennent du thème et du style du composant ; aucune mutation du ButtonStyle de widgets
-voisins. SegmentOption.label et icône utilisent les mêmes couleurs résolues.
+Styles come from the theme and component style; no mutation of neighboring widgets' ButtonStyle. SegmentOption.label and icon use the same resolved colors.
 
-Changement de sélection invalide les deux faces affectées, pas la collection entière si métriques
-inchangées.
+Selection changes invalidate the two affected faces rather than the whole collection when metrics are unchanged.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Group nommé, enfants RadioButton avec selected/checked et action Select quand mutables.
-SemanticRole actuel ne contient pas RadioGroup : ne pas annoncer ce rôle comme livré.
+Target: named Group, with RadioButton children exposing selected/checked and Select when mutable. Current SemanticRole does not contain RadioGroup: do not claim this role is delivered.
 
-Un seul segment selected par égalité ; option désactivée reste exposée enabled=false. Valeur
-inconnue laisse tous les enfants non selected.
+Exactly one selected segment by equality; a disabled option remains exposed with enabled=false. An unknown value leaves all children unselected.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Le noyau non template possède les segments retenus et les adaptateurs par valeur ; aucune référence
-T à une ligne temporaire.
+The non-template core owns retained segments and adapters by value; no T reference to a temporary row.
 
-Commit sélection après terminaison de capture et état focus cohérent ; observer retirant le groupe
-ou levant ne doit pas provoquer un second set ni un accès postérieur à un enfant détruit.
+Commit selection after ending capture and establishing consistent focus state; an observer removing the group or throwing must not cause a second set or subsequent access to a destroyed child.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [radio_button](radio_button.md), [toggle_group](toggle_group.md) pour présentation,
-focus commun, State/ThemeBinding.
+Dependencies: [radio_button](radio_button.md), [toggle_group](toggle_group.md) for presentation, shared focus, State/ThemeBinding.
 
-Valeurs d’options dupliquées interdites : invalid_argument avant publication de Spec, sinon identité
-de choix ambiguë. Labels dupliqués admis si les valeurs diffèrent.
+Duplicate option values are forbidden: invalid_argument before Spec publication to avoid ambiguous choice identity. Duplicate labels are allowed when values differ.
 
-Options vides/all disabled : aucun choix utilisateur ; valeur externe préservée. Après remplacement
-des options, une valeur retirée reste dans le Binding et perd seulement sa face selected.
+Empty/all-disabled options: no user choice; preserve the external value. After replacing options, a removed value remains in Binding and loses only its selected face.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/segmented_control.hpp` et `src/segmented_control.cpp`. Le header expose
-les déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter
-un véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/segmented_control.hpp` and `src/segmented_control.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-SegmentOption<T>, constructeurs State/Binding et éventuels guides de déduction restent en header ;
-selected/observe/select sont des adaptateurs templates. Le .cpp contient la machine segmentée non
-template.
+SegmentOption<T>, State/Binding constructors, and any deduction guides remain in the header; selected/observe/select are template adapters. The .cpp contains the non-template segmented state machine.
 
-Le contrôleur RadioGroup<T> existant reste compatible ; SegmentedControl ne rebaptise ni Toggle ni
-Switch<T>.
+Existing RadioGroup<T> remains compatible; SegmentedControl renames neither Toggle nor Switch<T>.
 
-Inscrire `src/segmented_control.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les
-includes collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou
-plugin dans l’API publique.
+Register `src/segmented_control.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`segmented_control_selection` : clic et navigation sélectionnent une seule valeur ; choix identique
-sans notification.
+`segmented_control_selection`: clicks and navigation select one value; the same choice causes no notification.
 
-`segmented_control_unknown_disabled` : état inconnu ou disabled n’est pas réécrit par mount/paint.
+`segmented_control_unknown_disabled`: unknown or disabled state is not rewritten by mount/paint.
 
-`segmented_control_empty_duplicates` : vide/all disabled sans focus mutant ; valeurs dupliquées
-rejetées.
+`segmented_control_empty_duplicates`: empty/all-disabled options cause no mutating focus; duplicate values are rejected.
 
-`segmented_control_remove_option` : option retirée pendant appui ne reçoit pas un commit périmé.
+`segmented_control_remove_option`: an option removed during a press receives no stale commit.
 
-`segmented_control_generic_type` : type utilisateur copiable/égalité compile avec noyau .cpp, sans
-instanciation listée.
+`segmented_control_generic_type`: a copyable/equality-comparable user type compiles with the .cpp core without listed instantiations.
 
-`segmented_control_observer_throw` : retrait/réentrance et exception d’observer laissent prochain
-choix possible.
+`segmented_control_observer_throw`: observer removal/reentrancy and exceptions leave the next choice possible.
 
-Ajouter `examples/features/segmented_control.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/segmented_control.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

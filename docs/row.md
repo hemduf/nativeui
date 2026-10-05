@@ -1,20 +1,20 @@
 # Row
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Row` organise les enfants sur l’axe horizontal, avec allocation flex et alignement transversal. Il existe dans [layout_builders.inc](../include/nativeui/detail/layout_builders.inc) ; `RowComponent` dans [layout_components.inc](../include/nativeui/detail/layout_components.inc) est public et peint zéro pixel.
+`Row` arranges children along the horizontal axis, with flex allocation and cross-axis alignment. It exists in [layout_builders.inc](../include/nativeui/detail/layout_builders.inc); `RowComponent` in [layout_components.inc](../include/nativeui/detail/layout_components.inc) is public and paints no pixels.
 
-MyGo `ui/layout.go`, fonctions `flexLayout`, `resolveFlexible`, `justifyOffsets`, fournit un layout flex plus général. Le présent composant conserve son modèle sans retour automatique à la ligne ; ce portage n’introduit pas de flex-wrap implicite.
+MyGo `ui/layout.go`, with the `flexLayout`, `resolveFlexible` and `justifyOffsets` functions, provides a more general flex layout. This component retains its model without automatic line wrapping; this port does not introduce implicit flex-wrap.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante à conserver :
+Existing API to preserve:
 
 ```cpp
 template<class... Children> explicit Row(Children&&... children);
@@ -24,91 +24,91 @@ Row&& justify(Justify value) &&;
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
-auto row = ui::Row{ui::Label{"Nom"}, ui::Label{"Valeur"}}
+auto row = ui::Row{ui::Label{"Name"}, ui::Label{"Value"}}
     .gap(8.0f).align(ui::Align::Center).justify(ui::Justify::Start);
 ```
 
-Les valeurs par défaut sont `gap=18`, `Align::Start`, `Justify::Start`. Préserver `RowComponent(float, Align, Justify)` et les enums publics.
+The defaults are `gap=18`, `Align::Start` and `Justify::Start`. Preserve `RowComponent(float, Align, Justify)` and the public enums.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-- Le builder possède la liste ordonnée des `Spec` ; le runtime possède les composants montés.
-- Aucun binding, état de sélection ni callback propre à `Row`.
-- L’identité des enfants est gérée par le runtime ; une modification de contenu invalide le layout du parent.
-- Les facteurs `Flex` appartiennent aux enfants, pas à une table mutable du conteneur.
+- The builder owns the ordered list of `Spec` objects; the runtime owns the mounted components.
+- `Row` has no binding, selection state or callback of its own.
+- The runtime manages child identity; a content change invalidates the parent layout.
+- `Flex` factors belong to the children, rather than to a mutable container table.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-- Aucun arrêt de focus et aucune activation pour le conteneur.
-- Le pointeur et le clavier ciblent les descendants dans l’ordre normal du runtime.
-- Tab suit l’ordre de composition ; l’alignement visuel ne change pas l’ordre de lecture.
-- Molette, capture, validation et annulation sont déléguées aux enfants.
+- The container has no focus stop or activation.
+- Pointer and keyboard input target descendants in the normal runtime order.
+- Tab follows composition order; visual alignment does not change reading order.
+- Wheel input, capture, confirmation and cancellation are delegated to the children.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-- Taille préférée : somme des largeurs, intervalles entre enfants, hauteur maximale.
-- Minimum : même formule avec les minima des enfants.
-- Mesure sans borne sur l’axe X ; la hauteur reste contrainte par le parent.
-- Placement par `allocate_main_axis` : grow répartit l’excédent ; shrink retire l’espace sans franchir les minima.
-- `Stretch` agit sur la hauteur ; `SpaceBetween` distribue uniquement l’espace libre positif.
-- Gap négatif ou non fini devient zéro, comme aujourd’hui. Une ligne vide mesure zéro.
-- Pas de clip automatique ; un déficit au-delà des minima déborde et se gère par [Clip](clip.md) ou [ScrollView](scroll_view.md).
+- Preferred size: the sum of widths and gaps between children, with the maximum height.
+- Minimum: the same formula using the child minima.
+- Measurement is unbounded along the X axis; height remains constrained by the parent.
+- Placement uses `allocate_main_axis`: grow distributes surplus space; shrink removes space without crossing the minima.
+- `Stretch` affects height; `SpaceBetween` distributes only positive free space.
+- A negative or non-finite gap becomes zero, as it does today. An empty row measures zero.
+- No automatic clipping; a deficit beyond the minima causes overflow, handled through [Clip](clip.md) or [ScrollView](scroll_view.md).
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-- Le conteneur ne dessine ni fond, ni bordure, ni focus ring.
-- Changer l’alignement ou l’écart au moment d’une reconstruction ne change que placement/métriques.
-- La couleur et la typographie restent celles des descendants et de [StyleScope](style_scope.md).
-- Les styles de widget ne modifient pas les valeurs explicites de layout.
+- The container draws no background, border or focus ring.
+- Changing alignment or gap during a rebuild changes only placement/metrics.
+- Color and typography remain those of the descendants and [StyleScope](style_scope.md).
+- Widget styles do not change explicit layout values.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Le rôle cible demeure `None` : aplatir le wrapper en conservant l’ordre de ses descendants. Aucun nom, valeur, action ou état sélectionné propre à la ligne. Une ligne sémantiquement nommée doit être enveloppée dans un groupe explicitement prévu par l’application.
+The target role remains `None`: flatten the wrapper while preserving descendant order. The row has no name, value, action or selected state of its own. A semantically named row must be wrapped in a group explicitly provided by the application.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Une erreur de mesure ou de montage d’un enfant ne publie pas un placement partiel. Garder la transaction de layout existante ; après récupération, reconstruire les positions depuis les métriques acceptées, sans réutiliser de référence vers un enfant retiré.
+A child measurement or mount failure must not publish partial placement. Keep the existing layout transaction; after recovery, rebuild positions from accepted metrics without reusing references to removed children.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de `ChildMetrics`, `Constraints`, `Align`, `Justify` et du noyau flex. Tester enfants collapsed, minimum supérieur à la largeur disponible, largeur zéro et redimensionnement. Un enfant retiré pendant son callback est réconcilié par le runtime, sans parcours manuel après suppression.
+Depends on `ChildMetrics`, `Constraints`, `Align`, `Justify` and the flex core. Test collapsed children, a minimum greater than the available width, zero width and resizing. The runtime reconciles a child removed during its callback without manual traversal after removal.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/row.hpp` et `src/row.cpp`.
+Target: `include/nativeui/row.hpp` and `src/row.cpp`.
 
-Préserver l’include historique `layout.hpp`, les constructeurs variadiques, les signatures `float` et `RowComponent`. Extraire le layout depuis `layout_components.inc` ; le constructeur template ne fait que convertir et posséder les `Spec`. L’algorithme de placement reste non template dans `row.cpp`.
+Preserve the historical `layout.hpp` include, variadic constructors, `float` signatures and `RowComponent`. Extract layout from `layout_components.inc`; the template constructor only converts and owns `Spec` objects. The placement algorithm remains non-template code in `row.cpp`.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `row_intrinsic_and_empty` : 0, 1 et 3 enfants, gap appliqué exactement N−1 fois.
-- `row_flex_minimum` : grow/shrink répartis ; minima jamais franchis.
-- `row_alignment_justify` : Start/Center/End/Stretch et SpaceBetween, y compris déficit.
-- `row_nonfinite_gap` : NaN/inf/négatif ramenés à zéro.
-- `row_removed_during_layout` : exception/réconciliation puis resize valide.
-- Réutiliser les contrats des tests existants `layout_flex_tests`, `layout_alignment_tests` et `layout_constraints_tests`.
+- `row_intrinsic_and_empty`: 0, 1 and 3 children, with the gap applied exactly N−1 times.
+- `row_flex_minimum`: grow/shrink distribution; minima are never crossed.
+- `row_alignment_justify`: Start/Center/End/Stretch and SpaceBetween, including a deficit.
+- `row_nonfinite_gap`: NaN/inf/negative values are reduced to zero.
+- `row_removed_during_layout`: exception/reconciliation followed by a valid resize.
+- Reuse the contracts of the existing `layout_flex_tests`, `layout_alignment_tests` and `layout_constraints_tests`.
 
-Créer l’exemple public futur `examples/features/row.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/row.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

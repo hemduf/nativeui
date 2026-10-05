@@ -1,20 +1,20 @@
 # If
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`If` insère ou retire structurellement un enfant selon bool. Source : [dynamic.hpp](../include/nativeui/dynamic.hpp), `If`, `detail::IfComponent`, `DynamicChildrenSource`.
+`If` structurally inserts or removes a child according to a bool. Source: [dynamic.hpp](../include/nativeui/dynamic.hpp), `If`, `detail::IfComponent`, `DynamicChildrenSource`.
 
-Pas de famille MyGo autonome : MyGo reconstruit impérativement sous condition. Le composant NativeUI diffère de Visibility : false démonte l’enfant, true construit une nouvelle instance retenue.
+No independent MyGo family: MyGo rebuilds imperatively under a condition. The NativeUI component differs from Visibility: false unmounts the child and true constructs a new retained instance.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante :
+Existing API:
 
 ```cpp
 template<class Child> If(Binding<bool> state, Child&& child);
@@ -22,81 +22,81 @@ template<class Child> If(State<bool>& state, Child&& child);
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<bool> detailed{false};
-auto branch = ui::If{detailed, ui::Label{"Détails"}};
+auto branch = ui::If{detailed, ui::Label{"Details"}};
 ```
 
-Préserver ces surcharges et la clé logique interne `if:true`. Le Spec enfant est gardé comme recette possédée, pas comme instance de Component réutilisée après démontage.
+Preserve these overloads and the internal logical key `if:true`. The child Spec is kept as an owned recipe rather than a Component instance reused after unmounting.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Binding bool copié, recette de Spec partagée immutable. Observe marque la structure dirty ; Tree réconcilie au checkpoint sûr. True répété conserve l’identité courante ; false retire les nodes montés. État local d’un enfant détruit n’est pas retenu : externaliser si nécessaire.
+The bool Binding is copied and the Spec recipe is shared and immutable. Observe marks structure dirty; Tree reconciles at the safe checkpoint. Repeated true retains the current identity; false removes mounted nodes. Local state of a destroyed child is not retained: externalize it if necessary.
 
-- La recette n’est pas exécutée pour une branche false initiale.
-- Retourner true après démontage recrée les objets Component, pas leurs modèles externes.
-- Une suite true/false avant checkpoint adopte la dernière valeur autoritaire sans fabriquer d’action utilisateur.
-- L’application qui veut conserver l’instance montante choisit Visibility au lieu de If.
+- The recipe is not executed for an initially false branch.
+- Returning to true after unmounting recreates Component objects rather than their external models.
+- A true/false sequence before the checkpoint adopts the latest authoritative value without manufacturing a user action.
+- An application that wants to preserve the mounted instance chooses Visibility rather than If.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun focus/input propre. Retrait sous focus/capture utilise les mécanismes Tree avant disparition. Au retour true, aucune activation ni gesture synthétique. Tab suit seulement les descendants présents. L’annulation de geste relève du runtime, pas d’un callback on_false.
+No focus/input of its own. Removal during focus/capture uses Tree mechanisms before disappearance. Returning to true synthesizes no activation or gesture. Tab follows only present descendants. Gesture cancellation belongs to the runtime rather than an on_false callback.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Vide = Size zéro ; true rapporte les métriques du seul enfant et place sur bounds. Parent reçoit invalidation structure/layout lors du changement. Un hidden enfant reste monté mais If false n’a pas de métrique fantôme.
+Empty = zero Size; true reports the sole child’s metrics and places it within the bounds. The parent receives structure/layout invalidation on change. A hidden child remains mounted, but If false has no phantom metrics.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Paint vide. Nettoyer ancienne région au retrait. La construction/reconciliation ne doit pas déclencher repaint pendant paint en cours ; exécution au safe checkpoint. Le même bool effectif ne remonte pas inutilement le sous-arbre.
+No painting. Clear the old region on removal. Construction/reconciliation must not trigger a repaint during active paint; execution occurs at the safe checkpoint. An unchanged effective bool does not unnecessarily remount the subtree.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Wrapper `None`. Enfant false absent du snapshot ; retour true reçoit les IDs de nouveaux nodes, les anciens proxies restent defunct. L’ordre sémantique des frères est préservé.
+Wrapper `None`. A false child is absent from the snapshot; returning to true receives new node IDs and old proxies remain defunct. Sibling semantic order is preserved.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Une exception de factory/mount laisse l’ancienne structure cohérente ou une récupération durable du runtime, sans moitié de child publié. Ne pas répéter automatiquement un mount callback déjà commencé. Une bascule supplémentaire après failure doit pouvoir récupérer, selon la quarantaine existante de composition dynamique.
+A factory/mount exception leaves the old structure coherent or durable runtime recovery pending, without a partially published child. Do not automatically repeat a mount callback that has already started. An additional toggle after failure must be able to recover according to the existing dynamic-composition quarantine.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutiliser dynamic reconciliation, lifecycle transactions, availability recovery et [Visibility](visibility.md). Cas : false initial, bascules rapides avant checkpoint, retrait réentrant dans callback enfant, factory throwing, owner détruit avant invalidation deferred.
+Reuse dynamic reconciliation, lifecycle transactions, availability recovery and [Visibility](visibility.md). Cases: initially false, rapid toggles before the checkpoint, reentrant removal in a child callback, a throwing factory and owner destruction before deferred invalidation.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/if.hpp` et `src/if.cpp`.
+Target: `include/nativeui/if.hpp` and `src/if.cpp`.
 
-if.hpp expose builder et adaptateur enfant ; if.cpp porte le host dynamique bool et sa source de clés/children. Préserver include dynamic.hpp et les types utilitaires partagés une seule fois. Ne pas réimplémenter la transaction Tree dans ce composant.
+if.hpp exposes the builder and child adapter; if.cpp contains the dynamic bool host and its key/child source. Preserve the dynamic.hpp include and single declarations of shared utility types. Do not reimplement the Tree transaction in this component.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `if_initial_false` : aucun mount/paint/focus enfant.
-- `if_toggle_lifecycle` : mount/unmount exact et nouvel ID à réinsertion.
-- `if_reentrant_remove` : retrait sous input, pas UAF.
-- `if_factory_fault` : pas de child partiellement publié, bascule suivante récupérable.
-- `if_multiple_pending` : état final au checkpoint sans action doublée.
-- Conserver `dynamic_composition_tests` et leurs scénarios de récupération.
+- `if_initial_false`: no child mount/paint/focus.
+- `if_toggle_lifecycle`: exact mount/unmount counts and a new ID on reinsertion.
+- `if_reentrant_remove`: removal during input without UAF.
+- `if_factory_fault`: no partially published child; the next toggle is recoverable.
+- `if_multiple_pending`: final state at the checkpoint without duplicate action.
+- Preserve `dynamic_composition_tests` and their recovery scenarios.
 
-Créer l’exemple public futur `examples/features/if.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/if.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

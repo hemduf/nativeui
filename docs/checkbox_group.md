@@ -1,26 +1,22 @@
 # CheckboxGroup
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Composer une case d’agrégation et des options indépendantes, avec état unchecked/checked/mixed
-dérivé. Usage : sélectionner toutes les autorisations d’un groupe.
+Compose an aggregate checkbox and independent options with derived unchecked/checked/mixed state. Usage: select all permissions in a group.
 
-NativeUI fournit Checkbox et SemanticCheckedState::Mixed dans
-[semantics.hpp](../include/nativeui/semantics.hpp), mais aucun groupe agrégé.
+NativeUI provides Checkbox and SemanticCheckedState::Mixed in [semantics.hpp](../include/nativeui/semantics.hpp) but no aggregate group.
 
-MyGo : `ui/feedback.go`, `CheckboxGroup`, `paintCheckbox` ; agrège les bools des cases construites
-sous une case parent. Cible : collection explicite de bindings, pour éviter un registre implicite de
-contexte.
+MyGo: `ui/feedback.go`, `CheckboxGroup`, `paintCheckbox`; it aggregates bools from boxes constructed under a parent box. Target: explicit binding collection to avoid an implicit context registry.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 struct CheckboxGroupItem {
@@ -38,182 +34,120 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<bool> mail{true};
 ui::State<bool> calendar{false};
 auto group = ui::CheckboxGroup("Notifications", {
-    {"mail", "Courrier", mail.binding(), true, false},
-    {"calendar", "Calendrier", calendar.binding(), true, false}}).spec();
+    {"mail", "Mail", mail.binding(), true, false},
+    {"calendar", "Calendar", calendar.binding(), true, false}}).spec();
 ```
 
-CheckboxGroupStyle cible possède CheckboxStyle pour parent/enfants, indentation, gap et marque
-mixed. Les CheckboxGroupItem et le bool agrégé restent des sous-types du groupe.
+Target CheckboxGroupStyle owns CheckboxStyle for parent/children, indentation, gap, and a mixed mark. CheckboxGroupItem and the aggregate bool remain group subtypes.
 
-Ne pas proposer Binding<bool> au parent : son état tri-valué est dérivé. Les notifications
-applicatives viennent des bindings enfants, sans second callback aggregate fictif.
+Do not offer Binding<bool> for the parent: its three-state value is derived. Application notifications come from child bindings, without a fictitious second aggregate callback.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Chaque item possède un Binding<bool> copié. Le vector d’items est un snapshot immuable pour la
-génération montée, sans setter/provider d’items dans cette v1 ; keys uniques/non vides identifient
-les enfants dans cette génération. Changer ordre/label/items exige remplacer la Spec au checkpoint,
-avec annulation de la génération précédente ; seuls les bools restent observables live par RAII.
+Each item owns a copied Binding<bool>. The items vector is an immutable snapshot for the mounted generation, with no item setter/provider in this v1; unique/non-empty keys identify children within that generation. Changing order/label/items requires replacing Spec at a checkpoint and cancelling the previous generation; only bools remain live-observable through RAII.
 
-Agrégat dérivé sur tous les items : vide=Unchecked ; tous true=Checked ; certains true=Mixed ; sinon
-Unchecked. Disabled/read_only restent comptés visuellement, puisqu’ils sont de vraies valeurs.
+Aggregate over all items: empty=Unchecked; all true=Checked; some true=Mixed; otherwise Unchecked. Disabled/read_only remain visually counted because they are actual values.
 
-Activation parent : choisir false si agrégat Checked, sinon true, puis écrire seulement les enfants
-enabled, non read_only et Binding valid dans l’ordre du snapshot. Un enfant non mutable peut laisser
-le parent Mixed ; son dernier bool lisible reste compté.
+Parent activation: choose false if the aggregate is Checked, otherwise true, then write only enabled, non-read_only children with valid Binding in snapshot order. An immutable child may leave the parent Mixed; its last readable bool remains counted.
 
-L’écriture collective n’est pas atomique entre plusieurs State. Chaque set notifie immédiatement ;
-en cas d’exception, les valeurs déjà publiées restent, les suivantes ne sont pas écrites et le
-parent recalcule son agrégat au checkpoint. Aucun rollback ni retry de callbacks.
+Bulk writing is not atomic across States. Each set notifies immediately; on exception, already published values remain, subsequent values are not written, and the parent recomputes its aggregate at the checkpoint. No rollback or callback retry.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Case parent et enfants activent au relâchement pointeur ou Espace ; Enter suit le comportement
-Checkbox. La case parent est focusable seulement lorsqu’au moins un enfant peut être modifié.
+Parent and child boxes activate on pointer or Space release; Enter follows Checkbox behavior. The parent box is focusable only when at least one child can change.
 
-Tab visite parent puis enfants disponibles ; ce groupe ne remplace pas les cases par un unique arrêt
-roving. Flèches n’effectuent pas d’opération collective.
+Tab visits the parent and then available children; this group does not replace boxes with one roving stop. Arrows do not perform bulk operations.
 
-ReadOnly hérité interdit toutes les écritures mais expose agrégat ; disabled enfant reste
-visuellement présent. PointerCancel annule la demande parent avant le premier set.
+Inherited ReadOnly prevents all writes but exposes the aggregate; disabled children remain visually present. PointerCancel cancels the parent request before the first set.
 
-Une écriture externe ou le retrait d’item pendant un set est traité sur un snapshot de bindings ;
-vérifier la génération vivante avant chaque nouvelle écriture, arrêter si le groupe a été retiré.
+An external write or item removal during set is handled through a binding snapshot; check the live generation before each new write, stopping if the group has been removed.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Column : case parent puis colonne indentée d’enfants ; largeur maximum des lignes + indentation,
-hauteur somme des mesures et gaps.
+Column: parent box then an indented child column; width is maximum row width plus indentation, height is the sum of measurements and gaps.
 
-Indicateur mixed prend exactement la même boîte que checked ; pas de saut de layout pendant
-agrégation. Les labels suivent Checkbox et les coordonnées logiques.
+The mixed indicator occupies exactly the same box as checked; no layout shift during aggregation. Labels follow Checkbox and logical coordinates.
 
-Contrainte étroite : clipper labels, préserver indicateurs ; aucune disparition automatique
-d’autorisation par manque de place.
+Narrow constraint: clip labels and preserve indicators; permissions never disappear automatically for lack of space.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Parent utilise checkmark quand Checked, trait horizontal quand Mixed, rien quand Unchecked. La
-marque suit checkbox colors et largeur de trait locale.
+Parent uses a checkmark for Checked, a horizontal stroke for Mixed, and nothing for Unchecked. The mark follows checkbox colors and local stroke width.
 
-Modification bool demande repaint parent et enfant ; changement de texte/ordre/style métrique
-demande layout. Une observation n’effectue jamais un set pour aligner la valeur agrégée.
+A bool change repaints parent and child; changes to text/order/metric style require layout. Observation never calls set to align the aggregate value.
 
-Le parent peut rester Mixed après “tout cocher” si des enfants disabled restent false ; garder cette
-présentation fidèle aux valeurs, plutôt qu’afficher une réussite artificielle.
+The parent may remain Mixed after “check all” if disabled children remain false; keep presentation faithful to values rather than displaying artificial success.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Group nommé label, case parent Checkbox checked Mixed/Checked/Unchecked et enfants Checkbox
-nommés. Parent Toggle absent quand aucune valeur mutable.
+Target: Group named by label, parent Checkbox with Mixed/Checked/Unchecked checked state, and named Checkbox children. Parent Toggle is absent when no value is mutable.
 
-La disponibilité parent est fondée sur ses actions, pas sur l’agrégat ; un groupe vide décrit une
-liste sans options et ne présente pas un bouton actif.
+Parent availability is based on its actions rather than the aggregate; an empty group describes an optionless list and presents no active button.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Toute activation parent prépare un snapshot key/binding/mutabilité et un objectif unique avant le
-premier set. Libérer capture avant notifications, ne retenir aucun Child Node.
+Every parent activation prepares a key/binding/mutability snapshot and a single target value before the first set. Release capture before notifications; retain no Child Node.
 
-Un observateur peut retirer un enfant, reconstruire le groupe ou lever. Les données déjà écrites
-sont autoritatives ; recalculer l’agrégat à partir du nouveau modèle, sans terminer aveuglément
-l’ancien lot.
+An observer may remove a child, rebuild the group, or throw. Already written data is authoritative; recompute the aggregate from the new model without blindly finishing the old batch.
 
-Démonter retire tous les abonnements, y compris ceux d’items remplacés ; la destruction ne lance
-jamais une action “tout décocher”.
+Unmounting removes all subscriptions, including those for replaced items; destruction never launches an “uncheck all” action.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [checkbox](checkbox.md), [column](column.md), State, disponibilité et sémantique
-mixed. Aucun service collectif de notification globale à ajouter.
+Dependencies: [checkbox](checkbox.md), [column](column.md), State, availability, and mixed semantics. Add no global collective notification service.
 
-Keys dupliquées rejetées avant publication. Les labels dupliqués sont permis ; même Binding dans
-deux items est permis, parcouru dans l’ordre, le second set identique ne notifie pas à nouveau selon
-State.
+Duplicate keys are rejected before publication. Duplicate labels are allowed; the same Binding in two items is allowed and visited in order, with the second identical set not notifying again according to State.
 
-Collection vide/all immutable/all invalid : pas d’écriture, aucune capture de mutation. Remplacer
-les items exige nouvelle Spec au checkpoint ; aucune synchronisation d’items ou conservation de
-transient focus entre générations n’est promise.
+Empty/all-immutable/all-invalid collection: no writes or mutation capture. Replacing items requires a new Spec at a checkpoint; no item synchronization or preservation of transient focus between generations is promised.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/checkbox_group.hpp` et `src/checkbox_group.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/checkbox_group.hpp` and `src/checkbox_group.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-CheckboxGroupItem et CheckboxGroupStyle restent avec le parent ; les cases enfants réutilisent le
-noyau Checkbox, tandis que checkbox_group.cpp porte agrégation, lot et layout.
+CheckboxGroupItem and CheckboxGroupStyle remain with the parent; child boxes reuse the Checkbox core, while checkbox_group.cpp contains aggregation, batching, and layout.
 
-Inscrire `src/checkbox_group.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les
-includes collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou
-plugin dans l’API publique.
+Register `src/checkbox_group.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`checkbox_group_aggregate` : vide/off/all/mixed produisent les états exacts sans aucune écriture au
-mount.
+`checkbox_group_aggregate`: empty/off/all/mixed produce exact states without any mount-time write.
 
-`checkbox_group_mutable_only` : parent change seulement enfants enabled et modifiables ; mixed
-persistant fidèle.
+`checkbox_group_mutable_only`: parent changes only enabled mutable children; persistent mixed state remains faithful.
 
-`checkbox_group_order_failure` : observateur milieu lève : premières valeurs restent, suivantes
-inchangées, groupe récupère.
+`checkbox_group_order_failure`: a middle observer throws: initial values remain, later values stay unchanged, and the group recovers.
 
-`checkbox_group_remove_during_bulk` : retrait/reconstruction pendant set arrête les anciennes
-écritures.
+`checkbox_group_remove_during_bulk`: removal/reconstruction during set stops old writes.
 
-`checkbox_group_keys` : réordre garde identité/focus ; keys dupliquées rejetées.
+`checkbox_group_keys`: reordering preserves identity/focus; duplicate keys rejected.
 
-`checkbox_group_semantics` : parent Mixed et actions réellement disponibles ; enfants non doublés.
+`checkbox_group_semantics`: parent Mixed and actually available actions; children not duplicated.
 
-Ajouter `examples/features/checkbox_group.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/checkbox_group.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

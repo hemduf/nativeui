@@ -270,7 +270,7 @@ public:
       clear_style.base.horizontal_padding = 0.0f;
     Spec clear{[action, clear_style, visible] {
                  return std::make_unique<detail::InputAction>(
-                     "Effacer la recherche", "×", clear_style, action, false,
+                     "Clear search", "×", clear_style, action, false,
                      false, visible);
                },
                {}};

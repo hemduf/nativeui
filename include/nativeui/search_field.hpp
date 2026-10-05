@@ -23,7 +23,7 @@ public:
 private:
   std::string label_;
   Binding<std::string> query_;
-  std::string placeholder_{"Rechercher"};
+  std::string placeholder_{"Search"};
   std::size_t max_length_{};
   std::function<void(const std::string &)> on_submit_;
   SearchFieldStyle style_;

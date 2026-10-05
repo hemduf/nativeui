@@ -1,102 +1,102 @@
 # Padding
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Padding` réserve une marge intérieure uniforme autour d’un enfant. Sources : `Padding` / `PaddingComponent` dans [layout_builders.inc](../include/nativeui/detail/layout_builders.inc) et [layout_components.inc](../include/nativeui/detail/layout_components.inc).
+`Padding` reserves uniform inner spacing around a child. Sources: `Padding` / `PaddingComponent` in [layout_builders.inc](../include/nativeui/detail/layout_builders.inc) and [layout_components.inc](../include/nativeui/detail/layout_components.inc).
 
-MyGo `ui/layout.go`, `padX`, `padY`, `contentX`, `contentY`, traite padding et bordure séparément. NativeUI conserve ici le wrapper uniforme, sans importer la boîte entière.
+MyGo `ui/layout.go`, `padX`, `padY`, `contentX`, `contentY`, handles padding and borders separately. NativeUI retains the uniform wrapper here without importing the entire box model.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante :
+Existing API:
 
 ```cpp
 template<class Child> Padding(float padding, Child&& child);
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
-auto padded = ui::Padding{12.0f, ui::Label{"Contenu"}};
+auto padded = ui::Padding{12.0f, ui::Label{"Content"}};
 ```
 
-Préserver `PaddingComponent(float)` et la précision `float`. Une variante asymétrique ne fait pas partie de l’extraction spécifiée.
+Preserve `PaddingComponent(float)` and `float` precision. An asymmetric variant is outside the specified extraction.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Padding et Spec enfant sont possédés. Aucun état externe, notification ou callback propre. La taille intérieure se calcule à partir des bounds de la passe, sans cache global de dimensions.
+Padding and the child Spec are owned. No external state, notification or callback of its own. Inner size is calculated from the current pass’s bounds without a global dimension cache.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun arrêt de focus ni activation. La marge ne devient pas hit target ; seuls les descendants éligibles réagissent. Le clavier et la molette gardent leur routage. Validation/annulation appartiennent au contrôle enfant.
+No focus stop or activation. Spacing does not become a hit target; only eligible descendants react. Keyboard and wheel input retain their routing. Confirmation/cancellation belongs to the child control.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Préférée/minimum : métriques enfant + deux paddings sur chaque axe. Contraintes enfant inset ; placement à `(x+p,y+p)` avec `max(0,w−2p)` et `max(0,h−2p)`. Padding négatif ou non fini devient zéro. Un padding supérieur aux bounds conserve un rectangle intérieur vide et fini.
+Preferred/minimum size: child metrics + padding on both sides of each axis. Child constraints are inset; placement is at `(x+p,y+p)` with `max(0,w−2p)` and `max(0,h−2p)`. Negative or non-finite padding becomes zero. Padding greater than the bounds preserves an empty, finite inner rectangle.
 
-- Le code actuel emploie `std::max(0.0f,padding)` ; la garantie finite ci-dessus est une exigence cible de robustesse, pas la preuve d’un traitement actuel de +inf.
-- Aucune bordure n’est ajoutée à la mesure ; padding et stroke sont distincts.
-- Mesurer un child à largeur réduite peut augmenter sa hauteur par wrapping.
-- Le parent reçoit les métriques recalculées, pas une taille issue d’un ancien viewport.
-- L’inset des contraintes doit conserver min<=max après assainissement.
-- Le changement de facteur d’échelle reste une conversion backend, pas une multiplication du padding dans la recette.
+- Current code uses `std::max(0.0f,padding)`; the finite-value guarantee above is a target robustness requirement, rather than proof that +inf is currently handled.
+- No border is added to measurement; padding and stroke are distinct.
+- Measuring a child at a reduced width can increase its height through wrapping.
+- The parent receives recalculated metrics rather than a size from an old viewport.
+- Constraint insetting must preserve min<=max after sanitization.
+- A scale-factor change remains a backend conversion, rather than multiplying the padding in the recipe.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Paint vide, sans couleur de fond. Ne pas peindre des marges en couleur de surface. Changement de padding par reconstruction demande layout ; changement de paint enfant ne redemande pas intrinsèques si ses métriques sont identiques.
+No painting or background color. Do not paint spacing in a surface color. Changing padding through a rebuild requests layout; a child paint change does not request intrinsic sizes again if its metrics are unchanged.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Rôle `None`, enfant aplati. Les bounds accessibles du contrôle incluent uniquement ses bounds de layout, pas toute la marge du wrapper. Le padding ne modifie pas le nom/description du contrôle.
+Role `None`, with the child flattened. The control’s accessible bounds include only its layout bounds, rather than the wrapper’s entire spacing area. Padding does not change the control’s name/description.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Ne pas conserver de référence aux contraintes entre passes. Les exceptions de mesure/layout restent récupérables via transaction Tree. Démontage ne crée aucune notification de taille applicative.
+Do not retain constraint references between passes. Measurement/layout exceptions remain recoverable through a Tree transaction. Unmounting creates no application size notification.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend des types de géométrie et de l’inset des contraintes. Cas limites : vide, padding excessif, clipping enfant, scroll transform, valeurs non finies. `Column::padding` reste distinct et compatible.
+Depends on geometry types and constraint insetting. Edge cases: empty content, excessive padding, child clipping, scroll transformations and non-finite values. `Column::padding` remains separate and compatible.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/padding.hpp` et `src/padding.cpp`.
+Target: `include/nativeui/padding.hpp` and `src/padding.cpp`.
 
-Extraire `PaddingComponent` dans `padding.cpp` avec déclaration publique dans `padding.hpp`. Le constructeur enfant template reste header. Préserver `layout.hpp` et le sens uniforme historique.
+Extract `PaddingComponent` into `padding.cpp`, with its public declaration in `padding.hpp`. The template child constructor remains in the header. Preserve `layout.hpp` and the historical uniform meaning.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `padding_intrinsic` : ajout de 2p aux minima/préférées.
-- `padding_inset_bounds` : placement intérieur exact.
-- `padding_excess` : petites bounds, largeur/hauteur jamais négatives.
-- `padding_nonfinite` : NaN/inf/négatif assainis.
-- `padding_hit_geometry` : marge ne déclenche pas l’enfant.
-- `padding_fault_recovery` : erreur enfant puis prochaine passe correcte.
+- `padding_intrinsic`: add 2p to minimum/preferred sizes.
+- `padding_inset_bounds`: exact inner placement.
+- `padding_excess`: small bounds, with width/height never negative.
+- `padding_nonfinite`: NaN/inf/negative values are sanitized.
+- `padding_hit_geometry`: spacing does not activate the child.
+- `padding_fault_recovery`: child failure followed by a correct next pass.
 
-Créer l’exemple public futur `examples/features/padding.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/padding.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

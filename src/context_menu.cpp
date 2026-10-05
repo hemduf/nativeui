@@ -78,7 +78,7 @@ public:
     info.role = SemanticRole::Group;
     info.enabled = effective_enabled();
     if (provider_ && has_child_)
-      info.description = "Menu contextuel disponible";
+      info.description = "Context menu available";
     return info;
   }
   void paint(PaintContext &) const override {}

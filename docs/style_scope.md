@@ -1,20 +1,20 @@
 # StyleScope
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`StyleScope` applique des overrides lexicaux typés sur le Theme hérité. Source : [style_scope.hpp](../include/nativeui/style_scope.hpp), `StyleScope`, `StyleScopeOverrides`, `apply_style_scope_overrides`, `classify_style_scope_change`, `StyleScopeComponent`.
+`StyleScope` applies typed lexical overrides to the inherited Theme. Source: [style_scope.hpp](../include/nativeui/style_scope.hpp), `StyleScope`, `StyleScopeOverrides`, `apply_style_scope_overrides`, `classify_style_scope_change`, `StyleScopeComponent`.
 
-Pas de famille MyGo autonome à porter : MyGo hérite ses propriétés de style. L’API NativeUI est déjà publique, avec override immutable ou Binding ; son extraction doit préserver le contrat de priorité champ par champ.
+No independent MyGo family needs porting: MyGo inherits style properties. The NativeUI API is already public, with immutable overrides or Binding; extraction must preserve field-by-field precedence.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante :
+Existing API:
 
 ```cpp
 template<class Child> StyleScope(StyleScopeOverrides overrides, Child&& child);
@@ -23,7 +23,7 @@ template<class Child> StyleScope(State<StyleScopeOverrides>& overrides, Child&& 
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::StyleScopeOverrides patch;
@@ -31,73 +31,73 @@ patch.palette.accent=ui::Color{0.8f,0.3f,0.1f,1.0f};
 auto scope = ui::StyleScope{patch, ui::Button{"Action", []{}}};
 ```
 
-Conserver tous les types Palette/Typography/Spacing/Radii/ControlOverrides et les fonctions apply/classify. Options restent optional et leur absence signifie inherit ; ne pas ajouter contraintes ou modèle dans le patch.
+Preserve all Palette/Typography/Spacing/Radii/ControlOverrides types and the apply/classify functions. Options remain optional and absence means inherit; do not add constraints or a model to the patch.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Value form immutable pour la durée retenue ; Binding form remplacement UI-thread. State délègue déjà à binding et ne garde pas State*. Résolution du plus externe au plus interne, nearest-scope-wins par champ, puis recette locale du widget. Chaque scope possède son Theme résolu et observer weak.
+The value form is immutable for its retained lifetime; Binding form replacement is UI-thread confined. State already delegates to binding and retains no State*. Resolve from outermost to innermost, nearest-scope-wins per field, then apply the widget’s local recipe. Each scope owns its resolved Theme and weak observer.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun input/focus/capture propre. Les contrôles conservent leur interaction et disponibilité ; changer palette ne désactive pas un enfant. Les scopes peuvent s’imbriquer sans mode « active style » global. Aucun raccourci de thème.
+No input/focus/capture of its own. Controls retain their interaction and availability; changing the palette does not disable a child. Scopes can nest without a global “active style” mode. No theme shortcut.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Pass-through des contraintes, minimum/préférée et bounds enfant. Overrides typographiques/controls peuvent changer métriques descendants, mais width/height/Flex/Grid/scroll state explicites ne sont pas représentables dans StyleScopeOverrides et restent autoritaires.
+Pass through constraints, child minimum/preferred size and bounds. Typography/control overrides may change descendant metrics, but explicit width/height/Flex/Grid/scroll state cannot be represented in StyleScopeOverrides and remains authoritative.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Comparer Theme effectif avant/après, pas seulement patch brut : égalité effective None, couleur Paint, métriques Layout selon classify_theme_change existant. Ne pas re-mesurer pour accent seulement. La présence d’un override identique à la valeur héritée peut être un no-op effectif ; changement de parent doit recalculer descendants.
+Compare the effective Theme before/after rather than only the raw patch: effective equality produces None, color produces Paint and metrics produce Layout according to the existing classify_theme_change. Do not remeasure for accent alone. An override equal to the inherited value can be an effective no-op; a parent change must recalculate descendants.
 
-- La comparaison des couleurs conserve les composantes r/g/b/a du type Color existant.
-- Une override family vide est une valeur explicite ; elle ne signifie pas nullopt/inherit.
-- Une police fallback modifiée est une modification métrique potentielle à classer par le Theme resolver.
+- Color comparison preserves the existing Color type’s r/g/b/a components.
+- An empty family override is an explicit value; it does not mean nullopt/inherit.
+- A changed fallback font is a potential metric change for the Theme resolver to classify.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Wrapper `None`. Le style ne modifie aucun nom, rôle ou action. Les couleurs doivent conserver les contrastes choisis par la recette/app ; ne pas promettre un audit automatisé de contraste livré par ce composant.
+Wrapper `None`. Style changes no name, role or action. Colors must preserve the contrasts chosen by the recipe/application; do not promise an automated contrast audit delivered by this component.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Observer weak déconnecté avant destruction ; inherited Theme doit appartenir au runtime vivant, pas à un temporaire. Préparer prochain Theme avant publication, classer invalidation ; erreur de callback invalidator laisse pending work durable sans dangling theme pointer. Deux scopes ne doivent pas partager de resolved Theme mutable.
+Disconnect the weak observer before destruction; the inherited Theme must belong to the live runtime rather than a temporary. Prepare the next Theme before publication and classify invalidation; an invalidator callback failure leaves durable pending work without a dangling theme pointer. Two scopes must not share a mutable resolved Theme.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend Theme, ThemeBinding et classify_theme_change ; types float existants conservés. Cas : patch vide, inner champ nul, palette égale, font-family/fallbacks modifiés, parent Theme changé, state expiré. Aucun override de disponibilité/callback/model accepté.
+Depends on Theme, ThemeBinding and classify_theme_change; preserve existing float types. Cases: an empty patch, an absent inner field, an equal palette, changed font-family/fallbacks, changed parent Theme and expired state. No availability/callback/model override is accepted.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/style_scope.hpp` et `src/style_scope.cpp`.
+Target: `include/nativeui/style_scope.hpp` and `src/style_scope.cpp`.
 
-Le header de ce nom existe déjà : le conserver comme API canonique, déplacer implémentations non templates dans style_scope.cpp. Garder fonctions publiques/equality et types ; seules les trois conversions enfant templates restent inline. Les types détail ne deviennent pas un service global.
+A header with this name already exists: retain it as the canonical API and move non-template implementations into style_scope.cpp. Preserve public functions/equality and types; only the three template child conversions remain inline. Detail types do not become a global service.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `style_scope_nearest_field` : priorité par champ, inherit par absence.
-- `style_scope_effective_noop` : patch égal au Theme courant = aucune invalidation.
-- `style_scope_paint_layout` : couleur Paint, typographie Layout.
-- `style_scope_parent_change` : recalcul d’un nested patch partiel.
-- `style_scope_local_recipe` : recette widget appliquée après scope.
-- `style_scope_lifetime_fault` : expiration/throw puis callback stale inerte.
+- `style_scope_nearest_field`: per-field precedence, inheritance through absence.
+- `style_scope_effective_noop`: a patch equal to the current Theme causes no invalidation.
+- `style_scope_paint_layout`: color produces Paint, typography produces Layout.
+- `style_scope_parent_change`: recalculation of a nested partial patch.
+- `style_scope_local_recipe`: the widget recipe is applied after the scope.
+- `style_scope_lifetime_fault`: expiration/throw followed by an inert stale callback.
 
-Créer l’exemple public futur `examples/features/style_scope.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/style_scope.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

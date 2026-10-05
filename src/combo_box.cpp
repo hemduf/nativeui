@@ -31,7 +31,7 @@ public:
       : session_(std::move(session)), index_(index),
         generation_(session_->generation),
         label_(index < session_->rows.size() ? session_->rows[index].label
-                                             : "Aucun résultat") {}
+                                             : "No results") {}
   Size measure(const std::vector<ChildMetrics> &) const override { return {}; }
   bool pointer_targetable() const noexcept override { return false; }
   SemanticInfo semantics() const override {
@@ -45,7 +45,7 @@ public:
                    session_->rows[index_].enabled;
     info.selected = current && index_ == session_->selected;
     if (current && index_ == session_->highlighted)
-      info.description = "Option surlignée";
+      info.description = "Highlighted option";
     if (info.enabled)
       info.actions = {SemanticAction::Select};
     return info;
@@ -222,7 +222,7 @@ public:
   SemanticInfo semantics() const override {
     SemanticInfo info;
     info.role = SemanticRole::ListView;
-    info.description = session_->rows.empty() ? "Aucun résultat" : "Options";
+    info.description = session_->rows.empty() ? "No results" : "Options";
     return info;
   }
   void paint(PaintContext &context) const override {
@@ -238,7 +238,7 @@ public:
       auto style = base();
       painter.text(
           {bounds.x + style.horizontal_padding, bounds.y + bounds.h * .5f},
-          "Aucun résultat", row_text(style));
+          "No results", row_text(style));
     }
     for (std::size_t index = 0; index < session_->rows.size(); ++index) {
       const auto style = resolved(index);

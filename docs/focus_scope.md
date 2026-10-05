@@ -1,20 +1,20 @@
 # FocusScope
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`FocusScope` délimite seulement le domaine de focus ; active=false ne cache pas ses enfants. Source : [focus.hpp](../include/nativeui/focus.hpp), `FocusScope`, `FocusScopeComponent` ; routage dans les services Tree existants.
+`FocusScope` only defines the focus domain; active=false does not hide its children. Source: [focus.hpp](../include/nativeui/focus.hpp), `FocusScope`, `FocusScopeComponent`; routing uses existing Tree services.
 
-MyGo `ui/scope.go`, `enterScope`, `arrangeFocus`, `restoreFocus`, possède une modalité liée aux overlays. Ne pas importer ces services : utiliser le scope NativeUI et ses overlays.
+MyGo `ui/scope.go`, `enterScope`, `arrangeFocus`, `restoreFocus`, provides modality tied to overlays. Do not import those services: use NativeUI’s scope and overlays.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante :
+Existing API:
 
 ```cpp
 template<class Child> FocusScope(Binding<bool> active, Child&& child);
@@ -24,7 +24,7 @@ FocusScope&& default_focus(std::size_t focusable_descendant_index) &&;
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<bool> active{true};
@@ -32,74 +32,74 @@ auto scope = ui::FocusScope{active, ui::Button{"OK", []{}}}
     .trap(true).default_focus(0);
 ```
 
-Trap par défaut true, default index zéro. FocusScopeComponent reste public, y compris les hooks is_focus_scope/focus_scope_active/traps/default_index.
+Trap defaults to true and the default index is zero. FocusScopeComponent remains public, including the is_focus_scope/focus_scope_active/traps/default_index hooks.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Binding active copié, trap/index immuables dans la recette. Observer invalide focus et paint selon le runtime, sans changer disponibilité ou modèle enfants. Aucun « current scope » global. L’ordre focusable descendant est déterminé au moment de récupération, pas par pointeurs figés.
+The active Binding is copied, with immutable trap/index values in the recipe. The observer invalidates focus and paint according to the runtime without changing child availability or models. No global “current scope”. Focusable descendant order is determined during recovery rather than through fixed pointers.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-- active=false retire descendants des cibles de focus, mais laisse paint/visibilité et input pointeur selon runtime.
-- trap=true conserve Tab/Shift-Tab dans le domaine actif.
-- default_focus est indice de descendant focusable éligible, pas index d’enfant immédiat.
-- Indice hors plage : récupération déterministe sur premier éligible, domaine vide sans focus.
-- Le scope ne consomme pas Échap et n’est pas modal à lui seul.
-- Les popups/dialogues établissent leur propre policy à travers services existants.
+- active=false removes descendants from focus targets but leaves paint/visibility and pointer input according to the runtime.
+- trap=true keeps Tab/Shift-Tab within the active domain.
+- default_focus is an index among eligible focusable descendants rather than immediate children.
+- Out-of-range index: deterministic recovery to the first eligible descendant; an empty domain has no focus.
+- The scope does not consume Escape and is not modal on its own.
+- Popups/dialogs establish their own policy through existing services.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Wrapper transparent : premier enfant fournit minimum/préférée et reçoit bounds. Aucun espace supplémentaire pour focus ring. Le rectangle sémantique/focus des descendants reste leur propre placement.
+Transparent wrapper: the first child provides minimum/preferred size and receives the bounds. No extra space for a focus ring. Descendants’ semantic/focus rectangles remain their own placements.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Paint vide ; aucun backdrop ou contour propre. Focus visible est dessiné par descendants. Une bascule active doit nettoyer les anciens focus rings sans transformer la zone en Hidden. Pas d’animation du scope.
+No painting or backdrop/outline of its own. Descendants draw focus-visible. An active toggle must clear old focus rings without turning the region Hidden. No scope animation.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Rôle `None`, lecture de descendants indépendante de focus-active. Le runtime reste autorité du focus accessible. Les demandes Focus vers un domaine inactif sont rejetées sans casser les snapshots de valeurs.
+Role `None`, with descendant reading independent of focus-active. The runtime remains authoritative for accessible focus. Focus requests into an inactive domain are rejected without breaking value snapshots.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Conserver active Binding après recette, subscription libérée à unmount. Désactiver un scope sous callback de focus doit laisser un checkpoint de récupération durable et éviter récursion de transferts. Les identités de restitution de focus sont stables/weak, aucun Node* retenu.
+Retain the active Binding after the recipe is consumed and release the subscription on unmount. Disabling a scope within a focus callback must leave a durable recovery checkpoint and avoid recursive transfers. Focus-restoration identities are stable/weak, with no retained Node*.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend Tree focus/domaines, [Visibility](visibility.md) et [Dialog](dialog.md). Cas : nested traps, active false initial, aucun contrôle, index hors plage, enfant disabled et suppression du scope courant. Ne pas copier focus manager MyGo.
+Depends on Tree focus/domains, [Visibility](visibility.md) and [Dialog](dialog.md). Cases: nested traps, initially false active state, no control, an out-of-range index, a disabled child and removal of the current scope. Do not copy MyGo’s focus manager.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/focus_scope.hpp` et `src/focus_scope.cpp`.
+Target: `include/nativeui/focus_scope.hpp` and `src/focus_scope.cpp`.
 
-focus_scope.hpp/cpp extraient les hooks et mesure non templates ; focus.hpp reste compatible et FocusScopeComponent public. Aucun type natif ou registry globale dans l’API.
+focus_scope.hpp/cpp extract non-template hooks and measurement; focus.hpp remains compatible and FocusScopeComponent public. No native type or global registry in the API.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `focus_scope_inactive_visible` : pixels présents, Tab ne cible pas enfants.
-- `focus_scope_trap_cycle` : Tab/Shift-Tab bouclent correctement.
-- `focus_scope_default_index` : indice parmi éligibles, hors plage fallback.
-- `focus_scope_nested` : domaines imbriqués et restitution.
-- `focus_scope_remove_focused` : suppression sûre avec focus actif.
-- `focus_scope_focus_callback_throw` : prochain transfert reste possible.
+- `focus_scope_inactive_visible`: pixels remain present; Tab does not target children.
+- `focus_scope_trap_cycle`: Tab/Shift-Tab cycle correctly.
+- `focus_scope_default_index`: index among eligible descendants, with out-of-range fallback.
+- `focus_scope_nested`: nested domains and restoration.
+- `focus_scope_remove_focused`: safe removal with active focus.
+- `focus_scope_focus_callback_throw`: the next transfer remains possible.
 
-Créer l’exemple public futur `examples/features/focus_scope.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/focus_scope.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

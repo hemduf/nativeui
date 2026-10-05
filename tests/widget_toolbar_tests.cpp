@@ -64,7 +64,7 @@ std::optional<ui::SemanticInfo> menu_info(const ui::UI &tree,
 }
 void open_more(ui::UI &tree, test::MockPlatform &platform) {
   tree.dispatch(test::key(ui::Key::End), platform);
-  NUI_CHECK(group_test::focused(tree) == "Plus");
+  NUI_CHECK(group_test::focused(tree) == "More");
   tree.dispatch(test::key(ui::Key::Down), platform);
   group_test::release(tree, platform, ui::Key::Down);
   NUI_CHECK(tree.overlay_entries().size() == 1);
@@ -78,13 +78,13 @@ void overflow_preserves_suffix_order_and_same_application_commands() {
   tree.activate(platform);
   group_test::render(tree, {300, 60});
   NUI_CHECK(visible(tree, "Save") && visible(tree, "Undo") &&
-            visible(tree, "Redo") && !visible(tree, "Plus"));
+            visible(tree, "Redo") && !visible(tree, "More"));
   group_test::click(tree, platform, audit[0]->bounds);
   NUI_CHECK(calls[0] == 1);
   tree.resize({120, 60});
   group_test::render(tree, {120, 60});
   NUI_CHECK(visible(tree, "Save") && !visible(tree, "Undo") &&
-            !visible(tree, "Redo") && visible(tree, "Plus"));
+            !visible(tree, "Redo") && visible(tree, "More"));
   open_more(tree, platform);
   tree.dispatch(test::key(ui::Key::Home), platform);
   tree.dispatch(test::key(ui::Key::Enter), platform);
@@ -150,7 +150,7 @@ void focus_and_capture_transfer_to_more_without_remount() {
   NUI_CHECK(group_test::focused(tree) == "Value");
   tree.resize({120, 60});
   group_test::render(tree, {120, 60});
-  NUI_CHECK(group_test::focused(tree) == "Plus" && !value.get());
+  NUI_CHECK(group_test::focused(tree) == "More" && !value.get());
   NUI_CHECK(platform.pointer_capture_begin_count ==
             platform.pointer_capture_end_count);
   tree.dispatch(test::pointer(ui::InputType::PointerUp, old.x + old.w * .5f,
@@ -225,12 +225,12 @@ void layout_failure_keeps_last_committed_plan_then_recovers() {
   } catch (const std::runtime_error &) {
     caught = true;
   }
-  NUI_CHECK(caught && visible(tree, "Undo") && !visible(tree, "Plus") &&
+  NUI_CHECK(caught && visible(tree, "Undo") && !visible(tree, "More") &&
             group_test::same_rect(old, audit[1]->bounds));
   audit[2]->throw_measure = false;
   tree.resize({120, 60});
   group_test::render(tree, {120, 60});
-  NUI_CHECK(!visible(tree, "Undo") && visible(tree, "Plus"));
+  NUI_CHECK(!visible(tree, "Undo") && visible(tree, "More"));
   open_more(tree, platform);
   tree.dispatch(test::key(ui::Key::Enter), platform);
   NUI_CHECK(calls[1] == 1);
@@ -297,8 +297,8 @@ void copied_recipe_has_independent_plan_focus_and_menu() {
   right.activate(b);
   group_test::render(left, {300, 60});
   group_test::render(right, {120, 60});
-  NUI_CHECK(visible(left, "Undo") && !visible(left, "Plus"));
-  NUI_CHECK(!visible(right, "Undo") && visible(right, "Plus"));
+  NUI_CHECK(visible(left, "Undo") && !visible(left, "More"));
+  NUI_CHECK(!visible(right, "Undo") && visible(right, "More"));
   open_more(right, b);
   left.dispatch(test::key(ui::Key::Right), a);
   NUI_CHECK(group_test::focused(left) == "Undo");
@@ -309,7 +309,7 @@ void copied_recipe_has_independent_plan_focus_and_menu() {
   NUI_CHECK(group_test::focused(left) == "Undo");
   right.resize({300, 60});
   group_test::render(right, {300, 60});
-  NUI_CHECK(visible(right, "Undo") && !visible(right, "Plus"));
+  NUI_CHECK(visible(right, "Undo") && !visible(right, "More"));
 }
 void editor_and_nested_group_keep_navigation_and_spacer_flex() {
   ui::State<std::string> text{"abc"};
@@ -351,7 +351,7 @@ void editor_and_nested_group_keep_navigation_and_spacer_flex() {
   tree.dispatch(test::text("x"), platform);
   NUI_CHECK(group_test::focused(tree) == "Editor" && text.get() == "axbc");
   NUI_CHECK_NEAR(last->bounds.x + last->bounds.w, 900, .01f);
-  NUI_CHECK(!visible(tree, "Plus"));
+  NUI_CHECK(!visible(tree, "More"));
 }
 void suite() {
   overflow_preserves_suffix_order_and_same_application_commands();

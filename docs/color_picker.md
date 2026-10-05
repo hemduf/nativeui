@@ -1,22 +1,22 @@
 # ColorPicker
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Sélecteur sRGB avec carré saturation/valeur, teinte, alpha, champ hexadécimal, preview et palette nommée. Le modèle public reste ui::Color ; HSV est uniquement une représentation UI interne.
+An sRGB picker with a saturation/value square, hue, alpha, hexadecimal field, preview, and named palette. The public model remains ui::Color; HSV is only an internal UI representation.
 
-Absent de NativeUI ; [geometry.hpp](../include/nativeui/geometry.hpp) définit Color, Painter dispose de gradients, Slider/TextInput et Binding existent.
+Absent from NativeUI; [geometry.hpp](../include/nativeui/geometry.hpp) defines Color, Painter has gradients, and Slider/TextInput and Binding exist.
 
-MyGo : `ui/colorpicker.go`, `ColorPicker`, `toHSVA`, `hsva.color`, `hexOf`, `pickerState`, `channelSlider`, `checkers`. Conservation de teinte sur gris locaux, synchronisation externe, alpha/hex et swatches. MyGo utilise uint8 ; cible garde les composantes flottantes de ui::Color.
+MyGo: `ui/colorpicker.go`, `ColorPicker`, `toHSVA`, `hsva.color`, `hexOf`, `pickerState`, `channelSlider`, `checkers`. Hue retention on local grays, external synchronization, alpha/hex, and swatches. MyGo uses uint8; the target retains ui::Color floating-point components.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 struct ColorSwatch { std::string id; std::string name; Color value; };
@@ -32,92 +32,92 @@ public:
 };
 ```
 
-Défauts : alpha activé, swatches vide pour ne pas imposer une palette, carré SV puis teinte/alpha/hex, largeur préférée 280 unités logiques. ColorPickerStyle couvre carré, thumb, checker, textes, gaps/padding et swatch size.
+Defaults: alpha enabled, empty swatches to avoid imposing a palette, SV square then hue/alpha/hex, preferred width 280 logical units. ColorPickerStyle covers square, thumb, checker, text, gaps/padding, and swatch size.
 
-Exemple cible proposé : `ui::ColorPicker{"Accent", accent}.alpha_enabled().spec()` avec State<Color> détenu par l’application. Tous les nouveaux nombres d’options/style sont double ; Color reste son type existant.
+Proposed target example: `ui::ColorPicker{"Accent", accent}.alpha_enabled().spec()` with application-owned State<Color>. All new option/style numbers are double; Color retains its existing type.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<Color> externe et surcharge State convertie immédiatement. Source détruite : valid=false, get dernière couleur, set ignoré/observe inactif sans notification automatique ; revalider avant edit et ne pas notifier on_change. HSV double privé, dernier Color effectif, brouillon hex et capture appartiennent à l’instance. sRGB non linéaire des canaux [0,1] ; alpha [0,1] linéaire.
+External Binding<Color> and immediately converted State overload. Source destruction: valid=false, get returns the last color, set ignored/observe inactive without automatic notification; revalidate before edit and do not notify on_change. Private double HSV, last effective Color, hex draft, and capture belong to the instance. Nonlinear sRGB channels [0,1]; linear alpha [0,1].
 
-HSV est calculé sur ces canaux sRGB, pas après conversion gamma. Une transition utilisateur vers gris conserve la dernière teinte utile ; une couleur externe grise conserve aussi cette teinte de l’instance sans écrire Color.
+HSV is calculated on these sRGB channels, not after gamma conversion. A user transition to gray retains the last useful hue; an external gray color also retains this instance's hue without writing Color.
 
-Chaque mutation utilisateur modifie Color effectif puis on_change une fois si distinct ; observations de l’écriture attendue reconnues par scope récupérable ne réinitialisent pas la teinte. Externe différente met à jour HSV/preview, annule gesture et remplace brouillon sans callback. Aucune quantization8 bits sauf saisie/format hex.
+Each user mutation changes effective Color, then on_change once if distinct; observations of the expected write, recognized by a recoverable scope, do not reset hue. A different external value updates HSV/preview, cancels the gesture, and replaces the draft without a callback. No 8-bit quantization except hex entry/formatting.
 
 ## 4. Interactions
 
-Carré SV : clic/drag capturé, x=S, y=1-V, clamp aux bounds. Flèches droite/gauche ±0,01 S et haut/bas ±0,01 V ; Shift divise le pas par 10. Teinte/alpha utilisent le comportement clavier des sliders.
+SV square: captured click/drag, x=S, y=1-V, clamped to bounds. Right/left arrows ±0.01 S and up/down ±0.01 V; Shift divides the step by 10. Hue/alpha use slider keyboard behavior.
 
-Swatch activé par clic/Enter/Space ; champ hex accepte exactement #RRGGBB ou #RRGGBBAA. Commit Enter/perte focus seulement si parse valide ; syntaxe invalide reste locale et ne modifie pas Color ; Escape restaure dernier hex valide.
+Swatch activated by click/Enter/Space; the hex field accepts exactly #RRGGBB or #RRGGBBAA. Enter/loss of focus commit only if parsing is valid; invalid syntax remains local without modifying Color; Escape restores the last valid hex.
 
-PointerCancel garde dernière couleur publiée et libère capture. Externe pendant drag annule drag avant synchronisation. ReadOnly retire mutations mais conserve lecture/navigation ; aucune molette implicite sur carré.
+PointerCancel retains the last published color and releases capture. An external change during dragging cancels drag before synchronization. ReadOnly removes mutations but retains reading/navigation; no implicit wheel behavior on the square.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure : carré SV ratio 1:1, deux lignes de sliders si alpha, preview/hex et swatches en grille à colonnes bornées. Le parent contraint largeur ; min taille garantit zones utilisables ou clipping sans overlap.
+Measurement: 1:1 SV square, two slider rows if alpha is enabled, preview/hex, and swatches in a grid with bounded columns. The parent constrains width; minimum size guarantees usable areas or clipping without overlap.
 
-Calcul SV avec largeur/hauteur strictement positives ; zéro interdit mutation plutôt que diviser. Rectangles swatches et pointer hit suivent la grille calculée.
+Calculate SV only with strictly positive width/height; zero forbids mutation rather than dividing. Swatch rectangles and pointer hits follow the calculated grid.
 
-Coordonnées logiques ; le checker alpha est clipé à la preview et au slider alpha. Pas de dimension framebuffer exposée ni d’accès écran.
+Logical coordinates; alpha checker clips to preview and alpha slider. No exposed framebuffer dimension or screen access.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-ColorPickerStyle nouveau pour surfaces, labels et focus ; couleur sélectionnée ne devient pas une variable globale de thème. Checker clair/foncé rend alpha visible et garde une description textuelle.
+New ColorPickerStyle for surfaces, labels, and focus; the selected color does not become a global theme variable. A light/dark checker makes alpha visible and retains a textual description.
 
-Changement couleur repaint des surfaces dépendantes, update texte/semantics ; hue modifie gradients sans relayout. Swatches/style métrique changent layout/structure.
+Color changes repaint dependent surfaces and update text/semantics; hue changes gradients without relayout. Swatches/metric style change layout/structure.
 
-Hex formatage = lowercase, #rrggbb si alpha exactement 1, sinon #rrggbbaa ; rondeau byte = round(clamp(channel)*255). Format hex ne doit pas réécrire le modèle ni perdre ses fractions float.
+Hex formatting = lowercase, #rrggbb if alpha is exactly 1, otherwise #rrggbbaa; byte rounding = round(clamp(channel)*255). Hex formatting must not rewrite the model or lose its fractional float values.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Group nommé ; carré Custom décrit S et V, sliders Slider pour H/alpha avec ranges ; swatches Button nommés, champ TextInput nommé « Hexadécimal ». Pas de Role::ColorPicker existant.
+Target contract: named Group; Custom square describing S and V, Slider sliders for H/alpha with ranges; named Button swatches, TextInput field named “Hexadecimal”. No existing Role::ColorPicker.
 
-Fournir valeurs descriptives en pourcentage et hex, pas seulement couleur visuelle. Actions sémantiques mutatrices partagent validation/clamp et respectent ReadOnly.
+Provide descriptive percentage and hex values, not only visual color. Mutating semantic actions share validation/clamping and respect ReadOnly.
 
-Ponts T068 différés. Champ hex utilise committed text ; IME preedit/candidate rectangles restent dépendance DESIGN17.4 et ne sont pas revendiqués.
+T068 bridges are deferred. The hex field uses committed text; IME preedit/candidate rectangles remain a DESIGN17.4 dependency and are not claimed.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement RAII, capture de SV/sliders détenue par le système input. Chaque update utilise une snapshot de la couleur source, sans références à ses canaux conservées.
+UI/main thread; RAII subscription, SV/slider capture owned by the input system. Each update uses a source color snapshot without retaining references to its channels.
 
-Préparer conversion/parse avant écriture ; réentrance Binding/on_change peut masquer/démonter, donc ne toucher contexte ou instance après callback sans token valide.
+Prepare conversion/parsing before writing; Binding/on_change reentrancy may hide/unmount, so do not touch the context or instance after a callback without a valid token.
 
-Exceptions restauration capture/guards puis propagation C++ ; callback commencé jamais rejoué. Destruction no-throw annule edits/capture et abonnements sans on_change. Pas de service couleur OS ni état global mutable.
+Exceptions restore capture/guards, then propagate in C++; a started callback is never replayed. No-throw destruction cancels edits/capture and subscriptions without on_change. No OS color service or global mutable state.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de [Slider](slider.md), [TextInput](text_input.md), Button, Painter/gradients et Binding. La palette est fournie par valeurs possédées et ids stables.
+Depends on [Slider](slider.md), [TextInput](text_input.md), Button, Painter/gradients, and Binding. The palette is supplied as owned values and stable IDs.
 
-External Color non fini : afficher invalide avec couleur effective de repli {0,0,0,1} sans writeback ; externe hors [0,1] clamp uniquement pour vue. Nouveau geste écrit une couleur finie normalisée.
+Nonfinite external Color: display invalid with effective fallback color {0,0,0,1}, without writeback; external channels outside [0,1] clamp only for the view. A new gesture writes a finite normalized color.
 
-alpha_enabled=false masque l’alpha et conserve le canal source lors des changements HSV/#RRGGBB ; #RRGGBBAA est refusé dans ce mode. IDs swatch vides/dupliqués = invalid_argument avant publication ; retrait de swatch pressé annule son action.
+alpha_enabled=false hides alpha and preserves the source channel during HSV/#RRGGBB changes; #RRGGBBAA is rejected in this mode. Empty/duplicate swatch IDs = invalid_argument before publication; removal of a pressed swatch cancels its action.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/color_picker.hpp` et `src/color_picker.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/color_picker.hpp` and `src/color_picker.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : Color/Painter/Binding existants. ColorSwatch et ColorPickerStyle restent dans le header du parent ; HSV et parser privés dans color_picker.cpp, aucune API Skia ou système.
+Origin to extract or reuse: existing Color/Painter/Binding. ColorSwatch and ColorPickerStyle remain in the parent header; HSV and parser are private in color_picker.cpp, with no Skia or system API.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, without an empty file or central widget switch. No Pugl, Skia, OS, or plugin SDK types belong in this API.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery is documentation only: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests required during implementation:
 
-- `color_picker_srgb_hsv` : primaires et aller-retour sRGB/HSV respectent la tolérance float.
-- `color_picker_gray_hue` : perte saturation puis restauration garde teinte par instance.
-- `color_picker_hex_validation` : formes exactes, erreurs et arrondi hex sans writeback.
-- `color_picker_alpha_disabled` : canal alpha conserve sa précision et refuse hex alpha.
-- `color_picker_external_drag` : update externe annule capture sans réécriture stale.
-- `color_picker_remove_swatch` : palette modifiée pendant pression ne choisit pas un autre swatch.
-- `color_picker_throw_recover` : callback qui lève ne rejoue pas et prochaine couleur reste possible.
+- `color_picker_srgb_hsv`: primaries and sRGB/HSV round-trip respect float tolerance.
+- `color_picker_gray_hue`: loss and restoration of saturation retain hue per instance.
+- `color_picker_hex_validation`: exact forms, errors, and hex rounding without writeback.
+- `color_picker_alpha_disabled`: the alpha channel retains precision and rejects alpha hex.
+- `color_picker_external_drag`: an external update cancels capture without stale rewriting.
+- `color_picker_remove_swatch`: a palette changed during a press does not choose another swatch.
+- `color_picker_throw_recover`: a throwing callback is not replayed and the next color remains possible.
 
-Créer `examples/features/color_picker.cpp` et la cible `nativeui_example_color_picker`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/color_picker.cpp` and the `nativeui_example_color_picker` target, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery after the faults described above under ASan/UBSan where lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture/registration remains after unmounting, and the published API matches these contracts. Verification performed here: reading declarations and sources; no C++ or interactive tests executed.

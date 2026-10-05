@@ -1,22 +1,22 @@
 # IconView
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Affichage déclaratif de SvgIcon, monochrome teinté par défaut, taille relative au texte et ratio préservé. Distinct de SvgIcon qui est une ressource préparée et de ImageView multicolore.
+Declarative SvgIcon display, monochrome and tinted by default, sized relative to text with preserved ratio. Distinct from SvgIcon, a prepared resource, and multicolor ImageView.
 
-La ressource [SvgIcon](../include/nativeui/svg.hpp) et draw_svg existent ; [skia_svg.cpp](../src/skia_svg.cpp) rend le DOM sans teinte. Il n’existe ni IconView public ni overload monochrome actuel.
+The [SvgIcon](../include/nativeui/svg.hpp) resource and draw_svg exist; [skia_svg.cpp](../src/skia_svg.cpp) renders the DOM without tinting. Neither public IconView nor a current monochrome overload exists.
 
-MyGo : `ui/svg.go`, `Icon` et `Painter.Icon` ; `ui/widgets.go`, intrinsicSize. Icône à hauteur de police, ratio SVG, teinte TextColor quels que soient fills, décorative sauf label. Cette teinte est une extension du rendu NativeUI à implémenter.
+MyGo: `ui/svg.go`, `Icon` and `Painter.Icon`; `ui/widgets.go`, intrinsicSize. Icon at font height, SVG ratio, TextColor tint regardless of fills, decorative unless labeled. This tint is a NativeUI rendering extension to implement.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 class IconView {
@@ -33,9 +33,9 @@ public:
 };
 ```
 
-Défauts : hauteur Theme typography.control_size, couleur Theme.text, monochrome=true, decorative=true, alt vide. Color ne s’applique qu’en mode monochrome ; mode false conserve exactement couleurs du SVG.
+Defaults: height Theme typography.control_size, color Theme.text, monochrome=true, decorative=true, empty alt. Color applies only in monochrome mode; false mode preserves SVG colors exactly.
 
-Exemple cible proposé :
+Proposed target example:
 
 ```cpp
 ui::SvgIcon saveIcon;
@@ -45,87 +45,87 @@ auto icon = ui::IconView{saveIcon}
     .spec();
 ```
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-SvgIcon handle possédé/copié, backing partagé stable ; overload Binding observé, State immédiatement converti. Couleur/size/alt sont des valeurs possédées.
+Owned/copied SvgIcon handle with stable shared backing; Binding overload observed, State converted immediately. Color/size/alt are owned values.
 
-Update resource change intrinsic ratio donc layout et paint ; changer la couleur de thème n’affecte que teinte implicite, jamais la donnée SVG partagée.
+Resource updates change intrinsic ratio and therefore layout and paint; theme color changes affect only implicit tint, never shared SVG data.
 
-Source détruite : Binding invalid, get dernier handle et observe inactive sans notification automatique ; aucune set ni callback on_change. Ressource invalid après update est sûre à mesurer/peindre.
+Source destroyed: Binding invalid, get retains the last handle and observe inactive without automatic notification; no set or on_change callback. A resource invalid after update is safe to measure/paint.
 
 ## 4. Interactions
 
-IconView ignore pointeur, drag, molette, clavier, texte et drops. Aucun focus/capture ; placé dans Button il ne détourne pas activation ni nom du Button.
+IconView ignores pointer, drag, wheel, keyboard, text, and drops. No focus/capture; inside Button it diverts neither activation nor Button name.
 
-Pour une icône cliquable, l’application compose Button avec son nom. alt informative ne rend pas l’image interactif.
+For a clickable icon, the application composes a named Button. Informative alt does not make the image interactive.
 
-Validation/annulation non applicables. Rotation/animation ne sont pas incluses implicitement ; Spinner est le composant d’activité dédié.
+Confirmation/cancellation do not apply. Rotation/animation are not implicitly included; Spinner is the dedicated activity component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Hauteur spécifiée ou typographique, largeur = hauteur × ratio intrinsic_size. Ressource invalide : carré de hauteur choisie comme placeholder de layout, aucun pixel ; pas de division par zéro.
+Specified or typographic height, width=height × intrinsic_size ratio. Invalid resource: a square of the chosen height as a layout placeholder, no pixels; no division by zero.
 
-Bounds finaux utilisent centered Contain, clipés et sans étirer les shapes. Le DPR est traité par le renderer ; la taille publique reste logique.
+Final bounds use centered Contain, clipped without stretching shapes. The renderer handles DPR; public size remains logical.
 
-size0 = absence pixels avec mesure nulle, et aucune rect invalide passée au backend. Largeur parent réduite peut réduire l’image au contain sans modifier ratio demandé.
+size 0 means no pixels and zero measurement, with no invalid rectangle passed to the backend. Reduced parent width may shrink the contained image without changing the requested ratio.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Monochrome cible : utiliser masque alpha de rendu SVG et appliquer Color uniforme, en conservant alpha original des formes × alpha Color. Ne pas modifier fills/strokes du DOM partagé à chaque paint.
+Monochrome target: use the rendered SVG alpha mask and apply uniform Color, preserving original shape alpha × Color alpha. Do not modify shared DOM fills/strokes on every paint.
 
-Extension privée de l’adapter SVG nécessaire ; source actuelle ne la fournit pas. Le masque/backend cache éventuel dépend de backing identity, destination/résolution et couleur, ownership instance/contexte explicite, jamais namespace global mutable.
+A private SVG adapter extension is required; current source does not provide it. Any mask/backend cache depends on backing identity, destination/resolution, and color, with explicit instance/context ownership rather than a global mutable namespace.
 
-Theme change réévalue size seulement si hauteur implicite, color seulement si teinte implicite. Pas de IconViewStyle requis pour les options fixées ici, ni slot Theme imaginaire.
+Theme changes reevaluate size only for implicit height, and color only for implicit tint. No IconViewStyle required for these fixed options or imaginary Theme slot.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Décorative : SemanticRole::None. Informative : Image avec name=alt et aucune action ; ce rôle existe, pas Role::Icon.
+Decorative: SemanticRole::None. Informative: Image with name=alt and no action; this role exists, unlike Role::Icon.
 
-Le parent Button conserve son nom applicatif ; ne pas automatiquement concaténer alt et label et lire deux fois « Enregistrer ». Une icône informative sans alt est explicitement sans nom.
+The parent Button keeps its application name; do not automatically concatenate alt and label and read “Save” twice. An informative icon without alt is explicitly unnamed.
 
-Ponts T068 différés. Pas d’IME ni annonce live liée à pixel/resource.
+T068 bridges are deferred. No IME or pixel/resource-driven live announcement.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement et cache du widget/renderer ont RAII et weak invalidateur. Source buffer original peut disparaître après SvgIcon.parse conformément à ressource.
+UI/main thread; widget/renderer subscription and cache use RAII and a weak invalidator. The original source buffer may disappear after SvgIcon.parse according to the resource contract.
 
-Masque/tint préparés sans muter shared DOM : exception restitue save/clip/transform et laisse une prochaine peinture possible. Pas de raw SvgData* conservé sans handle owner.
+Prepare mask/tint without mutating shared DOM: exceptions restore save/clip/transform and leave the next paint possible. Retain no raw SvgData* without a handle owner.
 
-Destruction no-throw et callback-silent ; clearing un cache d’une UI ne retire pas resource toujours partagée par une autre. Aucune registration OS/module-global.
+Destruction is no-throw and invokes no callbacks; clearing one UI's cache does not remove a resource still shared by another. No OS/module-global registration.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de SvgIcon/Painter/private adapter, Theme et Binding. Aucun chargement ResourceProvider/XML dans paint ; SVG animé ou externe reste hors ressource v1.
+Depends on SvgIcon/Painter/private adapter, Theme, and Binding. No ResourceProvider/XML loading in paint; animated or external SVG remains outside resource v1.
 
-size non finite/négative = invalid_argument ; zéro valide. Couleur non finie = invalid_argument à Spec, composants hors [0,1] clamp pour teinte vue sans modifier options source.
+Non-finite/negative size causes invalid_argument; zero is valid. Non-finite color causes invalid_argument at Spec; components outside [0,1] clamp for visible tint without modifying source options.
 
-monochrome(false) ignore color explicite comme décidé, preserve image-native colors ; ImageView couvre fit Fill/Cover pour des SVG illustratifs. Fichier absent/parse échoué donnent handle invalide, pas bouton de retry invisible.
+monochrome(false) ignores explicit color as specified and preserves native image colors; ImageView covers Fill/Cover fit for illustrative SVGs. Missing file/failed parse produce an invalid handle rather than an invisible retry button.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/icon_view.hpp` et `src/icon_view.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/icon_view.hpp` and `src/icon_view.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : svg.hpp et adapter privé de src/skia_svg.cpp. SvgIcon/SvgCache gardent leurs API historiques. L’adapter monochrome reste backend privé ; icon_view.cpp contient mesure/composition/tint request, pas un simple fichier include vide.
+Source to extract or reuse: svg.hpp and the private adapter in src/skia_svg.cpp. SvgIcon/SvgCache preserve historical APIs. The monochrome adapter remains backend-private; icon_view.cpp contains measurement/composition/tint requests rather than an empty include-only file.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `icon_view_ratio_size` : hauteur typo/explicite et ratio SVG corrects.
-- `icon_view_monochrome_alpha` : formes rouges/bleues deviennent la teinte demandée avec alpha conservé.
-- `icon_view_native_colors` : monochrome false conserve les couleurs d’origine et ignore tint.
-- `icon_view_shared_resource` : deux vues différemment colorées ne mutent pas DOM de l’autre.
-- `icon_view_invalid_clip` : SVG invalide et bounds zéro ne peignent rien ni polluent scope.
-- `icon_view_accessible_icon` : decorative et alt exposent exactement les rôles attendus.
+- `icon_view_ratio_size`: typographic/explicit height and SVG ratio are correct.
+- `icon_view_monochrome_alpha`: red/blue shapes become the requested tint with alpha preserved.
+- `icon_view_native_colors`: monochrome false preserves original colors and ignores tint.
+- `icon_view_shared_resource`: two differently colored views do not mutate each other's DOM.
+- `icon_view_invalid_clip`: invalid SVG and zero bounds paint nothing and do not pollute scopes.
+- `icon_view_accessible_icon`: decorative and alt expose exactly the expected roles.
 
-Créer `examples/features/icon_view.cpp` et la cible `nativeui_example_icon_view`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/icon_view.cpp` and target `nativeui_example_icon_view`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

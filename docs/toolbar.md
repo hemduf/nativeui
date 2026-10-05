@@ -1,26 +1,22 @@
 # Toolbar
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Barre horizontale de commandes avec navigation de groupe et overflow des contrôles ne tenant plus.
-Les commandes restent les mêmes en barre et en menu.
+A horizontal command bar with group navigation and overflow for controls that no longer fit. Commands remain the same in the bar and menu.
 
-NativeUI a Row, PopupMenu, Button et focus de groupe, mais aucune Toolbar publique dans
-[widgets.hpp](../include/nativeui/widgets.hpp).
+NativeUI has Row, PopupMenu, Button, and group focus but no public Toolbar in [widgets.hpp](../include/nativeui/widgets.hpp).
 
-MyGo : `ui/toolbar.go`, `Toolbar`, `layoutToolbar`, `appendToolbarItems`. Les contrôles de fin sont
-repliés puis décrits dans un menu. Cible : métadonnées possédées explicites, sans conserver ni
-cliquer des pointeurs de nœuds cachés.
+MyGo: `ui/toolbar.go`, `Toolbar`, `layoutToolbar`, `appendToolbarItems`. End controls are collapsed and then described in a menu. Target: explicit owned metadata without retaining or clicking hidden node pointers.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 struct ToolbarItem {
@@ -36,181 +32,121 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 std::vector<ui::ToolbarItem> items;
-items.push_back({"save", ui::Button("Sauver", [] {}).spec(),
-    ui::PopupMenuItem::action("Sauver", [] {})});
+items.push_back({"save", ui::Button("Save", [] {}).spec(),
+    ui::PopupMenuItem::action("Save", [] {})});
 auto bar = ui::Toolbar("Document", std::move(items)).spec();
 ```
 
-Les callbacks du contenu et de overflow_item doivent commander la même action applicative ; ne pas
-tenter une activation synthétique d’un Node caché. Pour l’exemple minimal les actions sont vides, en
-usage réel partager une fermeture possédée.
+Callbacks in content and overflow_item must invoke the same application action; do not attempt synthetic activation of a hidden Node. Actions are empty in the minimal example; in real usage share an owned closure.
 
-overflow_item absent marque un contrôle qui ne peut être replié ; un ToggleGroup fournit un
-sous-menu children des options, checked en snapshot. Représenter un Spacer via content Spacer et
-overflow_item absent avec largeur flexible.
+An absent overflow_item marks a control that cannot collapse; a ToggleGroup provides a children submenu of options with snapshot checked state. Represent a Spacer using Spacer content and no overflow_item, with flexible width.
 
-ToolbarStyle cible : padding, gap, hauteur minimum, styles de contrôle Toolbar et libellé du bouton
-“Plus”. Les snapshots d’items ne changent pas en place : remplacer la Spec à un checkpoint quand les
-métadonnées applicatives changent.
+Target ToolbarStyle: padding, gap, minimum height, Toolbar control styles, and the “More” button label. Item snapshots do not change in place: replace Spec at a checkpoint when application metadata changes.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Les keys non vides et uniques identifient les items au sein d’une génération ; labels ne servent
-jamais d’identité. ToolbarItem.content et overflow_item constituent un snapshot immuable de
-génération. Changer items/métadonnées demande remplacer Spec au checkpoint ; aucune mise à jour
-implicite en place ni conservation de transient state entre générations n’est promise.
+Non-empty unique keys identify items within a generation; labels never provide identity. ToolbarItem.content and overflow_item form an immutable generation snapshot. Changing items/metadata requires replacing Spec at a checkpoint; no implicit in-place update or preservation of transient state between generations is promised.
 
-La barre conserve ses composants montés quand ils passent en overflow afin de garder State et
-identité. Ils deviennent cachés et non interactifs ; captures/IME actives sont terminées avant
-retrait visuel.
+The bar retains mounted components when they move into overflow to preserve State and identity. They become hidden and non-interactive; active capture/IME are ended before visual removal.
 
-L’overflow contient des copies des métadonnées de commande. Une commande devenue obsolete est
-bloquée par son jeton de propriétaire applicatif ; elle ne doit pas réactiver un contenu d’identité
-recyclée.
+Overflow contains copies of command metadata. An obsolete command is blocked by its application owner token; it must not reactivate content with a recycled identity.
 
 ## 4. Interactions
 
-Tab entre sur un seul participant visible, ou Plus ; Gauche/Droite bouclent, Home/End
-premier/dernier. Les flèches de TextInput ou d’un sous-groupe sont traitées par le descendant avant
-navigation extérieure.
+Tab enters at a single visible participant or More; Left/Right wrap, Home/End choose first/last. TextInput or subgroup arrows are handled by the descendant before outer navigation.
 
-Clic/Entrée/Espace délégués aux contrôles ; le menu Plus suit PopupMenu. La molette et les commandes
-sans propriétaire ne sont pas capturées par la barre.
+Clicks/Enter/Space are delegated to controls; the More menu follows PopupMenu. The bar does not capture the wheel or commands without an owner.
 
-Si le contrôle focusé est replié, terminer son interaction puis transférer le focus à Plus sans
-écrire de valeur par défaut. En élargissant, ne pas voler focus au menu ouvert ; fermer ce menu s’il
-n’existe plus d’overflow.
+If the focused control collapses, end its interaction then transfer focus to More without writing a default value. On widening, do not steal focus from the open menu; close that menu if overflow no longer exists.
 
-ReadOnly/Disabled sont hérités par les contrôles ; une action ponctuelle reste soumise au contrat
-Button, les valeurs au contrat ToggleButton/ComboBox.
+ReadOnly/Disabled are inherited by controls; one-time actions follow the Button contract, values follow ToggleButton/ComboBox.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesurer les items intrinsèques, gap et padding ; si la somme dépasse la largeur, réserver d’abord
-Plus puis replier depuis la fin les items overflowables jusqu’à ce que les visibles tiennent.
+Measure intrinsic items, gap, and padding; if their sum exceeds width, first reserve More, then collapse overflowable items from the end until visible items fit.
 
-Préserver l’ordre des items conservés et des commandes overflow. Les groupes sont indivisibles pour
-leur arrangement, et leur sous-menu décrit les enfants, sans couper un ToggleGroup au milieu.
+Preserve order of retained items and overflow commands. Groups are indivisible for arrangement, and their submenu describes the children without splitting a ToggleGroup in the middle.
 
-Items non repliables restent présents : si leur largeur dépasse le viewport, clipper la barre et
-permettre le parent scroll ; ne perdre aucune commande silencieusement. Les Spacers flex prennent
-seulement l’espace restant.
+Non-collapsible items stay present: if their width exceeds the viewport, clip the bar and allow the parent to scroll; silently lose no command. Flexible Spacers take only remaining space.
 
-Décisions d’overflow prises au layout, jamais en paint. Coordonnées logiques et styles de police
-sont la source des mesures ; adapter après scale/font/resize.
+Make overflow decisions in layout, never in paint. Logical coordinates and font styles supply measurements; adjust after scale/font/resize changes.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Contrôles transparents au repos, face visible au hover/pressed ; le style Toolbar s’applique via
-portée locale. Les bools checked persistent visuellement même dans le menu Plus.
+Controls are transparent at rest, with a visible face on hover/press; Toolbar style applies through a local scope. Checked bools persist visually even in the More menu.
 
-Plus n’occupe pas de largeur quand tout tient. Une transition d’overflow invalide layout, focus et
-structure sémantique ; couleurs seules font paint.
+More occupies no width when everything fits. An overflow transition invalidates layout, focus, and semantic structure; colors alone invalidate paint.
 
-Aucune animation boucle globale ni remount pour chaque resize. Les invalidations d’items masqués
-sont suspendues visuellement jusqu’à réapparition, tout en gardant données courantes.
+No global animation loop or remount on every resize. Hidden item invalidations are visually suspended until reappearance while retaining current data.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-SemanticRole actuel ne contient pas Toolbar : utiliser Group nommé et garder actions des contrôles
-visibles. Le menu Plus est Button/PopupMenu ; éléments repliés ne sont pas doublés dans l’arbre
-accessible.
+Current SemanticRole does not contain Toolbar: use a named Group and preserve visible controls' actions. The More menu is Button/PopupMenu; collapsed items are not duplicated in the accessible tree.
 
-Pour checked ou sous-menu, utiliser les métadonnées de PopupMenuItem. Les boutons uniquement
-iconiques ont un label de commande explicite dans content et overflow_item.
+For checked state or a submenu, use PopupMenuItem metadata. Icon-only buttons have an explicit command label in content and overflow_item.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer un plan d’overflow complet puis publier ensemble géométries, visibilité et navigation.
-Échec de mesure/fabrique : conserver le layout précédemment commis, pas un item en moitié de barre
-et menu.
+Prepare a complete overflow plan, then publish geometry, visibility, and navigation together. Measurement/factory failure: retain the previously committed layout, with no item halfway between bar and menu.
 
-Le menu copie ses actions avant invocation et se ferme d’abord. Callback qui retire l’item/barre ou
-lève ne produit pas une seconde action à partir de l’ancien nœud.
+The menu copies actions before invocation and closes first. A callback removing the item/bar or throwing does not produce a second action from the old node.
 
-Rejet d’enqueue focus/overlay est un état récupérable avec commande durable au checkpoint ; ne pas
-passer par des appels directs sur un participant caché.
+Focus/overlay enqueue rejection is recoverable through a durable command at the checkpoint; do not use direct calls on a hidden participant.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [row](row.md), [spacer](spacer.md), [focus_scope](focus_scope.md),
-[popup_menu](popup_menu.md), [toggle_group](toggle_group.md). Pas de Router ni de menu système.
+Dependencies: [row](row.md), [spacer](spacer.md), [focus_scope](focus_scope.md), [popup_menu](popup_menu.md), [toggle_group](toggle_group.md). No Router or system menu.
 
-Items vides : barre de taille minimale sans Plus. Keys dupliquées rejetées avant publication.
-overflow_item sans callback reste visible dans le menu selon son enabled/actionable réel.
+Empty items: minimum-size bar without More. Duplicate keys are rejected before publication. An overflow_item without a callback remains visible in the menu according to its actual enabled/actionable state.
 
-Une application mettant à jour enabled/checked doit fournir de nouvelles métadonnées au même
-checkpoint que le contenu. Pas d’inspection ad hoc d’un State caché ni d’accès audio.
+An application updating enabled/checked must supply new metadata at the same checkpoint as content. No ad hoc inspection of hidden State or audio access.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/toolbar.hpp` et `src/toolbar.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/toolbar.hpp` and `src/toolbar.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-ToolbarItem, ToolbarStyle et modèles de groupe/spacer restent dans le couple Toolbar ; le .cpp porte
-mesure/repli, portée de style et focus, avec moteur menu partagé.
+ToolbarItem, ToolbarStyle, and group/spacer models remain in the Toolbar file pair; the .cpp contains measurement/collapsing, style scope, and focus, with a shared menu engine.
 
-Aucun scan de types Pugl/Skia dans ToolbarItem ni conversion de Node* vers callbacks ; les keys et
-métadonnées sont les seules identités de commande exportées.
+No Pugl/Skia type scanning in ToolbarItem or Node*-to-callback conversion; keys and metadata are the only exported command identities.
 
-Inscrire `src/toolbar.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/toolbar.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`toolbar_overflow` : réduction largeur replie depuis la fin, réserve Plus et conserve l’ordre.
+`toolbar_overflow`: reducing width collapses from the end, reserves More, and preserves order.
 
-`toolbar_groups` : groupe indivisible devient un sous-menu ; checked et disabled visibles
-correctement.
+`toolbar_groups`: an indivisible group becomes a submenu; checked and disabled states display correctly.
 
-`toolbar_same_command` : action menu invoque exactement la même commande que le contrôle visible.
+`toolbar_same_command`: a menu action invokes exactly the same command as the visible control.
 
-`toolbar_resize_focus` : repli du focus/drag annule proprement ; réélargissement sans remount ni vol
-focus.
+`toolbar_resize_focus`: collapsing focus/drag cancels cleanly; widening causes no remount or focus theft.
 
-`toolbar_nonoverflowable` : contrôle sans metadata reste visible/clippé ; aucun item perdu.
+`toolbar_nonoverflowable`: a control without metadata remains visible/clipped; no item is lost.
 
-`toolbar_stale_throw` : commande devenue périmée ou callback levant ne réactive aucun nœud retiré.
+`toolbar_stale_throw`: a stale command or throwing callback reactivates no removed node.
 
-`toolbar_layout_failure` : exception de mesure ne publie aucune géométrie/visibilité partielle.
+`toolbar_layout_failure`: a measurement exception publishes no partial geometry/visibility.
 
-Ajouter `examples/features/toolbar.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/toolbar.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

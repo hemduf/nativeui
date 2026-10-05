@@ -1,25 +1,25 @@
 # EditableComboBox
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Choisir une chaîne dans une liste fermée en tapant un filtre. Le texte draft n’est pas la sélection
-persistante tant qu’une option valide n’a pas été choisie.
+Choose a string from a closed list by typing a filter. Draft text is not the persistent selection
+until a valid option is chosen.
 
-NativeUI ComboBox<T> correspond à Select, sans éditeur ; TextInput/overlays fournissent les
-fondations. Aucun EditableComboBox public.
+NativeUI ComboBox<T> corresponds to Select, without an editor; TextInput/overlays provide the
+foundations. There is no public EditableComboBox.
 
-MyGo : `ui/combobox.go`, `Combobox`, `ComboboxBase`, `comboboxBase`, `matching`. Filtre, chevron
-d’ouverture, choix et retour à selected à blur sont le contrat source repris.
+MyGo: `ui/combobox.go`, `Combobox`, `ComboboxBase`, `comboboxBase`, `matching`. Filtering, the opening
+chevron, choosing, and reverting to selected on blur are the source contract carried over.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class EditableComboBox {
@@ -39,191 +39,190 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<std::string> font{"Inter"};
-auto selector = ui::EditableComboBox("Police", font,
+auto selector = ui::EditableComboBox("Font", font,
     std::vector<std::string>{"Inter", "Georgia", "Menlo"}).spec();
 ```
 
-Style cible : TextInputStyle, ComboBoxStyle pour cadre/chevron, MenuItemStyle popup. v1 est string
-selon MyGo ; sélectionner un objet typed reste ComboBox<T>.
+Target style: TextInputStyle, ComboBoxStyle for frame/chevron, and popup MenuItemStyle. v1 uses
+strings as MyGo does; selecting a typed object remains ComboBox<T>.
 
-Filtre par défaut : trim ASCII du query, comparaison ASCII case-insensitive, UTF-8 non ASCII
-préservé exact ; préfixes d’abord puis substring, ordre source stable. Différence explicite avec
-strings.ToLower Unicode de MyGo ; filter injecté permet politique Unicode applicative.
+Default filter: trim ASCII whitespace from query, compare ASCII case-insensitively, preserve
+non-ASCII UTF-8 exactly; prefixes first, then substrings, with stable source order. This explicitly
+differs from MyGo's Unicode strings.ToLower; an injected filter allows application Unicode policy.
 
-Filter personnalisé décide inclusion, garde ordre provider ; aucune promesse ICU ou filtrage
-asynchrone. Provider appelé à ouverture puis après chaque edit commis qui doit rafraîchir la liste,
-jamais paint.
+A custom Filter decides inclusion and retains provider order; no ICU or asynchronous filtering is
+promised. Call the provider on opening and after each committed edit that must refresh the list,
+never during paint.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<string> est sélection ; draft, typed/filtering, highlighted et session overlay locaux.
-Afficher selection au repos, même si la chaîne a été retirée de la liste.
+Binding<string> is the selection; draft, typed/filtering, highlighted, and the overlay session are
+local. Display the selection at rest, even if the string was removed from the list.
 
-Frappe modifie seulement draft et suggestions. Le premier match est surligné ; navigation ne publie
-pas. Choix d’un match remplace selected, formate draft et sélectionne tout le texte.
+Typing changes only the draft and suggestions. The first match is highlighted; navigation does not
+publish. Choosing a match replaces selected, formats the draft, and selects all text.
 
-Blur ou Escape abandonne le draft non choisi et affiche sélection actuelle sans set. Écriture
-externe selected pendant edit remplace draft et ferme session, avec priorité à l’application.
+Blur or Escape discards an unchosen draft and displays the current selection without set. An
+external selected write during editing replaces the draft and closes the session; the application
+has priority.
 
-Snapshot de suggestions est possédé et génération identifié. Un résultat provider pour une ancienne
-génération ne peut pas être commis sur la requête nouvelle.
+The suggestion snapshot is owned and identified by generation. A provider result for an old
+generation cannot be committed to the new query.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Chevon/clic ouvre liste complète si aucun filtre typed ; frappe ouvre liste filtrée. Bas/Haut
-ouvrent puis naviguent sans bouclage en dépassant les extrémités ; Home/End restent navigation texte
-sauf commandes popup explicites.
+The chevron/click opens the full list if no typed filter exists; typing opens a filtered list.
+Down/Up open then navigate without wrapping past the ends; Home/End remain text navigation unless
+explicit popup commands are used.
 
-Enter avec surligné choisit ; Enter sans match ne crée pas une valeur libre. Clic item au
-relâchement choisit. Escape ferme/restore ; Tab ferme/restore et poursuit focus.
+Enter with a highlight chooses; Enter without a match does not create a free value. Clicking an item
+chooses on release. Escape closes/restores; Tab closes/restores and continues focus navigation.
 
-L’éditeur garde focus pendant navigation popup ; chevron et lignes ne deviennent pas des arrêts Tab
-supplémentaires. PointerCancel cesse armement item sans choix.
+The editor keeps focus during popup navigation; the chevron and rows do not add Tab stops.
+PointerCancel ends item arming without choosing.
 
-ReadOnly empêche édition/ouverture mutante et garde lecture ; disabled bloque. Molette défile
-seulement panneau si ouvert ; aucune sélection spontanée sur champ fermé.
+ReadOnly prevents editing/mutating opening and retains reading; disabled blocks interaction. The
+wheel scrolls only the open panel; no spontaneous selection occurs on a closed field.
 
-Composition Update ne filtre ni sélectionne ; Commit déclenche une seule génération query et
-déduplication committed text. Pont IME natif avancé distinct.
+Composition Update neither filters nor selects; Commit triggers one query generation and committed
+text deduplication. Advanced native IME bridging is separate.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Editor flex et chevron fixe dans un cadre commun ; taille préférée stable de champ, indépendamment
-du nombre de matches. Long draft scroll horizontal.
+Flexible editor and fixed chevron in a common frame; stable preferred field size, independent of
+match count. A long draft scrolls horizontally.
 
-Popup ancré à tout le cadre, borné viewport via OverlaySpec/OverlayHandle et service overlay retenu.
-Hauteur plafonnée à 8 lignes puis scrolling ; pas de virtualisation claim pour v1.
+The popup is anchored to the entire frame, bounded by the viewport through OverlaySpec/OverlayHandle
+and the retained overlay service. Height is capped at 8 rows, then scrolling; no virtualization
+claim for v1.
 
-Les lignes ont hauteur fixe issue MenuItemStyle et width au moins cadre, élargie pour texte dans
-viewport. Empty results : panneau “Aucun résultat” non sélectionnable.
+Rows have a fixed height from MenuItemStyle and a width at least as large as the frame, expanded for
+text within the viewport. Empty results: a nonselectable “No results” panel.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-États focus/hover/read_only de champ plus highlighted du popup. Le selected applicatif n’est pas mis
-à jour pour preview ; aucun design source imprimant un choix déjà validé alors que seul un filtre
-est saisi.
+Field focus/hover/read_only states plus popup highlighted state. The application's selected value
+is not updated for preview; the presentation must not imply a validated choice when only a filter
+has been typed.
 
-Query change recalcule filtre au checkpoint UI puis paint/layout popup ; couleur de highlighted
-paint only. Les handlers de texte restent dans noyau partagé.
+Query changes recalculate the filter at the UI checkpoint, then paint/layout the popup; highlight
+color is paint only. Text handlers remain in the shared core.
 
-Chevrons/primitives ne requièrent aucun shader/ressource spécifique public. Pas d’appel
-provider/filter depuis semantics native immutable.
+Chevrons/primitives require no public specialized shader/resource. No provider/filter call from
+immutable native semantics.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : ComboBox avec text_value draft, expanded et nom label ; options ListItem,
-highlighted/selected distingués.
+Target: ComboBox with draft text_value, expanded, and label as name; ListItem options,
+distinguishing highlighted from selected.
 
-La sélection applicative apparaît en description/value au repos ; ReadOnly supprime
-Expand/Select/SetValue. Le message vide est Text sans action.
+Application selection appears in description/value at rest; ReadOnly removes Expand/Select/SetValue.
+The empty message is Text without actions.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer nouvelle liste filtrée avant publier génération ; si provider/filter lève, fermer le
-panneau, conserver draft, retirer toute activation de l’ancien snapshot et restaurer flags avant
-propagation. La prochaine ouverture pourra réessayer ; aucune option ancienne ne reste choisissable.
+Prepare the new filtered list before publishing the generation; if provider/filter throws, close
+the panel, keep the draft, remove all activation from the old snapshot, and restore flags before
+propagation. The next opening may retry; no old option remains selectable.
 
-Commit ferme le popup puis prépare Binding et string possédés ; set peut retirer le champ. Aucune
-relecture de draft/this après publication.
+Commit closes the popup then prepares an owned Binding and string; set may remove the field. Do not
+reread draft/this after publication.
 
-Rejet ouverture différée : rester fermé avec draft conservé, continuer édition ; un handle périmé
-devient no-op. Clipboard et callbacks filter portent tokens sûrs.
+Rejected deferred opening: remain closed with the draft preserved and continue editing; a stale
+handle becomes a no-op. Clipboard and filter callbacks carry safe tokens.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), [combo_box](combo_box.md), [popup_menu](popup_menu.md),
-Overlay et State. Noyau suggestions privé partagé avec Autocomplete/TokenField.
+Dependencies: [TextInput](text_input.md), [ComboBox](combo_box.md), [PopupMenu](popup_menu.md), Overlay,
+and State. A private suggestion core is shared with Autocomplete/TokenField.
 
-Options dupliquées exactes dédupliquées au premier passage pour identité text stable ; chaîne vide
-admise comme option explicite, distincte de placeholder.
+Deduplicate exact duplicate options on the first pass for stable text identity; an empty string is
+allowed as an explicit option, distinct from the placeholder.
 
-Sélection inconnue ou options vides ne changent pas Binding ; aucun auto-select mount. Option
-retirée entre générations annule son appui avant nouveau snapshot ; filter invalide ne fournit pas
-un nouveau choix.
+An unknown selection or empty options do not change the Binding; no auto-selection on mount. An
+option removed between generations cancels its press before the new snapshot; an invalid filter
+does not supply a new choice.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/editable_combo_box.hpp` et `src/editable_combo_box.cpp`. Le header expose
-les déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter
-un véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/editable_combo_box.hpp` and `src/editable_combo_box.cpp`. The header exposes
+public declarations and only the necessary template adapters; the .cpp must contain a real retained
+core, interactions, measurement, and rendering, never an empty file.
 
-Les alias Filter/OptionsProvider et EditableComboBoxStyle restent dans le couple. Le .cpp porte
-draft, filtrage, snapshot/génération, input, layout et popup via noyau partagé.
+Filter/OptionsProvider aliases and EditableComboBoxStyle remain in the pair. The .cpp contains draft,
+filtering, snapshot/generation, input, layout, and popup through the shared core.
 
-Ne pas ajouter ces fonctionnalités à ComboBox<T> en modifiant silencieusement son sens ; les anciens
-includes et l’API sélection seule restent intacts.
+Do not add these features to ComboBox<T> by silently changing its meaning; old includes and the
+selection-only API remain intact.
 
-Inscrire `src/editable_combo_box.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les
-includes collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou
-plugin dans l’API publique.
+Register `src/editable_combo_box.cpp` in NativeUI::Core during implementation. Preserve historical
+aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the
+public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`editable_combo_box_filter` : préfixes avant substring, ASCII case fold/Unicode exact et filter
-injecté documentés.
+`editable_combo_box_filter`: prefixes before substrings, ASCII case folding/exact Unicode, and
+injected filter documented.
 
-`editable_combo_box_draft` : édition ne set pas selected ; Enter avec match choisit, sans match
-reste sans choix.
+`editable_combo_box_draft`: editing does not set selected; Enter with a match chooses, without a
+match it makes no choice.
 
-`editable_combo_box_restore_external` : blur/Escape restore selected actuelle ; écriture externe
-gagne et ferme popup.
+`editable_combo_box_restore_external`: blur/Escape restore the current selected value; an external
+write wins and closes the popup.
 
-`editable_combo_box_duplicates_empty` : dédup options et empty state non selectable ; aucune valeur
-par défaut.
+`editable_combo_box_duplicates_empty`: option deduplication and a nonselectable empty state; no
+default value.
 
-`editable_combo_box_composition` : Update ne filtre pas, Commit une génération ; pas double commit.
+`editable_combo_box_composition`: Update does not filter, Commit produces one generation; no
+duplicate commit.
 
-`editable_combo_box_stale_failure` : provider/filter/enqueue lèvent ou option retirée pendant appui
-: pas choix périmé.
+`editable_combo_box_stale_failure`: provider/filter/enqueue throw or an option is removed during a
+press: no stale choice.
 
-`editable_combo_box_popup_focus` : focus reste éditeur, resize/scroll popup stable et Tab sort.
+`editable_combo_box_popup_focus`: focus stays in the editor, stable popup resize/scroll, and Tab exits.
 
-Ajouter `examples/features/editable_combo_box.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/editable_combo_box.cpp`, compilable by a public consumer, with a `--self-test`
+mode verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

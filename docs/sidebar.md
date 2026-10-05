@@ -1,20 +1,20 @@
 # Sidebar<Key>
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Sidebar est une navigation mono-sélection en sections repliables, icônes et accessoires de ligne. NativeUI ListView n’exprime pas encore les sections de navigation ; ce composant s’appuie sur liste/disclosure plutôt que Router.
+Sidebar is single-selection navigation with collapsible sections, icons, and row accessories. NativeUI ListView does not yet express navigation sections; this component builds on list/disclosure rather than Router.
 
-MyGo `ui/sidebar.go` : `Sidebar`, `SidebarSection`, `SidebarItem`, `keys`. Un arrêt de Tab, sélection par ID, typeahead, sections sous titre et scroll lorsque contenu dépasse.
+MyGo `ui/sidebar.go`: `Sidebar`, `SidebarSection`, `SidebarItem`, `keys`. One Tab stop, ID selection, typeahead, sections under headings, and scrolling when content overflows.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, membres de Sidebar<Key> :
+Proposed target API, members of Sidebar<Key>:
 
 ```cpp
 explicit Sidebar(Binding<std::optional<Key>> selection);
@@ -33,75 +33,75 @@ Spec spec() &&;
 ui::State<std::optional<std::string>> mailbox{std::string{"inbox"}};
 ui::State<bool> open{true};
 auto nav = ui::Sidebar<std::string>{mailbox}
-    .section("mail","Boîtes",open.binding())
-    .item("inbox","Réception").item("sent","Envoyés");
+    .section("mail","Mailboxes",open.binding())
+    .item("inbox","Inbox").item("sent","Sent");
 ```
 
-State<bool>& surcharge section. Sans open binding section toujours ouverte. item s’attache à la dernière section déclarée ; items avant sections forment un groupe racine sans header. Section/item keys uniques dans leurs domaines ; accessory Spec peut contenir IconView/Badge, sans fonction métier interactive par défaut.
+State<bool>& section overload. Without an open binding, the section is always open. An item attaches to the last declared section; items before sections form a root group without a header. Section/item keys are unique in their domains; accessory Spec may contain IconView/Badge, with no interactive business function by default.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Selection mono binding authoritative ; section open bindings own safe refs, sans section controller global. Items/sections builder static v1, reconstruction app pour changer ensemble ; keys préservent identités via retained recipe là où possible. Navigate callback après changement choisi, key copie détenue ; key externe inconnue ou section collapsed n’impose aucune selection différente. Binding invalide garde texte sélectionné lisible mais gesture mutation refusée.
+Authoritative single-selection binding; section open bindings own safe references without a global section controller. Static builder items/sections in v1; the application rebuilds to change the set; keys preserve identities through the retained recipe where possible. Navigate callback after a selected change, with an owned key copy; an unknown external key or collapsed section imposes no different selection. An invalid Binding retains readable selected text but refuses gesture mutation.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Up/Down/Home/End sur items visibles enabled ; typeahead labels buffer 700 ms. Click item sélectionne et appelle on_navigate une fois si nouvelle sélection ; Enter sur item déjà choisi active on_navigate sans nouveau write. Header click toggle si binding open ; headers focusables via roving list et Left/Right ferment/ouvrent. Un arrêt Tab principal et contrôles accessoires non focusables ; accessory explicit interactive doit conserver ses propres actions sans selection click synthétique. Section close sous active/focus récupère header/voisin, pas une navigation métier automatique.
+Up/Down/Home/End on visible enabled items; label typeahead with a 700 ms buffer. Item click selects and calls on_navigate once if selection is new; Enter on an already-selected item activates on_navigate without a new write. Header click toggles if it has an open binding; headers are focusable through the roving list and Left/Right close/open them. One main Tab stop and nonfocusable accessory controls; an explicitly interactive accessory must retain its own actions without a synthetic selection click. Closing a section under active/focus recovers to the header/neighbor without automatic business navigation.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Colonne dans ScrollView, header/rows variables selon style, indent d’un niveau sous section. Width fournie par parent (aucune largeur fixe globale), preferred default220 DIP, min120 DIP via style. Labels single-line ellipsis ; badges/accessory gardent intrinsèque dans limite du row. Overflow vertical scroll, horizontal clip. Un header collapsed masque items et leur contribution à la hauteur.
+Column in ScrollView, variable headers/rows according to style, one-level indentation under sections. Parent-provided width (no global fixed width), preferred default220 DIP, min120 DIP through style. Single-line ellipsized labels; badges/accessories retain intrinsic size within row limits. Vertical overflow scrolls, horizontal clips. A collapsed header hides items and their height contribution.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-SidebarStyle : surface, padding, section typography, row active/selected/hover, indent/gap. Selected accent distinct de header hover. Badge visuel ne change pas le label automatiquement ; description/accessibility pourrait donner compteur explicitement. Section arrows peuvent animer localement 150ms reduced motion, arrêt hidden/unmount.
+SidebarStyle: surface, padding, section typography, active/selected/hover row, indent/gap. Selected accent distinct from header hover. A visual Badge does not automatically change the label; description/accessibility may explicitly supply a count. Section arrows may animate locally for 150ms with reduced-motion handling, stopping while hidden/unmounted.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Tree rôle MyGo n’existe pas dans NativeUI : Group/Custom et expanded sur headers, ListItem ou Custom sur destinations avec Select/Activate/Focus éligibles. Chaque section reste grouping logique ; labels owned et selection key snapshots cohérents. Native source-list/tree mapping futur est une extension séparée.
+MyGo's Tree role does not exist in NativeUI: Group/Custom and expanded on headers, ListItem or Custom on destinations with eligible Select/Activate/Focus. Each section remains a logical grouping; owned labels and consistent selection key snapshots. Future native source-list/tree mapping is a separate extension.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Résoudre key à release et copier callback avant user code. Navigation peut retirer Sidebar ou reconstruire sections au checkpoint ; ne pas continuer sur un index stale. Open binding expiré devient non modifiable, dernier open lisible jusqu’à prochaine lecture sûre. Teardown libère observers/timers/focus references, jamais callbacks métier.
+Resolve the key on release and copy the callback before user code. Navigation may remove Sidebar or rebuild sections at the checkpoint; do not continue on a stale index. An expired open binding becomes unmodifiable, with the last open value readable until the next safe read. Teardown releases observers/timers/focus references, never business callbacks.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[ListView](list_view.md), [Collapsible](collapsible.md), [ScrollView](scroll_view.md), IconView/Badge optionnels. Cas : aucun item, all disabled, unknown key, duplicate item/section key reject initial, section sans open, long title, accessory wide et retrait pendant navigation. Aucun Router imposé ; on_navigate injecté par app.
+[ListView](list_view.md), [Collapsible](collapsible.md), [ScrollView](scroll_view.md), optional IconView/Badge. Cases: no items, all disabled, unknown key, duplicate item/section key rejected initially, section without open, long title, wide accessory, and removal during navigation. No imposed Router; application-injected on_navigate.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/sidebar.hpp` et `src/sidebar.cpp`.
+Target: `include/nativeui/sidebar.hpp` and `src/sidebar.cpp`.
 
-sidebar.hpp contient modèles de section/item dans le couple, templates keys/accessories et style. sidebar.cpp porte roving/typeahead, disclosure state, layout/paint et activation. Aucun fichier autonome SidebarItem ou SidebarSection ; clés own type erased et noyau non template.
+sidebar.hpp contains section/item models in the pair, key/accessory templates, and style. sidebar.cpp contains roving/typeahead, disclosure state, layout/paint, and activation. No standalone SidebarItem or SidebarSection file; owned type-erased keys and a non-template core.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `sidebar_sections_root` : attach item à section courante ou groupe racine.
-- `sidebar_selection_navigation` : callback changement/Enter conforme.
-- `sidebar_typeahead_roving` : labels, skip disabled, un arrêt Tab.
-- `sidebar_close_active` : focus récupéré sans navigation métier automatique.
-- `sidebar_unknown_duplicate` : unknown externe inert, duplicates refused.
-- `sidebar_accessory_layout` : wide badge/icon et ellipsis.
-- `sidebar_reentrant_navigation` : suppression au callback sans UAF.
-- `sidebar_open_binding_dead` : prochain accès safe, aucun write synthétique.
+- `sidebar_sections_root`: attach item to current section or root group.
+- `sidebar_selection_navigation`: correct change/Enter callback.
+- `sidebar_typeahead_roving`: labels, disabled skipping, one Tab stop.
+- `sidebar_close_active`: recovered focus without automatic business navigation.
+- `sidebar_unknown_duplicate`: inert external unknown, duplicates refused.
+- `sidebar_accessory_layout`: wide badge/icon and ellipsis.
+- `sidebar_reentrant_navigation`: callback removal without UAF.
+- `sidebar_open_binding_dead`: next access safe, no synthetic write.
 
-Créer l’exemple public futur `examples/features/sidebar.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/sidebar.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

@@ -1,20 +1,20 @@
 # Switch<T>
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Switch<T>` sélectionne un sous-arbre par égalité de valeur ; il ne représente pas un interrupteur. Source : [dynamic.hpp](../include/nativeui/dynamic.hpp), `Switch<T>`, `SwitchBranch<T>`, `SwitchComponent<T>`.
+`Switch<T>` selects a subtree by value equality; it does not represent a toggle switch. Source: [dynamic.hpp](../include/nativeui/dynamic.hpp), `Switch<T>`, `SwitchBranch<T>`, `SwitchComponent<T>`.
 
-MyGo utilise un switch Go lors de composition ; aucun widget autonome à porter. Conserver ce nom pour composition conditionnelle et [Toggle](toggle.md) pour le switch visuel.
+MyGo uses a Go switch during composition; no independent widget needs porting. Preserve this name for conditional composition and [Toggle](toggle.md) for the visual switch.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante à conserver intégralement :
+Existing API to preserve in full:
 
 ```cpp
 explicit Switch(Binding<T> state);
@@ -26,77 +26,77 @@ template<class Child> Switch&& otherwise(Child&& child) &&;
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<int> page{0};
-auto view = ui::Switch<int>{page}.when(0, ui::Label{"Accueil"})
-    .when(1, ui::Label{"Options"}).otherwise(ui::Label{"Inconnu"});
+auto view = ui::Switch<int>{page}.when(0, ui::Label{"Home"})
+    .when(1, ui::Label{"Options"}).otherwise(ui::Label{"Unknown"});
 ```
 
-Préserver les guides de déduction implicites de State/Binding, les overloads lvalue/rvalue et les contraintes d’égalité de T. Première branche égale gagne, même si plusieurs `.when` déclarent la même valeur ; `otherwise` remplace la fallback précédente.
+Preserve the implicit State/Binding deduction guides, lvalue/rvalue overloads and T equality constraints. The first equal branch wins even when several `.when` calls declare the same value; `otherwise` replaces the previous fallback.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Recettes de branches et valeurs possédées. Binding observé ; clés des branches conservent actuellement `switch:<index>`, fallback `switch:fallback`. Passer d’une valeur à une autre sélectionnant la même branche conserve celle-ci. Branches non actives ne sont pas montées.
+Branch recipes and values are owned. Binding is observed; branch keys currently remain `switch:<index>` and fallback `switch:fallback`. Changing to another value that selects the same branch preserves that branch. Inactive branches are not mounted.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Aucun input/focus propre. Branch change sous callback est deferred à Tree ; capture/focus de la branche retirée sont récupérés. Pas d’Échap spécial, gesture de commutation ou événement on_select. L’application observe son state si elle veut une notification métier.
+No input/focus of its own. A branch change within a callback is deferred to Tree; capture/focus of the removed branch is recovered. No special Escape, switching gesture or on_select event. The application observes its state for business notifications.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure/préférée de l’unique branche active ; aucun match sans fallback = zéro. Les branches inactives ne contribuent ni taille ni gaps. Tous placements utilisent bounds du host ; pas de transition de layout entre deux branches implicite.
+Measurement/preferred size comes from the sole active branch; no match without a fallback = zero. Inactive branches contribute neither size nor gaps. All placements use the host bounds; no implicit layout transition between branches.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Host paint vide. Une branche inchangée n’est pas démontée pour une notification de state équivalente. Nettoyer les anciens pixels au remplacement. Toute animation optionnelle devrait être un composant explicite ; aucune couche globale de transitions ajoutée ici.
+The host does not paint. An unchanged branch is not unmounted for an equivalent state notification. Clear old pixels on replacement. Any optional animation should be an explicit component; no global transition layer is added here.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-`None` du host, descendants de la branche active seulement. Réinsertion d’une branche démontée recrée des IDs retenus ; ne pas recycler une identity sémantique defunct. La fallback ne reçoit aucun rôle spécial.
+The host is `None`, with only active-branch descendants. Reinserting an unmounted branch recreates retained IDs; do not recycle a defunct semantic identity. The fallback receives no special role.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Adapter T vers choix de branche dans le header, puis transmettre index/clé et Spec au noyau type-erased. Une comparaison/factory qui lève ne laisse pas un host à moitié commuté. Conserver les règles de quarantaine/retry explicite du runtime dynamique ; un callback commencé ne se rejoue pas.
+Adapt T to branch selection in the header, then pass index/key and Spec to the type-erased core. A throwing comparison/factory does not leave a half-switched host. Preserve the dynamic runtime’s quarantine/explicit retry rules; a started callback is not replayed.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend des sources dynamiques et de la réconciliation Tree. T doit rester copiable selon les usages existants et comparable ; ne pas exiger hash ou enum seulement. Cas : aucun match, duplicates, fallback remplacée, state réentrant, equality throwing et switch vide.
+Depends on dynamic sources and Tree reconciliation. T must remain copyable as required by existing uses and comparable; do not require hashing or enum types only. Cases: no match, duplicates, replaced fallback, reentrant state, throwing equality and an empty switch.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/switch.hpp` et `src/switch.cpp`.
+Target: `include/nativeui/switch.hpp` and `src/switch.cpp`.
 
-switch.hpp garde uniquement adaptateurs de comparaison typed et constructeurs templates ; switch.cpp héberge DynamicHost non template, observation type-erased et publication de branches. Ne pas remplacer cela par instanciations prédéfinies de T. Preserve dynamic.hpp et les signatures publiques historiques.
+switch.hpp retains only typed comparison adapters and template constructors; switch.cpp hosts non-template DynamicHost, type-erased observation and branch publication. Do not replace this with predefined T instantiations. Preserve dynamic.hpp and historical public signatures.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `switch_first_equal` : première branche duplicate gagne.
-- `switch_fallback_replace` : dernière otherwise choisie, none vide.
-- `switch_lvalue_overloads` : compiler when/otherwise sur builder nommé et temporaire.
-- `switch_custom_key_type` : type utilisateur non enum/non hashable.
-- `switch_same_branch_identity` : pas de remount pour même branche.
-- `switch_compare_factory_fault` : récupération après equality/factory throw.
+- `switch_first_equal`: the first duplicate branch wins.
+- `switch_fallback_replace`: the last otherwise is selected; no fallback leaves empty content.
+- `switch_lvalue_overloads`: compile when/otherwise on named and temporary builders.
+- `switch_custom_key_type`: a user type that is neither an enum nor hashable.
+- `switch_same_branch_identity`: no remount for the same branch.
+- `switch_compare_factory_fault`: recovery after an equality/factory throw.
 
-Créer l’exemple public futur `examples/features/switch.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/switch.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

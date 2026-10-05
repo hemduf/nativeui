@@ -149,7 +149,7 @@ public:
     info.name = label_;
     info.text_value = state_->preview.hex;
     info.description =
-        state_->preview.invalid ? "Couleur invalide" : state_->preview.hex;
+        state_->preview.invalid ? "Invalid color" : state_->preview.hex;
     info.focusable = true;
     info.focused = focused_;
     info.enabled = effective_enabled();

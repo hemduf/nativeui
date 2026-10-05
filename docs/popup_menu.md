@@ -1,27 +1,22 @@
 # PopupMenu
 
-Statut : **existant à enrichir**.
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Ouvrir un menu ancré à un bouton ; une action peut être invoquée au pointeur ou au clavier. Le menu
-est un overlay portable de la même UI.
+Open a menu anchored to a button; an action can be invoked by pointer or keyboard. The menu is a portable overlay within the same UI.
 
-NativeUI : [combo_popup.hpp](../include/nativeui/combo_popup.hpp), PopupMenu/PopupMenuItem,
-MenuPopupComponent et commandes overlay. Sont présents actions, séparateurs, éléments disabled et
-styles de bouton/menu.
+NativeUI: [combo_popup.hpp](../include/nativeui/combo_popup.hpp), PopupMenu/PopupMenuItem, MenuPopupComponent, and overlay commands. Actions, separators, disabled items, and button/menu styles are present.
 
-MyGo : `ui/widgets.go`, `MenuButton` ; `ui/menu.go`, `Menu.Item`, `Separator`, `Submenu`,
-`MenuItem.Checked`, `Shortcut`. Cible : checked, raccourci affiché et sous-menu, sans importer les
-menus système de MyGo.
+MyGo: `ui/widgets.go`, `MenuButton`; `ui/menu.go`, `Menu.Item`, `Separator`, `Submenu`, `MenuItem.Checked`, `Shortcut`. Target: checked state, displayed shortcuts, and submenus without importing MyGo system menus.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp
 using ItemsProvider = std::function<std::vector<PopupMenuItem>()>;
@@ -32,176 +27,117 @@ PopupMenu&& item_style(MenuItemStyle value) &&;
 Spec spec() &&;
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
 auto menu = ui::PopupMenu("Actions", std::vector<ui::PopupMenuItem>{
-    ui::PopupMenuItem::action("Ouvrir", [] {}),
+    ui::PopupMenuItem::action("Open", [] {}),
     ui::PopupMenuItem::separator(),
-    ui::PopupMenuItem::action("Supprimer", [] {}, false)}).spec();
+    ui::PopupMenuItem::action("Delete", [] {}, false)}).spec();
 ```
 
-PopupMenuItem actuel possède kind(Action/Separator), label, enabled et std::function<void()>
-callback ; action() et separator() conservent leur comportement.
+Current PopupMenuItem owns kind(Action/Separator), label, enabled, and a std::function<void()> callback; action() and separator() retain their behavior.
 
-Extensions cibles possédées : key string optionnelle unique par fratrie, optional<bool> checked,
-string shortcut_label et vector<PopupMenuItem> children. Un item children non vide est un sous-menu
-sans callback direct ; les raccourcis affichés ne les enregistrent pas globalement.
+Owned target extensions: optional string key unique among siblings, optional<bool> checked, string shortcut_label, and vector<PopupMenuItem> children. An item with non-empty children is a submenu without a direct callback; displayed shortcuts do not register shortcuts globally.
 
-Provider est rappelé à chaque ouverture, jamais depuis paint. Il produit un snapshot possédé pour
-toute la session ; les changements seront visibles au prochain menu ouvert.
+Provider is called again on each opening, never from paint. It produces an owned snapshot for the entire session; changes become visible in the next opened menu.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le provider et chaque callback sont possédés. Runtime d’ancre porte l’identité retenue, handle
-overlay et suppression de touche d’ouverture ; aucun pointeur brut de nœud n’est stocké dans les
-actions.
+The provider and each callback are owned. The anchor runtime carries retained identity, overlay handle, and opening-key suppression; actions store no raw node pointer.
 
-La session garde un snapshot immuable des items, un surligné local et une pile de sous-menus.
-Checked est une lecture visuelle du snapshot ; l’action applicative publie la nouvelle valeur pour
-la prochaine ouverture.
+The session keeps an immutable item snapshot, a local highlighted item, and a submenu stack. Checked visually reads the snapshot; the application action publishes the new value for the next opening.
 
-Fermer puis appeler le callback est l’ordre de commit. L’ancre peut disparaître pendant l’action
-sans prolonger le menu ni invoquer deux fois le même item.
+Close, then invoke the callback: this is the commit order. The anchor may disappear during the action without prolonging the menu or invoking the same item twice.
 
 ## 4. Interactions
 
-Ouverture : clic au relâchement, Entrée initiale, Espace au relâchement ; flèche Bas ouvre. La
-touche ayant ouvert reste consommée jusqu’au KeyUp afin de ne pas activer le premier item.
+Opening: click on release, initial Enter, Space on release; Down arrow opens. The opening key remains consumed until KeyUp to avoid activating the first item.
 
-Dans le panneau : Haut/Bas parcourent les actions actives, Home/End première/dernière ;
-Entrée/Espace valident. Séparateurs, disabled et actions sans callback sont sautés.
+Within the panel: Up/Down traverse enabled actions, Home/End select first/last; Enter/Space confirm. Separators, disabled items, and actions without callbacks are skipped.
 
-Cible sous-menu : Droite ouvre children du surligné ; Gauche ferme le niveau courant ; Échap ferme
-un niveau puis toute la session. Survol ouvre un sous-menu après 200 ms ; délai cancellable, jamais
-un pointeur de Node.
+Submenu target: Right opens the highlighted item's children; Left closes the current level; Escape closes one level and then the entire session. Hover opens a submenu after 200 ms; use a cancellable delay, never a Node pointer.
 
-Tab et clic extérieur ferment selon l’overlay existant. PointerCancel cesse l’armement sans choisir.
-La molette défile un panneau trop haut ; focus retourne à l’ancre encore valide ou suit la politique
-du runtime.
+Tab and outside click close according to the existing overlay. PointerCancel stops arming without choosing. The wheel scrolls an over-height panel; focus returns to an anchor that is still valid or follows runtime policy.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Largeur du bouton inchangée : label mesuré, minimum et padding du ComboBoxStyle. Le panneau mesure
-les labels, colonne de checked, shortcut_label et indicateur children.
+Button width is unchanged: measured label, minimum, and padding from ComboBoxStyle. The panel measures labels, the checked column, shortcut_label, and the children indicator.
 
-Ancre en coordonnées logiques ; placement sous l’ancre puis retournement/clamp dans le viewport par
-le service overlay. Chaque sous-menu calcule son placement à droite ou gauche, sans dépasser le
-bord.
+Anchor in logical coordinates; the overlay service places the menu below it, then flips/clamps within the viewport. Each submenu computes right or left placement without exceeding the edge.
 
-Un grand menu a une hauteur bornée et viewport scrollable ; ne pas monter tous les sous-panneaux
-fermés. Suppression d’une ancre invalide ferme la session.
+A large menu has bounded height and a scrollable viewport; do not mount closed subpanels. Removal of an invalid anchor closes the session.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Conserver ComboBoxStyle/MenuItemStyle. Extensions MenuItemStyle pour colonnes
-checked/shortcut/chevron restent dans le modèle du menu ; aucun menu OS ou slot Theme fictif.
+Preserve ComboBoxStyle/MenuItemStyle. MenuItemStyle extensions for checked/shortcut/chevron columns remain within the menu model; no OS menu or fictitious Theme slot.
 
-Surligné et focus ne réévaluent pas le provider. Variation de métriques d’item invalide
-mesure/panneau ; variation de couleur seule invalidate paint.
+Highlight and focus do not reevaluate the provider. Item metric changes invalidate measurement/panel; color changes alone invalidate paint.
 
-Un item checked ne change pas de largeur entre true/false : réserver la colonne. Aucun timer de
-sous-menu lorsque fermé, caché ou démonté.
+A checked item does not change width between true/false: reserve the column. No submenu timer while closed, hidden, or unmounted.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : ancre SemanticRole::Button avec état expanded ; panneau
-PopupMenu, éléments MenuItem, séparateurs None et checked applicable pour les items marqués.
+Target: SemanticRole::Button anchor with expanded state; PopupMenu panel, MenuItem items, None separators, and applicable checked state for marked items.
 
-Le surligné et la relation de sous-menu utilisent snapshots/identités ; annonce nom et
-shortcut_label en description. combo_popup.hpp ne fournit actuellement pas d’override semantics :
-publication à compléter.
+Highlight and submenu relationships use snapshots/identities; announce the name and shortcut_label as description. combo_popup.hpp currently provides no semantics override: publication remains to be completed.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer le snapshot et les panneaux avant publication du handle. Si provider ou montage lève,
-l’ancre reste fermée, ou l’ancienne session cohérente ; aucun handle semi-ouvert.
+Prepare the snapshot and panels before publishing the handle. If provider or mounting throws, the anchor remains closed or the old session remains consistent; no partially open handle.
 
-Toute action démarre après fermeture logique et remise du focus au checkpoint prévu. Exception de
-callback : session reste fermée ; aucune réouverture ni relance.
+Every action starts after logical closure and focus restoration at the intended checkpoint. Callback exception: the session remains closed; no reopening or retry.
 
-Rejet/exception d’enqueue overlay : laisser une commande durable pour le prochain checkpoint ou
-rapporter refus sans publication ; ne pas exécuter synchroniquement une action qui exige fermeture
-différée.
+Overlay enqueue rejection/exception: leave a durable command for the next checkpoint or report refusal without publication; do not synchronously run an action that requires deferred closure.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [combo_box](combo_box.md), service overlay retenu (OverlaySpec/OverlayHandle,
-detail::OverlayService) et commandes overlay, Focus, ThemeBinding, styles de menu. ContextMenu
-réutilise le même moteur de panneau.
+Dependencies: [combo_box](combo_box.md), retained overlay service (OverlaySpec/OverlayHandle, detail::OverlayService) and overlay commands, Focus, ThemeBinding, and menu styles. ContextMenu reuses the same panel engine.
 
-Liste vide admise : open_popup actuel publie un panneau sans action sélectionnable ; Échap, Tab ou
-clic extérieur le ferment. Préserver cette ouverture vide sans inventer un item/callback. Le
-snapshot de session ne change pas parce que l’application modifie sa liste.
+An empty list is allowed: current open_popup publishes a panel without a selectable action; Escape, Tab, or outside click close it. Preserve this empty opening without inventing an item/callback. The session snapshot does not change when the application changes its list.
 
-Children invalides, keys dupliquées ou profondeur supérieure à 16 sont rejetés avant ouverture avec
-invalid_argument pour l’API C++ directe. Les callbacks et styles restent opaques au moteur de menu.
+Invalid children, duplicate keys, or depth greater than 16 are rejected before opening with invalid_argument for the direct C++ API. Callbacks and styles remain opaque to the menu engine.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/popup_menu.hpp` et `src/popup_menu.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/popup_menu.hpp` and `src/popup_menu.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Conserver combo_popup.hpp comme header compatible important également ComboBox. PopupMenuItem et
-variantes menu restent déclarés dans popup_menu.hpp.
+Preserve combo_popup.hpp as a compatible header also importing ComboBox. PopupMenuItem and menu variants remain declared in popup_menu.hpp.
 
-Extraire les noyaux ancre/panneau non template de combo_popup.hpp ; partager avec ContextMenu par
-une interface privée, sans switch central de widgets ni duplication du service overlay.
+Extract non-template anchor/panel cores from combo_popup.hpp; share them with ContextMenu through a private interface, without a central widget switch or duplicating the overlay service.
 
-Inscrire `src/popup_menu.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/popup_menu.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`popup_menu_snapshot` : provider exécuté à l’ouverture ; mutation source ultérieure ne change pas la
-session.
+`popup_menu_snapshot`: provider runs on opening; later source mutation does not change the session.
 
-`popup_menu_navigation` : disabled/séparateurs sautés ; suppression touche d’ouverture ; nested
-Droite/Gauche/Échap.
+`popup_menu_navigation`: disabled items/separators are skipped; opening key is suppressed; nested Right/Left/Escape navigation.
 
-`popup_menu_placement` : long menu défile et sous-menu retourne près du bord à plusieurs scales.
+`popup_menu_placement`: a long menu scrolls and submenus flip near edges at multiple scales.
 
-`popup_menu_action_once` : fermeture commise avant action ; callback retire ancre ou lève sans
-seconde action.
+`popup_menu_action_once`: closure is committed before action; a callback removes the anchor or throws without a second action.
 
-`popup_menu_open_failure` : provider, mount et enqueue en échec laissent handles/focus récupérables.
+`popup_menu_open_failure`: provider, mount, and enqueue failures leave handles/focus recoverable.
 
-`popup_menu_legacy_api` : action, separator, style et item_style historiques compilent sans
-changement.
+`popup_menu_legacy_api`: historical action, separator, style, and item_style compile unchanged.
 
-Ajouter `examples/features/popup_menu.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/popup_menu.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

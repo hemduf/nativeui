@@ -1,124 +1,124 @@
 # Dialog
 
-**Statut : existant à enrichir.**
+**Status: existing — enhancements required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Contrôleur de dialogue modal portable, corps composé de Spec et actions identifiées. Ajouter la variante alerte dans le même couple de fichiers, sans deuxième composant AlertDialog.
+Portable modal dialog controller with a body composed from Spec and identified actions. Add the alert variant in the same file pair, without a second AlertDialog component.
 
-Implémentation actuelle dans [dialog.hpp](../include/nativeui/dialog.hpp), `Dialog`, `DialogSpec`, `DialogAction`, show/active/close. Une seule génération Dialog par UI ; service [Overlay](../include/nativeui/overlay.hpp) unique pour focus modal/barrière/presentation.
+The current implementation is in [dialog.hpp](../include/nativeui/dialog.hpp): `Dialog`, `DialogSpec`, `DialogAction`, show/active/close. One Dialog generation per UI; a single [Overlay](../include/nativeui/overlay.hpp) service handles modal focus, the barrier and presentation.
 
-MyGo : `ui/widgets.go`, `Modal` ; `ui/base.go`, `DialogBase` ; `ui/feedback.go`, `AlertDialog`. MyGo Modal dismiss outside, Alert bloque outside et infère Cancel depuis texte. NativeUI bloque déjà outside ; conserver son rôle Cancel explicite, indépendant de langue.
+MyGo: `ui/widgets.go`, `Modal`; `ui/base.go`, `DialogBase`; `ui/feedback.go`, `AlertDialog`. MyGo Modal dismisses on outside clicks; Alert blocks outside clicks and infers Cancel from text. NativeUI already blocks outside clicks; preserve its explicit Cancel role, independent of language.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle exacte : `explicit Dialog(UI&)`, `Completion=std::function<void(DialogResult)>`, `show(DialogSpec, Completion)->DialogShowResult`, `active() const noexcept`, `close()->bool`, destructeur noexcept ; contrôleur non copiable/non déplaçable. Aucun `spec()` builder à inventer.
+Exact current API: `explicit Dialog(UI&)`, `Completion=std::function<void(DialogResult)>`, `show(DialogSpec, Completion)->DialogShowResult`, `active() const noexcept`, `close()->bool`, noexcept destructor; a noncopyable, nonmovable controller. Do not invent a `spec()` builder.
 
-Exemple existant vérifié, uiInstance est une UI déjà montée :
+Verified existing example; uiInstance is an already mounted UI:
 
 ```cpp
 ui::Dialog dialog{uiInstance};
 ui::DialogSpec request;
-request.title = "Confirmer";
-request.body = ui::Label{"Appliquer les modifications ?"}.spec();
+request.title = "Confirm";
+request.body = ui::Label{"Apply changes?"}.spec();
 request.actions = {
-    {"cancel", "Annuler", true, ui::DialogActionRole::Cancel},
-    {"apply", "Appliquer", true, ui::DialogActionRole::Default}
+    {"cancel", "Cancel", true, ui::DialogActionRole::Cancel},
+    {"apply", "Apply", true, ui::DialogActionRole::Default}
 };
 auto shown = dialog.show(std::move(request), [](ui::DialogResult) {});
 (void)shown;
 ```
 
-Ajouts cibles proposés : `AlertDialogSpec { std::string title; std::string message; std::vector<DialogAction> actions; }` et `DialogShowResult show_alert(AlertDialogSpec, Completion)`. Ce helper crée un DialogSpec et son corps de message ; il ne déduit pas les rôles depuis labels.
+Proposed target additions: `AlertDialogSpec { std::string title; std::string message; std::vector<DialogAction> actions; }` and `DialogShowResult show_alert(AlertDialogSpec, Completion)`. This helper creates a DialogSpec and its message body; it does not infer roles from labels.
 
-Ajouter à la fin de DialogSpec `std::optional<DialogStyle> style` et `std::string description`, conservant les champs historiques title/body/actions/backdrop_color et leur défaut. DialogStyle possède width/padding/gaps/palette ; aucun slot Theme supposé existant.
+Append `std::optional<DialogStyle> style` and `std::string description` to DialogSpec, preserving the historical title/body/actions/backdrop_color fields and their defaults. DialogStyle owns width/padding/gaps/palette; no existing Theme slot is assumed.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Dialog emprunte UI et tient un état weak par génération. UI doit vivre tant que les opérations directes du contrôleur sont utilisables ; après teardown show retourne Unavailable et close false.
+Dialog borrows UI and holds weak state per generation. UI must remain alive while direct controller operations are usable; after teardown, show returns Unavailable and close returns false.
 
-show possède body/actions/Completion ; pas de State<bool> parallèle. Résultats actuels Shown/Busy/InvalidSpec/Unavailable conservés ; completion décrit Action(id) ou Dismissed, exactement une fois sur clôture effective.
+show owns body/actions/Completion; no parallel State<bool>. Preserve the current Shown/Busy/InvalidSpec/Unavailable results; completion describes Action(id) or Dismissed, exactly once upon effective closure.
 
-Données actions sont un snapshot immuable pour la session. Modèle externe de corps via Binding est valide, mais actions ne sont pas remplacées implicitement pendant une pression. close conserve le premier résultat demandé pendant une reprise.
+Action data is an immutable snapshot for the session. An external body model through Binding is valid, but actions are not implicitly replaced during a press. close preserves the first requested result during recovery.
 
 ## 4. Interactions
 
-Outside et backdrop consomment pointeur sans fermer. Tab/Shift+Tab restent dans la portée modale ; focus initial sur Default enabled, sinon premier descendant disponible, sinon panneau.
+Outside clicks and the backdrop consume pointer input without closing. Tab/Shift+Tab stay within the modal scope; initial focus goes to an enabled Default, otherwise the first available descendant, otherwise the panel.
 
-Enter remonte au Default uniquement si le descendant focalisé l’a ignoré ; TextInput/TextArea peuvent le consommer. Escape = Action du Cancel enabled, sinon Dismissed. Boutons Disabled ne s’activent ni au pointeur ni sémantiquement.
+Enter reaches Default only if the focused descendant ignored it; TextInput/TextArea may consume it. Escape = the enabled Cancel action, otherwise Dismissed. Disabled buttons activate neither through pointer input nor semantic actions.
 
-close programmatique = Dismissed. Déactivation UI ferme sans completion selon le contrat actuel. PointerCancel annule les gestes enfants ; aucun drag du panneau ni scroll global, seulement ScrollView du corps.
+Programmatic close = Dismissed. UI deactivation closes without completion under the current contract. PointerCancel cancels child gestures; no panel dragging or global scrolling, only the body's ScrollView.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Chemin historique : marge viewport24, maximum width560, padding20, section gap12 et actions gap8 unités logiques. Panneau centré ; largeur/hauteur bornées au viewport.
+Historical path: viewport margin 24, maximum width 560, padding 20, section gap 12 and action gap 8, in logical units. The panel is centered; its width/height are bounded by the viewport.
 
-Titre et actions hors scroll ; corps dans ScrollView vertical owned par le panneau. Viewport minuscule priorise chrome et réduit corps à zéro sans hauteur négative.
+Title and actions remain outside scrolling; the body is in a vertical ScrollView owned by the panel. A tiny viewport prioritizes chrome and reduces the body to zero without negative height.
 
-Contrat enrichi : la rangée d’actions trop large se replie en plusieurs lignes selon ordre visuel, sans changer les rôles/default du parcours focus. Aucun bouton ne déborde du panneau ; corps reste le seul contenu scrollable.
+Enhanced contract: an excessively wide action row wraps into multiple lines in visual order, without changing roles/default focus traversal. No button overflows the panel; the body remains the only scrollable content.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-DialogStyle nouveau fournit overrides typographiques/chrome/layout ; défaut conserve palette et géométrie actuelle hors cas d’overflow corrigé. Backdrop_color historique garde sa priorité explicite.
+The new DialogStyle provides typography/chrome/layout overrides; defaults preserve the current palette and geometry except for corrected overflow cases. Historical Backdrop_color retains its explicit priority.
 
-Variante alerte construit titre/message et actions dans le même panneau. Default visuellement accentuée ; Cancel/Normal gardent chrome standard, sans règle « dernier bouton = default ».
+The alert variant constructs title/message and actions in the same panel. Default is visually accented; Cancel/Normal keep standard chrome, without a “last button = default” rule.
 
-Theme et corps Binding invalidés selon services existants. Ouverture/fermeture passent par structural invalidation Overlay ; aucune boucle d’animation ou second stack modal.
+Theme and body Binding invalidation follow existing services. Opening/closing use Overlay structural invalidation; no animation loop or second modal stack.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : Dialog nommé title, description explicite ou message d’alerte ; Group/actions/corps conservent leurs rôles. SemanticRole::AlertDialog est absent : utiliser Dialog avec description ; extension dédiée serait un contrat séparé.
+Target contract: Dialog named by title, with an explicit description or alert message; Group/actions/body retain their roles. SemanticRole::AlertDialog is absent: use Dialog with a description; a dedicated extension would be a separate contract.
 
-Modal masque la navigation vers les descendants de fond selon l’arbre sémantique cible ; ordre visuel des actions ne doit pas être confondu avec Default priorisé pour focus.
+Modal hides navigation to background descendants in the target semantic tree; visual action order must not be confused with Default's focus priority.
 
-Ponts natifs T068 différés. Les inputs du corps utilisent committed text ; preedit/candidate rectangles natifs restent différés DESIGN17.4, sans ajout implicite par Dialog.
+Native T068 bridges are deferred. Body inputs use committed text; native preedit/candidate rectangles remain deferred under DESIGN17.4, without implicit additions through Dialog.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-show prépare contenu/callbacks avant acquisition de slot. Publication échouée libère génération et overlay ; échec close/reconciliation conserve handle/génération/resultat pour retry exact, pas session artificiellement Busy.
+show prepares content/callbacks before acquiring a slot. Failed publication releases the generation and overlay; failed close/reconciliation preserves the handle/generation/result for an exact retry rather than an artificially Busy session.
 
-La fermeture depuis dispatch est différée intégralement au checkpoint retenu, sans fallback synchrone sur échec d’enqueue. Slot et état local sont terminal avant completion ; une completion qui lève n’est jamais rejouée.
+Closure from dispatch is deferred entirely to the retained checkpoint, without synchronous fallback on enqueue failure. The slot and local state are terminal before completion; a completion that throws is never replayed.
 
-Particularité actuelle à conserver : destructeur active close peut invoquer completion ; il invalide d’abord callbacks retenus, force cleanup terminal et contient toutes exceptions. Déactivation/teardown UI abandonnent sans completion. Aucun état global ; top-level destruction seulement aux limites prouvées sûres.
+Current behavior to preserve: the destructor's active close may invoke completion; it first invalidates retained callbacks, forces terminal cleanup and contains all exceptions. UI deactivation/teardown abandon without completion. No global state; top-level destruction only at boundaries proven safe.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de Overlay, FocusScope, ScrollView, Button, Label/TextService et DialogState existants. Ne pas remplacer UI::dialog_state_ ni son flux de checkpoint.
+Depends on existing Overlay, FocusScope, ScrollView, Button, Label/TextService and DialogState. Do not replace UI::dialog_state_ or its checkpoint flow.
 
-Body sans factory = InvalidSpec. Id vide/dupliqué, plusieurs Default ou Cancel = InvalidSpec avant slot. Zéro action autorisé ; Escape/close restent opérationnels.
+Body without a factory = InvalidSpec. Empty/duplicate ID, multiple Default or Cancel actions = InvalidSpec before acquiring the slot. Zero actions are allowed; Escape/close remain operational.
 
-Titre/message vides autorisés. show_alert donne un body Spec valide même avec message vide. Deux Dialog d’une UI se partagent le slot Busy ; deux UI restent indépendantes. Actions disabled et destruction en completion sont des cas obligatoires.
+Empty title/message are allowed. show_alert supplies a valid body Spec even with an empty message. Two Dialog controllers in one UI share the Busy slot; two UIs remain independent. Disabled actions and destruction in completion are required cases.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/dialog.hpp` et `src/dialog.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/dialog.hpp` and `src/dialog.cpp`. The header contains public declarations; the `.cpp` contains a real retained kernel, measurement, layout, applicable events and rendering.
 
-Origine à extraire ou réutiliser : `dialog.hpp` existant et detail/dialog_state.hpp. Préserver toutes les déclarations publiques, structs/enums et includes historiques de dialog.hpp. Déplacer vrai contrôleur, panel/chrome et callbacks en dialog.cpp ; les helpers de composition ne deviennent pas un header lourd.
+Source to extract or reuse: existing `dialog.hpp` and detail/dialog_state.hpp. Preserve all public declarations, structs/enums and historical dialog.hpp includes. Move the actual controller, panel/chrome and callbacks into dialog.cpp; composition helpers must not become a heavy header.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters stay in the header and delegate to the non-template kernel. Preserve historical includes through their collective headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, without an empty file or central widget switch. This API exposes no Pugl, Skia, OS or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery is documentation: no extraction or CMake change is performed in this documentation phase.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement with the component:
 
-- `dialog_legacy_results` : Shown/Busy/InvalidSpec/Unavailable et Action/Dismissed sont conservés.
-- `dialog_default_enter` : Enter consommé par descendant ne déclenche pas Default.
-- `dialog_alert_roles` : rôles explicites non liés aux labels traduits.
-- `dialog_action_wrap` : actions longues replient dans un viewport minuscule sans overflow.
-- `dialog_close_fault` : reconciliation qui lève conserve premier résultat et retry owner.
-- `dialog_destructor_completion` : cleanup no-throw contient completion qui lève et libère slot.
-- `dialog_reentrant_show` : completion peut ouvrir le dialogue suivant sans fermer sa génération.
+- `dialog_legacy_results`: preserve Shown/Busy/InvalidSpec/Unavailable and Action/Dismissed.
+- `dialog_default_enter`: Enter consumed by a descendant does not trigger Default.
+- `dialog_alert_roles`: explicit roles are independent of translated labels.
+- `dialog_action_wrap`: long actions wrap in a tiny viewport without overflow.
+- `dialog_close_fault`: reconciliation that throws preserves the first result and retry owner.
+- `dialog_destructor_completion`: no-throw cleanup contains a throwing completion and releases the slot.
+- `dialog_reentrant_show`: completion can open the next dialog without closing its generation.
 
-Créer `examples/features/dialog.cpp` et la cible `nativeui_example_dialog`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/dialog.cpp` and the `nativeui_example_dialog` target, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a clock, works headlessly and returns a nonzero code on the first failure.
 
-Réutiliser les exemples `examples/features/t063_dialog.cpp` et les tests de transactions Dialog actuels ; ajouter alertes, sémantique et overflow sans affaiblir les preuves de reprise.
+Reuse `examples/features/t063_dialog.cpp` and current Dialog transaction tests; add alerts, semantics and overflow without weakening recovery evidence.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: all named tests pass, no capture/registration survives unmounting, and the published API matches these contracts. Verification performed here: reading declarations and sources; no C++ or interactive test was executed for this specification.

@@ -1,25 +1,22 @@
 # ToggleButton
 
-Statut : **nouveau à implémenter**.
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Un bouton qui garde une valeur pressée : gras, italique, option de barre d’outils. Il est distinct
-de Toggle, interrupteur à curseur déjà présent.
+A button that retains a pressed value: bold, italic, or a toolbar option. It is distinct from Toggle, the existing sliding switch.
 
-NativeUI fournit [Button](button.md), [Toggle](toggle.md), Binding et patches de style ; aucun
-ToggleButton public.
+NativeUI provides [Button](button.md), [Toggle](toggle.md), Binding, and style patches; no public ToggleButton.
 
-MyGo : `ui/toggle.go`, `ToggleBase`, `Toggle`, `pressedColor`. Le portage ajoute un nom sans
-collision avec Switch<T>, qui demeure la composition conditionnelle.
+MyGo: `ui/toggle.go`, `ToggleBase`, `Toggle`, `pressedColor`. The port adds a name without colliding with Switch<T>, which remains conditional composition.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class ToggleButton {
@@ -32,164 +29,111 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<bool> bold{false};
-auto control = ui::ToggleButton("Gras", bold).spec();
+auto control = ui::ToggleButton("Bold", bold).spec();
 ```
 
-ToggleButtonStyle cible : base, hovered, pressed, selected, focused, disabled, read_only, avec
-métriques de ButtonStyle. selected décrit la valeur persistante ; pressed décrit seulement l’appui
-en cours.
+Target ToggleButtonStyle: base, hovered, pressed, selected, focused, disabled, read_only, with ButtonStyle metrics. selected describes the persistent value; pressed describes only the current press.
 
-content remplace le label visuel et conserve son nom sémantique. Les notifications utilisent
-Binding<bool> ; aucun second callback on_change n’est nécessaire.
+content replaces the visual label and preserves its semantic name. Notifications use Binding<bool>; no second on_change callback is needed.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<bool> est l’unique vérité persistante. Valeur sélectionnée et appui momentanés ne sont
-jamais confondus ; activation calcule !pressed.get() au moment du commit.
+Binding<bool> is the sole persistent source of truth. Selected value and momentary press are never conflated; activation computes !pressed.get() at commit time.
 
-Une écriture externe pendant l’appui met à jour l’apparence ; au relâchement, basculer la valeur
-courante plutôt que celle capturée au début. Cela évite d’écraser une commande applicative récente.
+An external write during a press updates appearance; on release, toggle the current value rather than the value captured at the start. This avoids overwriting a recent application command.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Clic intérieur au relâchement bascule une fois. Déplacement dehors, PointerCancel et perte de focus
-n’écrivent pas ; aucun basculement à PointerDown, contrairement au Toggle existant.
+An inside click toggles once on release. Moving outside, PointerCancel, and loss of focus do not write; no toggle at PointerDown, unlike existing Toggle.
 
-Espace : armement KeyDown puis basculement KeyUp ; Entrée : premier KeyDown, répétitions supprimées.
-Molette sans effet, glisser hors bouton annule.
+Space: arm at KeyDown, toggle at KeyUp; Enter: first KeyDown, with repeats suppressed. Wheel has no effect; dragging outside the button cancels.
 
-ReadOnly reste focusable et expose la valeur mais consomme les entrées mutantes. Disabled suit la
-disponibilité héritée et retire les gestes armés.
+ReadOnly remains focusable and exposes the value but consumes mutating input. Disabled follows inherited availability and clears armed gestures.
 
-Dans ToggleGroup/Toolbar, les flèches déplacent le focus sans changer cette valeur ; seule une
-activation choisit ou retire l’option indépendante.
+Within ToggleGroup/Toolbar, arrows move focus without changing this value; only activation selects or clears the independent option.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure reprend Button : label ou contenu, padding horizontal, hauteur contrôle et largeur minimum.
-La valeur bool ne change pas les dimensions.
+Measurement follows Button: label or content, horizontal padding, control height, and minimum width. The bool value does not change dimensions.
 
-Clipper un contenu iconique sous contraintes étroites. Groupe et barre d’outils arrangent le
-contrôle ; le bouton ne lit pas la largeur de voisins depuis paint.
+Clip icon content under narrow constraints. Group and toolbar arrange the control; the button does not read neighbor widths from paint.
 
-Resize pendant capture utilise les limites courantes ; le point de relâchement est en coordonnées
-logiques.
+Resizing during capture uses current bounds; the release point is in logical coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-selected applique la face enfoncée persistante. hovered/pressed peuvent modifier les couleurs, puis
-focus conserve son ring ; priorité disabled et read_only clairement appliquée avant l’affordance
-active.
+selected applies a persistent depressed face. hovered/pressed may change colors, then focus keeps its ring; apply disabled and read_only priority clearly before active affordances.
 
-Le style segmenté vient de ToggleGroup localement. Il ne mutate pas les globals Theme ni le style de
-boutons extérieurs à ce groupe.
+Segmented styling comes locally from ToggleGroup. It does not mutate global Theme state or styles of buttons outside the group.
 
-Binding change : paint seule sauf patch selected comportant une métrique, auquel cas layout. Garder
-la place du ring pour éviter des déplacements lors du focus.
+Binding change: paint only unless the selected patch contains a metric, in which case layout. Reserve ring space to avoid shifts on focus.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Button avec checked Checked/Unchecked et action Toggle ; SemanticRole::Toggle est réservé
-ici à l’interrupteur visuel existant. Un rôle ToggleButton dédié pourra être ajouté séparément.
+Target: Button with Checked/Unchecked checked state and Toggle action; SemanticRole::Toggle is reserved here for the existing visual switch. A dedicated ToggleButton role may be added separately.
 
-La valeur persistante est annoncée même hors focus ; le nom reste le label pour un contenu
-uniquement iconique. ReadOnly supprime les actions mutantes.
+Announce the persistent value even without focus; the name remains the label for icon-only content. ReadOnly removes mutating actions.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-L’activation désarme, libère capture et prend copie du Binding avant set(). Un observateur qui
-retire le bouton ne laisse aucun accès postérieur au composant.
+Activation disarms, releases capture, and copies the Binding before set(). An observer removing the button leaves no subsequent component access.
 
-Aucun rollback de la valeur publiée en cas d’exception d’un observateur ; la prochaine interaction
-repart de la valeur courante.
+Do not roll back a published value if an observer throws; the next interaction starts from the current value.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [button](button.md), [toggle_group](toggle_group.md), disponibilité, ThemeBinding,
-State et machine d’activation.
+Dependencies: [button](button.md), [toggle_group](toggle_group.md), availability, ThemeBinding, State, and the activation state machine.
 
-Label vide avec icône : fournir un nom accessible ; callback/observateur externe peut remplacer le
-State mais jamais conserver un contexte d’input.
+Empty label with an icon: supply an accessible name; an external callback/observer may replace State but must never retain an input context.
 
-Un groupe exclusif doit utiliser SegmentedControl, pas observer plusieurs ToggleButton pour imposer
-une exclusivité implicite.
+An exclusive group must use SegmentedControl rather than observing several ToggleButtons to impose implicit exclusivity.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/toggle_button.hpp` et `src/toggle_button.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/toggle_button.hpp` and `src/toggle_button.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-ToggleButtonStyle et variantes de contenu restent dans ce couple ; le noyau partage la machine
-d’activation avec Button sans importer widgets_basic.inc comme implémentation.
+ToggleButtonStyle and content variants remain in this file pair; the core shares Button's activation state machine without importing widgets_basic.inc as implementation.
 
-Inscrire `src/toggle_button.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les
-includes collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou
-plugin dans l’API publique.
+Register `src/toggle_button.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`toggle_button_persistent` : la valeur selected reste après relâchement ; pressed temporaire
-disparaît.
+`toggle_button_persistent`: selected value remains after release; temporary pressed state disappears.
 
-`toggle_button_cancel` : sortie et PointerCancel ne basculent pas ; molette ne change rien.
+`toggle_button_cancel`: leaving bounds and PointerCancel do not toggle; wheel changes nothing.
 
-`toggle_button_external_during_press` : écriture externe puis activation bascule la valeur la plus
-récente.
+`toggle_button_external_during_press`: an external write followed by activation toggles the latest value.
 
-`toggle_button_read_only` : focus/lire permis, clavier et pointeur ne publient aucune valeur.
+`toggle_button_read_only`: focus/reading allowed; keyboard and pointer publish no value.
 
-`toggle_button_remove_observer` : observateur retire le bouton ou lève ; suivant réutilisable.
+`toggle_button_remove_observer`: an observer removes the button or throws; the next interaction remains usable.
 
-`toggle_button_group_independent` : flèches déplacent seulement focus ; plusieurs valeurs peuvent
-rester true.
+`toggle_button_group_independent`: arrows move only focus; several values may remain true.
 
-Ajouter `examples/features/toggle_button.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/toggle_button.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

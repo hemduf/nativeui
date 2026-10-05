@@ -1,20 +1,20 @@
 # GridView<Key>
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Collection d’items virtualisée en grille à colonnes adaptatives, avec sélection et navigation 2D. NativeUI possède [Grid](grid.md), un layout eager, mais pas ce modèle de grande collection.
+An item collection virtualized as a grid with adaptive columns, selection, and 2D navigation. NativeUI has [Grid](grid.md), an eager layout, but no such large-collection model.
 
-MyGo `ui/gridview.go` : `GridState`, `GridView`, `gridFit`, `keys`, `reorder`. Les colonnes sont calculées depuis une largeur minimale et les lignes ont une hauteur fixe ; redimensionner conserve l’item en haut de viewport.
+MyGo `ui/gridview.go`: `GridState`, `GridView`, `gridFit`, `keys`, `reorder`. Columns are calculated from a minimum width and rows have fixed height; resizing retains the item at the viewport top.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, signatures membres de `GridView<Key>` :
+Proposed target API, member signatures of `GridView<Key>`:
 
 ```cpp
 GridView(Binding<std::vector<CollectionItem<Key>>> items, Selection<Key>& selection);
@@ -39,76 +39,76 @@ auto grid = ui::GridView<int>{items,selection}.minimum_cell_width(140.0)
     .cell([](const auto& item){return std::move(ui::Label{item.label}).spec();});
 ```
 
-Defaults min_width140 DIP, cell_height120 DIP, gap8 DIP, Single, overscan2 lignes. Contrôleur cible `GridViewState<Key>` dans ce couple avec scroll_to_key/index, visible_range last exclusive ; `.state(GridViewState<Key>&)` optionnelle, control token sûr. Les modèles item/selection sont ceux de [ListView](list_view.md).
+Defaults min_width140 DIP, cell_height120 DIP, gap8 DIP, Single, overscan2 rows. Target `GridViewState<Key>` controller in this pair with scroll_to_key/index, visible_range with exclusive end; optional `.state(GridViewState<Key>&)`, safe control token. Item/selection models come from [ListView](list_view.md).
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Items Binding copié, clé unique et tokens monotones. section_header n’a pas de sens dans GridView : reject true dans dataset, employer liste pour sections. Selection selected ordonné selon dataset ; active/anchor par key. Modifier nombre de colonnes ne modifie pas selected ni ses bindings. Les invalid bindings refusent writes/activation mutante/callback synthétique.
+Copied items Binding, unique keys and monotonic tokens. section_header has no meaning in GridView: reject true in the dataset, use a list for sections. Selection selected ordered by dataset; active/anchor by key. Changing column count does not modify selected or its bindings. Invalid bindings refuse writes/mutating activation/synthetic callbacks.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-Left/Right suivent l’ordre linéaire du dataset (−1/+1) : droite sur le dernier item d’une rangée passe au premier de la suivante, gauche fait l’inverse ; aucun bouclage entre début et fin du dataset. Up/Down sautent de column_count et visent même colonne, clamp dernière ligne. Home/End début/fin dataset ; PageUp/Down sautent du nombre de rangées visibles. Modifiers multiple selection/toggle et typeahead selon ListView, Shift plage linéaire dataset. Enter/doubleclick activate. Reorder opt-in : dragged selected keys dans ordre dataset, insertion before key/nullopt fin, app remplace dataset ; Échap/cancel/removal annule, autoscroll local borné. Molette via ScrollView.
+Left/Right follow linear dataset order (−1/+1): right on the last item of a row moves to the first of the next, left does the reverse; no wrapping between dataset beginning and end. Up/Down jump by column_count and target the same column, clamping on the last row. Home/End go to dataset beginning/end; PageUp/Down jump by the number of visible rows. Multiple selection/toggle modifiers and typeahead follow ListView; Shift extends a linear dataset range. Enter/double-click activate. Opt-in reorder: dragged selected keys in dataset order, insertion before key/nullopt for end, application replaces dataset; Escape/cancel/removal cancel it, bounded local autoscroll. Wheel through ScrollView.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Columns = max(1,floor((viewport_width+gap)/(minimum_cell_width+gap))). Width effective `(max(0,W)-(C−1)*gap)/C` bornée zéro ; minimum demandé sert au calcul de C ; avec C=1 dans un viewport étroit, la cellule prend la largeur disponible même inférieure au minimum demandé, sans division par zéro. Le contenu intrinsèque débordant est clippé. Last row garde cellules mêmes widths, espaces vides non interactifs. Lignes fixes height+gap avec double cumuls ; matérialisation viewport/overscan et exceptions active capture. Resize columns conserve premier visible key+inset, jamais un ancien index de row. Extent overflow reject avant commit ; scroll O(V), copie des métadonnées O(N) ; validation/rematching de clés à nouvelle génération O(N log N) pour clés encodables et jusqu’à O(N²) pour clés equality-only, comme [ListView](list_view.md).
+Columns = max(1,floor((viewport_width+gap)/(minimum_cell_width+gap))). Effective width `(max(0,W)-(C−1)*gap)/C` bounded at zero; requested minimum is used to calculate C; with C=1 in a narrow viewport, the cell takes available width even below the requested minimum, without division by zero. Overflowing intrinsic content is clipped. The last row retains the same cell widths, with noninteractive empty spaces. Fixed rows height+gap with double cumulative sums; viewport/overscan materialization and active capture exceptions. Column resize retains the first visible key+inset, never an old row index. Extent overflow rejected before commit; scrolling O(V), metadata copying O(N); key validation/rematching at a new generation O(N log N) for encodable keys and up to O(N²) for equality-only keys, as in [ListView](list_view.md).
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-GridViewStyle : cellule selected/hover/pressed/focus, padding et insertion marker ; le contenu (image/titre) est factory. Séparer focus active et selection multiple. Gap/cell sizes changent layout/window ; color only paint. Aucune charge d’image synchrone dans layout/paint, les ressources sont applicatives et par instance.
+GridViewStyle: selected/hover/pressed/focus cell, padding, and insertion marker; content (image/title) comes from the factory. Separate active focus and multiple selection. Gap/cell sizes change layout/window; color requires only paint. No synchronous image loading during layout/paint; resources are application-provided and per instance.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Utiliser ListView/ListItem ou Custom pour semantics provisoires ; GridRole/row/column relations nécessitent une extension neutre future. Full dataset data-only shared metadata, item bounds calculés depuis current columns/row sizes snapshot. Aucune factory de cell lors lecture sémantique. Reflow publie une géométrie cohérente et pas des indices d’ancienne grille.
+Use ListView/ListItem or Custom for provisional semantics; GridRole/row/column relationships require a future neutral extension. Full dataset data-only shared metadata, with item bounds calculated from the current columns/row-size snapshot. No cell factory on semantic reads. Reflow publishes consistent geometry, rather than indices of the old grid.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Resize/dataset replacement prépare nouvelle window et mapping stable avant commit. Une cell factory qui lève ne publie pas une rangée incomplète ; dirty recovery durable. Remove dragged key termine capture/autoscroll. on_reorder reentrant peut reconstruire dataset, ne continuer qu’avec snapshot IDs own. Controller expiré rend operations safe/no-op.
+Resize/dataset replacement prepares a new window and stable mapping before commit. A throwing cell factory does not publish an incomplete row; durable dirty recovery. Removing a dragged key ends capture/autoscroll. Reentrant on_reorder may rebuild the dataset; continue only with an owned ID snapshot. An expired controller makes operations safe/no-op.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-[ListView](list_view.md) sélection/tokens, [ScrollView](scroll_view.md), modèles communs. Min width/cell height strictement positives finies ; gap fini nonnegative, invalid_argument pour options invalides. Items vide/duplicate, très petite width, million items, dernière rangée partielle et child controls focusables. Key PageUp/PageDown = extension additive future du système input, translations plateformes nécessaires.
+[ListView](list_view.md) selection/tokens, [ScrollView](scroll_view.md), common models. Minimum width/cell height strictly positive and finite; finite nonnegative gap, invalid_argument for invalid options. Empty/duplicate items, very small width, a million items, partial last row, and focusable child controls. Key PageUp/PageDown = future additive input-system extension, requiring platform translations.
 
-Les touches `Key::PageUp` et `Key::PageDown` sont des additions cibles en fin de l’enum portable actuel, avec traduction plateforme et tests. Le source actuel ne les définit pas. Typeahead utilise les InputEvent de texte commité ; aucun support natif complet IME n’est supposé.
+`Key::PageUp` and `Key::PageDown` are target additions at the end of the current portable enum, with platform translation and tests. The current source does not define them. Typeahead uses committed-text InputEvent objects; no complete native IME support is assumed.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/grid_view.hpp` et `src/grid_view.cpp`.
+Target: `include/nativeui/grid_view.hpp` and `src/grid_view.cpp`.
 
-grid_view.hpp contient style/state/templates key/factory ; grid_view.cpp porte fit columns, window 2D, selection navigation, drag transactions et paint/layout. Ne pas détourner GridComponent en collection ni dupliquer son auto-placement de spans. Corps de virtualization et tokens réutilisés depuis kernels communs.
+grid_view.hpp contains style/state/key/factory templates; grid_view.cpp contains column fitting, 2D window, selection navigation, drag transactions, and paint/layout. Do not repurpose GridComponent as a collection or duplicate its span auto-placement. Virtualization bodies and tokens are reused from common cores.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `grid_linear_row_boundary` : gauche/droite traversent les rangées, restent bornées aux extrémités et conservent l’extension Shift linéaire.
+- `grid_linear_row_boundary`: left/right cross rows, remain bounded at the ends, and preserve linear Shift extension.
 
-- `grid_view_fit_columns` : seuils min width+gap et width nulle.
-- `grid_view_last_row` : mêmes widths, blank cells inertes.
-- `grid_view_resize_anchor` : item/inset stable quand colonnes changent.
-- `grid_view_navigation_2d` : arrows/Home/End/Page et skip disabled.
-- `grid_view_range_selection` : Shift plage linéaire avec anchor stable.
-- `grid_view_reorder_keys_cancel` : callback one-shot et removal sous drag.
-- `grid_view_million_items` : Components bornés par rows visible.
-- `grid_view_geometry_overflow_fault` : reject sans nouvelle génération partielle.
-- `grid_view_semantic_reflow` : metadata pointer stable, geometry change data-only.
+- `grid_view_fit_columns`: min width+gap thresholds and zero width.
+- `grid_view_last_row`: same widths, inert blank cells.
+- `grid_view_resize_anchor`: stable item/inset as columns change.
+- `grid_view_navigation_2d`: arrows/Home/End/Page and disabled skipping.
+- `grid_view_range_selection`: Shift linear range with stable anchor.
+- `grid_view_reorder_keys_cancel`: one-shot callback and removal during drag.
+- `grid_view_million_items`: Components bounded by visible rows.
+- `grid_view_geometry_overflow_fault`: reject without a new partial generation.
+- `grid_view_semantic_reflow`: stable metadata pointer, data-only geometry change.
 
-Créer l’exemple public futur `examples/features/grid_view.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/grid_view.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

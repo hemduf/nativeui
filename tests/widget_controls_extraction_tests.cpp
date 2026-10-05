@@ -251,9 +251,9 @@ void meter_levels_and_disabled_priority() {
       style,
       ui::MeterLevels{0.5, 0.25}};
   value.set(0.25f);
-  NUI_CHECK(low_bad.semantics().description == "critique");
+  NUI_CHECK(low_bad.semantics().description == "critical");
   value.set(0.5f);
-  NUI_CHECK(low_bad.semantics().description == "avertissement");
+  NUI_CHECK(low_bad.semantics().description == "warning");
   value.set(0.75f);
   NUI_CHECK(low_bad.semantics().description == "normal");
   ui::detail::BoundedDisplayComponent equal{value.binding(),

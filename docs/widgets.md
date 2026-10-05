@@ -1,194 +1,196 @@
-# Spécifications des composants NativeUI
+# NativeUI component specifications
 
-Ce catalogue est le point d’entrée de **83 spécifications de composants publics**.
-Il couvre les **54 familles documentaires de MyGo**, leurs variantes autonomes,
-les widgets supplémentaires de NativeUI et ses conteneurs de composition.
-Une famille MyGo n’équivaut pas nécessairement à un composant : les alertes sont
-une variante de Dialog, tandis que Form, Field et Fieldset ont des responsabilités
-et des couples de fichiers distincts.
+This catalog is the entry point for **83 public component specifications**.
+It covers the **54 documented MyGo families**, their standalone variants,
+NativeUI's additional widgets and its composition containers.
+A MyGo family does not necessarily correspond to one component: alerts are
+a Dialog variant, whereas Form, Field and Fieldset have separate responsibilities
+and file pairs.
 
-[Suivi de l’implémentation](widgets_implementation.md) : fichiers intégrés, validations et contrats encore à réaliser.
+[Implementation tracking](widgets_implementation.md): integrated files, validation and contracts still to be completed.
 
-[Galerie de démonstration](widgets_demo.md) : application interactive utilisant les 83 composants, lancement et self-test.
+[Demo gallery](widgets_demo.md): an interactive application using all 83 components, launch instructions and self-tests.
 
-## 1. Périmètre et lecture
+## 1. Scope and reading guide
 
-Ces documents conservent le snapshot documentaire initial et spécifient la cible de développement. L’implémentation demandée ensuite est suivie séparément dans [widgets_implementation.md](widgets_implementation.md). Chaque page sépare API existante vérifiée, API
-cible proposée et critères de livraison. Les exemples cibles ne sont pas
-présentés comme compilés contre la version actuelle.
+These documents preserve the initial documentation snapshot and specify the development target.
+The implementation requested subsequently is tracked separately in
+[widgets_implementation.md](widgets_implementation.md). Each page distinguishes the verified
+existing API, the proposed target API and delivery criteria. Target examples are not
+presented as having been compiled against the current version.
 
-Références figées pour cet état des lieux, le 4 octobre 2026 :
+References frozen for this inventory on October 4, 2026:
 
-- NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c`, checkout étudié
-  `/Volumes/T7/Code/nativeui` ; [architecture](../DESIGN.md),
-  [contrat de review](../CODE_REVIEW.md), [API widgets](../include/nativeui/widgets.hpp).
-- MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`, checkout étudié
-  `/Volumes/T7/Code/mygo` ; `docs/ui/README.md`, sources `ui/` et exemples
-  `examples/gallery/`. Les références de chaque page donnent les fichiers et
-  fonctions consultés à cette version.
+- NativeUI: `e10077ff39b8cb977669a7d5604562f66d07cb4c`, inspected checkout
+  `/Volumes/T7/Code/nativeui`; [architecture](../DESIGN.md),
+  [review contract](../CODE_REVIEW.md), [widget API](../include/nativeui/widgets.hpp).
+- MyGo: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`, inspected checkout
+  `/Volumes/T7/Code/mygo`; `docs/ui/README.md`, sources under `ui/` and examples
+  under `examples/gallery/`. Each page identifies the files and functions consulted
+  at this version.
 
-Les mentions de statut décrivent le travail restant à ce snapshot ; elles ne
-remplacent pas les statuts d’issues GitHub :
+Status labels describe the work remaining at that snapshot; they do not replace
+GitHub issue statuses:
 
-| Statut documentaire | Signification |
+| Documentation status | Meaning |
 | --- | --- |
-| **existant à extraire** | Capacité présente ; préserver comportement/API en séparant header et cpp. |
-| **existant à enrichir** | Capacité présente ; extraction et extensions explicitement séparées dans la page. |
-| **nouveau à implémenter** | Widget public absent ; API et comportements décrits comme cibles. |
+| **existing — extraction required** | Capability already present; preserve its behavior/API while separating header and cpp. |
+| **existing — enhancements required** | Capability already present; the page explicitly separates extraction from extensions. |
+| **new — implementation required** | Public widget absent; its API and behavior are described as targets. |
 
-Chaque page suit onze rubriques : objectif/état actuel, API, état/propriété,
-interactions, layout, présentation, accessibilité, cycle de vie/récupération,
-dépendances/cas limites, fichiers/compatibilité, tests/acceptation.
+Each page has eleven sections: purpose/current behavior, API, state/ownership,
+interactions, layout, presentation, accessibility, lifecycle/recovery,
+dependencies/edge cases, files/compatibility, and tests/acceptance.
 
-## 2. Catalogue et fichiers cibles
+## 2. Catalog and target files
 
-Le nom de page, le header et le cpp utilisent le même `snake_case`. Les chemins
-C++ du tableau sont **des cibles**, même si un header de même nom existe déjà.
-Les variantes, modèles d’items et classes d’implémentation privées restent dans
-le couple de leur composant. Les types de données et contrôleurs ne reçoivent
-pas un cpp vide pour satisfaire artificiellement cette règle.
+The page, header and cpp use the same `snake_case` name. The C++ paths in the
+table are **targets**, even when a header with that name already exists.
+Variants, item models and private implementation classes stay in their component's
+file pair. Data types and controllers do not receive an empty cpp solely to
+satisfy this rule.
 
-### Texte et dessin
+### Text and drawing
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Label](label.md) | existant à extraire | `include/nativeui/label.hpp` | `src/label.cpp` |
-| [Header](header.md) | existant à enrichir | `include/nativeui/header.hpp` | `src/header.cpp` |
-| [RichText](rich_text.md) | nouveau à implémenter | `include/nativeui/rich_text.hpp` | `src/rich_text.cpp` |
-| [Canvas](canvas.md) | existant à enrichir | `include/nativeui/canvas.hpp` | `src/canvas.cpp` |
-| [Knob](knob.md) | existant à enrichir | `include/nativeui/knob.hpp` | `src/knob.cpp` |
-| [Divider](divider.md) | nouveau à implémenter | `include/nativeui/divider.hpp` | `src/divider.cpp` |
+| [Label](label.md) | existing — extraction required | `include/nativeui/label.hpp` | `src/label.cpp` |
+| [Header](header.md) | existing — enhancements required | `include/nativeui/header.hpp` | `src/header.cpp` |
+| [RichText](rich_text.md) | new — implementation required | `include/nativeui/rich_text.hpp` | `src/rich_text.cpp` |
+| [Canvas](canvas.md) | existing — enhancements required | `include/nativeui/canvas.hpp` | `src/canvas.cpp` |
+| [Knob](knob.md) | existing — enhancements required | `include/nativeui/knob.hpp` | `src/knob.cpp` |
+| [Divider](divider.md) | new — implementation required | `include/nativeui/divider.hpp` | `src/divider.cpp` |
 
 ### Actions
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Button](button.md) | existant à enrichir | `include/nativeui/button.hpp` | `src/button.cpp` |
-| [Link](link.md) | nouveau à implémenter | `include/nativeui/link.hpp` | `src/link.cpp` |
-| [PopupMenu](popup_menu.md) | existant à enrichir | `include/nativeui/popup_menu.hpp` | `src/popup_menu.cpp` |
-| [ContextMenu](context_menu.md) | nouveau à implémenter | `include/nativeui/context_menu.hpp` | `src/context_menu.cpp` |
-| [ToggleButton](toggle_button.md) | nouveau à implémenter | `include/nativeui/toggle_button.hpp` | `src/toggle_button.cpp` |
-| [ToggleGroup](toggle_group.md) | nouveau à implémenter | `include/nativeui/toggle_group.hpp` | `src/toggle_group.cpp` |
-| [SegmentedControl<T>](segmented_control.md) | nouveau à implémenter | `include/nativeui/segmented_control.hpp` | `src/segmented_control.cpp` |
-| [Toolbar](toolbar.md) | nouveau à implémenter | `include/nativeui/toolbar.hpp` | `src/toolbar.cpp` |
+| [Button](button.md) | existing — enhancements required | `include/nativeui/button.hpp` | `src/button.cpp` |
+| [Link](link.md) | new — implementation required | `include/nativeui/link.hpp` | `src/link.cpp` |
+| [PopupMenu](popup_menu.md) | existing — enhancements required | `include/nativeui/popup_menu.hpp` | `src/popup_menu.cpp` |
+| [ContextMenu](context_menu.md) | new — implementation required | `include/nativeui/context_menu.hpp` | `src/context_menu.cpp` |
+| [ToggleButton](toggle_button.md) | new — implementation required | `include/nativeui/toggle_button.hpp` | `src/toggle_button.cpp` |
+| [ToggleGroup](toggle_group.md) | new — implementation required | `include/nativeui/toggle_group.hpp` | `src/toggle_group.cpp` |
+| [SegmentedControl<T>](segmented_control.md) | new — implementation required | `include/nativeui/segmented_control.hpp` | `src/segmented_control.cpp` |
+| [Toolbar](toolbar.md) | new — implementation required | `include/nativeui/toolbar.hpp` | `src/toolbar.cpp` |
 
-### Choix
+### Selection controls
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Checkbox](checkbox.md) | existant à extraire | `include/nativeui/checkbox.hpp` | `src/checkbox.cpp` |
-| [CheckboxGroup](checkbox_group.md) | nouveau à implémenter | `include/nativeui/checkbox_group.hpp` | `src/checkbox_group.cpp` |
-| [RadioButton<T> et RadioGroup<T>](radio_button.md) | existant à extraire | `include/nativeui/radio_button.hpp` | `src/radio_button.cpp` |
-| [Toggle](toggle.md) | existant à extraire | `include/nativeui/toggle.hpp` | `src/toggle.cpp` |
-| [ComboBox<T>](combo_box.md) | existant à extraire | `include/nativeui/combo_box.hpp` | `src/combo_box.cpp` |
-| [Slider](slider.md) | existant à extraire | `include/nativeui/slider.hpp` | `src/slider.cpp` |
-| [RangeSlider](range_slider.md) | existant à enrichir | `include/nativeui/range_slider.hpp` | `src/range_slider.cpp` |
-| [Stepper](stepper.md) | nouveau à implémenter | `include/nativeui/stepper.hpp` | `src/stepper.cpp` |
-| [Rating](rating.md) | nouveau à implémenter | `include/nativeui/rating.hpp` | `src/rating.cpp` |
+| [Checkbox](checkbox.md) | existing — extraction required | `include/nativeui/checkbox.hpp` | `src/checkbox.cpp` |
+| [CheckboxGroup](checkbox_group.md) | new — implementation required | `include/nativeui/checkbox_group.hpp` | `src/checkbox_group.cpp` |
+| [RadioButton<T> and RadioGroup<T>](radio_button.md) | existing — extraction required | `include/nativeui/radio_button.hpp` | `src/radio_button.cpp` |
+| [Toggle](toggle.md) | existing — extraction required | `include/nativeui/toggle.hpp` | `src/toggle.cpp` |
+| [ComboBox<T>](combo_box.md) | existing — extraction required | `include/nativeui/combo_box.hpp` | `src/combo_box.cpp` |
+| [Slider](slider.md) | existing — extraction required | `include/nativeui/slider.hpp` | `src/slider.cpp` |
+| [RangeSlider](range_slider.md) | existing — enhancements required | `include/nativeui/range_slider.hpp` | `src/range_slider.cpp` |
+| [Stepper](stepper.md) | new — implementation required | `include/nativeui/stepper.hpp` | `src/stepper.cpp` |
+| [Rating](rating.md) | new — implementation required | `include/nativeui/rating.hpp` | `src/rating.cpp` |
 
-### Saisie
+### Input
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [TextInput](text_input.md) | existant à enrichir | `include/nativeui/text_input.hpp` | `src/text_input.cpp` |
-| [TextArea](text_area.md) | existant à enrichir | `include/nativeui/text_area.hpp` | `src/text_area.cpp` |
-| [NumberInput](number_input.md) | nouveau à implémenter | `include/nativeui/number_input.hpp` | `src/number_input.cpp` |
-| [SearchField](search_field.md) | nouveau à implémenter | `include/nativeui/search_field.hpp` | `src/search_field.cpp` |
-| [EditableComboBox](editable_combo_box.md) | nouveau à implémenter | `include/nativeui/editable_combo_box.hpp` | `src/editable_combo_box.cpp` |
-| [Autocomplete](autocomplete.md) | nouveau à implémenter | `include/nativeui/autocomplete.hpp` | `src/autocomplete.cpp` |
-| [TokenField](token_field.md) | nouveau à implémenter | `include/nativeui/token_field.hpp` | `src/token_field.cpp` |
-| [EditableText](editable_text.md) | nouveau à implémenter | `include/nativeui/editable_text.hpp` | `src/editable_text.cpp` |
-| [FindBar](find_bar.md) | nouveau à implémenter | `include/nativeui/find_bar.hpp` | `src/find_bar.cpp` |
+| [TextInput](text_input.md) | existing — enhancements required | `include/nativeui/text_input.hpp` | `src/text_input.cpp` |
+| [TextArea](text_area.md) | existing — enhancements required | `include/nativeui/text_area.hpp` | `src/text_area.cpp` |
+| [NumberInput](number_input.md) | new — implementation required | `include/nativeui/number_input.hpp` | `src/number_input.cpp` |
+| [SearchField](search_field.md) | new — implementation required | `include/nativeui/search_field.hpp` | `src/search_field.cpp` |
+| [EditableComboBox](editable_combo_box.md) | new — implementation required | `include/nativeui/editable_combo_box.hpp` | `src/editable_combo_box.cpp` |
+| [Autocomplete](autocomplete.md) | new — implementation required | `include/nativeui/autocomplete.hpp` | `src/autocomplete.cpp` |
+| [TokenField](token_field.md) | new — implementation required | `include/nativeui/token_field.hpp` | `src/token_field.cpp` |
+| [EditableText](editable_text.md) | new — implementation required | `include/nativeui/editable_text.hpp` | `src/editable_text.cpp` |
+| [FindBar](find_bar.md) | new — implementation required | `include/nativeui/find_bar.hpp` | `src/find_bar.cpp` |
 
-### Dates et couleurs
+### Dates and colors
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Calendar](calendar.md) | nouveau à implémenter | `include/nativeui/calendar.hpp` | `src/calendar.cpp` |
-| [DateInput](date_input.md) | nouveau à implémenter | `include/nativeui/date_input.hpp` | `src/date_input.cpp` |
-| [TimeInput](time_input.md) | nouveau à implémenter | `include/nativeui/time_input.hpp` | `src/time_input.cpp` |
-| [ColorPicker](color_picker.md) | nouveau à implémenter | `include/nativeui/color_picker.hpp` | `src/color_picker.cpp` |
-| [ColorWell](color_well.md) | nouveau à implémenter | `include/nativeui/color_well.hpp` | `src/color_well.cpp` |
+| [Calendar](calendar.md) | new — implementation required | `include/nativeui/calendar.hpp` | `src/calendar.cpp` |
+| [DateInput](date_input.md) | new — implementation required | `include/nativeui/date_input.hpp` | `src/date_input.cpp` |
+| [TimeInput](time_input.md) | new — implementation required | `include/nativeui/time_input.hpp` | `src/time_input.cpp` |
+| [ColorPicker](color_picker.md) | new — implementation required | `include/nativeui/color_picker.hpp` | `src/color_picker.cpp` |
+| [ColorWell](color_well.md) | new — implementation required | `include/nativeui/color_well.hpp` | `src/color_well.cpp` |
 
-### Collections et navigation
+### Collections and navigation
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [ListView<Key>](list_view.md) | existant à enrichir | `include/nativeui/list_view.hpp` | `src/list_view.cpp` |
-| [TableView<Key>](table_view.md) | nouveau à implémenter | `include/nativeui/table_view.hpp` | `src/table_view.cpp` |
-| [TreeView<Key>](tree_view.md) | nouveau à implémenter | `include/nativeui/tree_view.hpp` | `src/tree_view.cpp` |
-| [OutlineView<Key>](outline_view.md) | nouveau à implémenter | `include/nativeui/outline_view.hpp` | `src/outline_view.cpp` |
-| [OutlineTableView<Key>](outline_table_view.md) | nouveau à implémenter | `include/nativeui/outline_table_view.hpp` | `src/outline_table_view.cpp` |
-| [GridView<Key>](grid_view.md) | nouveau à implémenter | `include/nativeui/grid_view.hpp` | `src/grid_view.cpp` |
-| [Tabs<T>](tabs.md) | existant à extraire | `include/nativeui/tabs.hpp` | `src/tabs.cpp` |
-| [Sidebar<Key>](sidebar.md) | nouveau à implémenter | `include/nativeui/sidebar.hpp` | `src/sidebar.cpp` |
-| [Breadcrumbs](breadcrumbs.md) | nouveau à implémenter | `include/nativeui/breadcrumbs.hpp` | `src/breadcrumbs.cpp` |
-| [HistoryButton](history_button.md) | nouveau à implémenter | `include/nativeui/history_button.hpp` | `src/history_button.cpp` |
+| [ListView<Key>](list_view.md) | existing — enhancements required | `include/nativeui/list_view.hpp` | `src/list_view.cpp` |
+| [TableView<Key>](table_view.md) | new — implementation required | `include/nativeui/table_view.hpp` | `src/table_view.cpp` |
+| [TreeView<Key>](tree_view.md) | new — implementation required | `include/nativeui/tree_view.hpp` | `src/tree_view.cpp` |
+| [OutlineView<Key>](outline_view.md) | new — implementation required | `include/nativeui/outline_view.hpp` | `src/outline_view.cpp` |
+| [OutlineTableView<Key>](outline_table_view.md) | new — implementation required | `include/nativeui/outline_table_view.hpp` | `src/outline_table_view.cpp` |
+| [GridView<Key>](grid_view.md) | new — implementation required | `include/nativeui/grid_view.hpp` | `src/grid_view.cpp` |
+| [Tabs<T>](tabs.md) | existing — extraction required | `include/nativeui/tabs.hpp` | `src/tabs.cpp` |
+| [Sidebar<Key>](sidebar.md) | new — implementation required | `include/nativeui/sidebar.hpp` | `src/sidebar.cpp` |
+| [Breadcrumbs](breadcrumbs.md) | new — implementation required | `include/nativeui/breadcrumbs.hpp` | `src/breadcrumbs.cpp` |
+| [HistoryButton](history_button.md) | new — implementation required | `include/nativeui/history_button.hpp` | `src/history_button.cpp` |
 
-### Conteneurs
+### Containers
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Row](row.md) | existant à extraire | `include/nativeui/row.hpp` | `src/row.cpp` |
-| [Column](column.md) | existant à extraire | `include/nativeui/column.hpp` | `src/column.cpp` |
-| [Grid](grid.md) | existant à enrichir | `include/nativeui/grid.hpp` | `src/grid.cpp` |
-| [Scroll](scroll.md) | existant à extraire | `include/nativeui/scroll.hpp` | `src/scroll.cpp` |
-| [ScrollView](scroll_view.md) | existant à extraire | `include/nativeui/scroll_view.hpp` | `src/scroll_view.cpp` |
-| [Clip](clip.md) | existant à extraire | `include/nativeui/clip.hpp` | `src/clip.cpp` |
-| [Flex](flex.md) | existant à extraire | `include/nativeui/flex.hpp` | `src/flex.cpp` |
-| [Spacer](spacer.md) | existant à extraire | `include/nativeui/spacer.hpp` | `src/spacer.cpp` |
-| [Stack](stack.md) | existant à extraire | `include/nativeui/stack.hpp` | `src/stack.cpp` |
-| [Padding](padding.md) | existant à extraire | `include/nativeui/padding.hpp` | `src/padding.cpp` |
-| [SplitView](split_view.md) | nouveau à implémenter | `include/nativeui/split_view.hpp` | `src/split_view.cpp` |
-| [Collapsible](collapsible.md) | nouveau à implémenter | `include/nativeui/collapsible.hpp` | `src/collapsible.cpp` |
-| [Accordion](accordion.md) | nouveau à implémenter | `include/nativeui/accordion.hpp` | `src/accordion.cpp` |
-| [Form](form.md) | nouveau à implémenter | `include/nativeui/form.hpp` | `src/form.cpp` |
-| [Field](field.md) | nouveau à implémenter | `include/nativeui/field.hpp` | `src/field.cpp` |
-| [Fieldset](fieldset.md) | nouveau à implémenter | `include/nativeui/fieldset.hpp` | `src/fieldset.cpp` |
+| [Row](row.md) | existing — extraction required | `include/nativeui/row.hpp` | `src/row.cpp` |
+| [Column](column.md) | existing — extraction required | `include/nativeui/column.hpp` | `src/column.cpp` |
+| [Grid](grid.md) | existing — enhancements required | `include/nativeui/grid.hpp` | `src/grid.cpp` |
+| [Scroll](scroll.md) | existing — extraction required | `include/nativeui/scroll.hpp` | `src/scroll.cpp` |
+| [ScrollView](scroll_view.md) | existing — extraction required | `include/nativeui/scroll_view.hpp` | `src/scroll_view.cpp` |
+| [Clip](clip.md) | existing — extraction required | `include/nativeui/clip.hpp` | `src/clip.cpp` |
+| [Flex](flex.md) | existing — extraction required | `include/nativeui/flex.hpp` | `src/flex.cpp` |
+| [Spacer](spacer.md) | existing — extraction required | `include/nativeui/spacer.hpp` | `src/spacer.cpp` |
+| [Stack](stack.md) | existing — extraction required | `include/nativeui/stack.hpp` | `src/stack.cpp` |
+| [Padding](padding.md) | existing — extraction required | `include/nativeui/padding.hpp` | `src/padding.cpp` |
+| [SplitView](split_view.md) | new — implementation required | `include/nativeui/split_view.hpp` | `src/split_view.cpp` |
+| [Collapsible](collapsible.md) | new — implementation required | `include/nativeui/collapsible.hpp` | `src/collapsible.cpp` |
+| [Accordion](accordion.md) | new — implementation required | `include/nativeui/accordion.hpp` | `src/accordion.cpp` |
+| [Form](form.md) | new — implementation required | `include/nativeui/form.hpp` | `src/form.cpp` |
+| [Field](field.md) | new — implementation required | `include/nativeui/field.hpp` | `src/field.cpp` |
+| [Fieldset](fieldset.md) | new — implementation required | `include/nativeui/fieldset.hpp` | `src/fieldset.cpp` |
 
-### Dialogues et messages
+### Dialogs and messages
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Dialog](dialog.md) | existant à enrichir | `include/nativeui/dialog.hpp` | `src/dialog.cpp` |
-| [Popover](popover.md) | nouveau à implémenter | `include/nativeui/popover.hpp` | `src/popover.cpp` |
-| [Tooltip](tooltip.md) | existant à enrichir | `include/nativeui/tooltip.hpp` | `src/tooltip.cpp` |
-| [Toast](toast.md) | nouveau à implémenter | `include/nativeui/toast.hpp` | `src/toast.cpp` |
+| [Dialog](dialog.md) | existing — enhancements required | `include/nativeui/dialog.hpp` | `src/dialog.cpp` |
+| [Popover](popover.md) | new — implementation required | `include/nativeui/popover.hpp` | `src/popover.cpp` |
+| [Tooltip](tooltip.md) | existing — enhancements required | `include/nativeui/tooltip.hpp` | `src/tooltip.cpp` |
+| [Toast](toast.md) | new — implementation required | `include/nativeui/toast.hpp` | `src/toast.cpp` |
 
-### Indicateurs
+### Indicators
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [ProgressBar](progress_bar.md) | existant à enrichir | `include/nativeui/progress_bar.hpp` | `src/progress_bar.cpp` |
-| [Spinner](spinner.md) | nouveau à implémenter | `include/nativeui/spinner.hpp` | `src/spinner.cpp` |
-| [Meter](meter.md) | existant à enrichir | `include/nativeui/meter.hpp` | `src/meter.cpp` |
-| [Badge](badge.md) | nouveau à implémenter | `include/nativeui/badge.hpp` | `src/badge.cpp` |
+| [ProgressBar](progress_bar.md) | existing — enhancements required | `include/nativeui/progress_bar.hpp` | `src/progress_bar.cpp` |
+| [Spinner](spinner.md) | new — implementation required | `include/nativeui/spinner.hpp` | `src/spinner.cpp` |
+| [Meter](meter.md) | existing — enhancements required | `include/nativeui/meter.hpp` | `src/meter.cpp` |
+| [Badge](badge.md) | new — implementation required | `include/nativeui/badge.hpp` | `src/badge.cpp` |
 
-### Composition retenue
+### Retained composition
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [Visibility](visibility.md) | existant à enrichir | `include/nativeui/visibility.hpp` | `src/visibility.cpp` |
-| [Enabled](enabled.md) | existant à enrichir | `include/nativeui/enabled.hpp` | `src/enabled.cpp` |
-| [ReadOnly](read_only.md) | existant à enrichir | `include/nativeui/read_only.hpp` | `src/read_only.cpp` |
-| [If](if.md) | existant à extraire | `include/nativeui/if.hpp` | `src/if.cpp` |
-| [Switch<T>](switch.md) | existant à extraire | `include/nativeui/switch.hpp` | `src/switch.cpp` |
-| [ForEach<T>](for_each.md) | existant à extraire | `include/nativeui/for_each.hpp` | `src/for_each.cpp` |
-| [FocusScope](focus_scope.md) | existant à extraire | `include/nativeui/focus_scope.hpp` | `src/focus_scope.cpp` |
-| [CommandScope](command_scope.md) | existant à extraire | `include/nativeui/command_scope.hpp` | `src/command_scope.cpp` |
-| [StyleScope](style_scope.md) | existant à extraire | `include/nativeui/style_scope.hpp` | `src/style_scope.cpp` |
+| [Visibility](visibility.md) | existing — enhancements required | `include/nativeui/visibility.hpp` | `src/visibility.cpp` |
+| [Enabled](enabled.md) | existing — enhancements required | `include/nativeui/enabled.hpp` | `src/enabled.cpp` |
+| [ReadOnly](read_only.md) | existing — enhancements required | `include/nativeui/read_only.hpp` | `src/read_only.cpp` |
+| [If](if.md) | existing — extraction required | `include/nativeui/if.hpp` | `src/if.cpp` |
+| [Switch<T>](switch.md) | existing — extraction required | `include/nativeui/switch.hpp` | `src/switch.cpp` |
+| [ForEach<T>](for_each.md) | existing — extraction required | `include/nativeui/for_each.hpp` | `src/for_each.cpp` |
+| [FocusScope](focus_scope.md) | existing — extraction required | `include/nativeui/focus_scope.hpp` | `src/focus_scope.cpp` |
+| [CommandScope](command_scope.md) | existing — extraction required | `include/nativeui/command_scope.hpp` | `src/command_scope.cpp` |
+| [StyleScope](style_scope.md) | existing — extraction required | `include/nativeui/style_scope.hpp` | `src/style_scope.cpp` |
 
 ### Images
 
-| Composant | Statut | Header cible | Implémentation cible |
+| Component | Status | Target header | Target implementation |
 | --- | --- | --- | --- |
-| [ImageView](image_view.md) | nouveau à implémenter | `include/nativeui/image_view.hpp` | `src/image_view.cpp` |
-| [IconView](icon_view.md) | nouveau à implémenter | `include/nativeui/icon_view.hpp` | `src/icon_view.cpp` |
-| [Avatar](avatar.md) | nouveau à implémenter | `include/nativeui/avatar.hpp` | `src/avatar.cpp` |
+| [ImageView](image_view.md) | new — implementation required | `include/nativeui/image_view.hpp` | `src/image_view.cpp` |
+| [IconView](icon_view.md) | new — implementation required | `include/nativeui/icon_view.hpp` | `src/icon_view.cpp` |
+| [Avatar](avatar.md) | new — implementation required | `include/nativeui/avatar.hpp` | `src/avatar.cpp` |
 
-## 3. Correspondance exhaustive avec MyGo
+## 3. Complete MyGo mapping
 
-| Famille du catalogue MyGo | Spécification NativeUI |
+| MyGo catalog family | NativeUI specification |
 | --- | --- |
 | Button | [button](button.md) |
 | Link | [link](link.md) |
@@ -245,270 +247,255 @@ pas un cpp vide pour satisfaire artificiellement cette règle.
 | Icon | [icon_view](icon_view.md) |
 | Avatar | [avatar](avatar.md) |
 
-### Correspondances qui changent de nom
+### Mappings with different names
 
-- MyGo Switch → NativeUI **Toggle** ; `Switch<T>` demeure la composition
-  conditionnelle, et aucun alias `Switch = Toggle` n’est introduit.
-- MyGo Toggle → **ToggleButton** ; ToggleGroup est le groupe de boutons pressés.
-- MyGo Select → **ComboBox<T>** ; MyGo Combobox → **EditableComboBox**.
-- MyGo MenuButton → **PopupMenu** ; ContextMenu a un décorateur propre.
-- MyGo Text/Textf → **Label** ; TextLabel reste l’alias actuel. RichText
-  spécifie les spans et liens intégrés, en plus des 54 familles du catalogue.
-- MyGo Box/Column → **Column** ; Row/Spacer/Divider restent des primitives
-  identifiées, sans créer un composant Box redondant.
-- ImageView et IconView sont des widgets ; **Image** et **SvgIcon** sont
-  les ressources existantes. TreeView affiche une hiérarchie ; **Tree**
-  reste le runtime de composition.
-- Les bases sans apparence MyGo servent de références comportementales et de
-  personnalisation dans les pages ; elles ne deviennent pas 15 classes publiques
-  supplémentaires sans responsabilité autonome.
-- PrimaryButton est une variante de Button ; AlertDialog une variante de
-  Dialog ; SplitVertical une orientation de SplitView ; Back/ForwardButton
-  deux directions de HistoryButton. Items d’arbre, sections de Sidebar et
-  items d’Accordion restent dans le module du parent.
+- MyGo Switch → NativeUI **Toggle**; `Switch<T>` remains conditional composition,
+  and no `Switch = Toggle` alias is introduced.
+- MyGo Toggle → **ToggleButton**; ToggleGroup groups pressed buttons.
+- MyGo Select → **ComboBox<T>**; MyGo Combobox → **EditableComboBox**.
+- MyGo MenuButton → **PopupMenu**; ContextMenu has its own decorator.
+- MyGo Text/Textf → **Label**; TextLabel remains the existing alias. RichText
+  specifies spans and embedded links in addition to the catalog's 54 families.
+- MyGo Box/Column → **Column**; Row/Spacer/Divider remain named primitives,
+  without creating a redundant Box component.
+- ImageView and IconView are widgets; **Image** and **SvgIcon** are existing
+  resources. TreeView displays a hierarchy; **Tree** remains the composition runtime.
+- MyGo's unstyled bases provide behavioral and customization references in the
+  pages; they do not become 15 additional public classes without an independent responsibility.
+- PrimaryButton is a Button variant; AlertDialog is a Dialog variant;
+  SplitVertical is a SplitView orientation; Back/ForwardButton are two
+  HistoryButton directions. Tree items, Sidebar sections and Accordion items
+  stay in their parent's module.
 
-## 4. Architecture commune
+## 4. Shared architecture
 
-### Composition et état
+### Composition and state
 
-Les builders produisent un `ui::Spec`, normalement par `spec() &&`, et le Tree
-possède leurs composants retenus. Les contrôleurs existants, notamment Dialog,
-gardent leur API de contrôleur ; cette convention ne les transforme pas en
-builders. Les constructeurs/templates nécessaires à la composition C++ restent
-des adaptateurs, pas un moteur d’exécution par frame transplanté de MyGo.
+Builders produce a `ui::Spec`, normally through `spec() &&`, and Tree owns their
+retained components. Existing controllers, particularly Dialog, keep their
+controller API; this convention does not turn them into builders. Constructors
+and templates needed for C++ composition remain adapters, rather than a
+per-frame execution engine transplanted from MyGo.
 
-Les opérations de Tree, widgets et State appartiennent au thread UI/main.
-Un adaptateur audio ou hôte applique ses mises à jour après passage par son
-propre pont sûr entre threads. NativeUI ne reçoit ni IDs de paramètres, ni
-automatisation, ni gestes de formats audio. Les mises à jour externes sont
-reflétées sans action utilisateur synthétique ; une édition temporaire ne doit
-jamais réécrire une ancienne valeur après une mise à jour externe.
+Tree, widget and State operations belong to the UI/main thread. An audio or host
+adapter applies updates after passing them through its own safe bridge between
+threads. NativeUI receives no parameter IDs, automation or audio-format gestures.
+External updates are reflected without synthetic user actions; a temporary edit
+must never restore an old value after an external update.
 
-Les API existantes conservent leurs types numériques, notamment `float`.
-Les nouveaux contrôles numériques utilisent `double`, sauf conversion explicite
-vers une primitive existante. Le State source doit respecter la durée de vie
-documentée ; un Binding est un lien au modèle, pas une permission de conserver
-des pointeurs applicatifs périmés. Quand le constructeur convertit State en Binding, le control block reste lisible
-après destruction du State : valid() devient faux, get() donne la dernière
-valeur, set() est ignoré et observe() retourne une inscription inactive. Il
-n’existe pas de notification implicite de destruction ; toute nouvelle mutation
-vérifie valid() et ne publie pas de callback utilisateur si le modèle a disparu.
-Les véritables références empruntées des API historiques conservent leurs
-exigences de durée de vie, précisées dans leurs pages. Les abonnements, animations
-et overlays sont possédés par l’instance et libérés au démontage.
+Existing APIs retain their numeric types, particularly `float`. New numeric
+controls use `double`, except when explicitly converting to an existing primitive.
+The source State must satisfy its documented lifetime requirements; a Binding
+links to the model and does not authorize retaining stale application pointers.
+When a constructor converts State to Binding, the control block remains readable
+after State destruction: valid() becomes false, get() returns the last value,
+set() is ignored and observe() returns an inactive registration. There is no
+implicit destruction notification; every new mutation checks valid() and publishes
+no user callback if the model has disappeared. Actual borrowed references in
+historical APIs retain their lifetime requirements, as stated in their pages.
+Subscriptions, animations and overlays are instance-owned and released on unmount.
 
-### Input, focus et notifications
+### Input, focus and notifications
 
-Réutiliser le routage retenu, la capture de pointeur, les focus scopes,
-les commandes et les overlays du toolkit. Une interaction est annulée proprement
-quand son composant est retiré, caché ou désactivé. Tab traverse les widgets ;
-les groupes qui utilisent les flèches conservent une entrée de Tab cohérente.
-Le typeahead des collections utilise par défaut un repli ASCII sans casse ;
-les caractères UTF-8 non ASCII restent comparés exactement. Ce choix v1 est
-distinct du casefold Unicode MyGo, sans introduire de backend Unicode implicite.
-Le buffer et la navigation sont décrits par ListView puis réutilisés par ses
-consommateurs. Les règles locales de Space, Enter, Escape, molette et relâchement sont définies
-dans chaque page : l’extraction ne les uniformise pas silencieusement.
-Le Key actuel ne couvre pas PageUp/PageDown, les touches de fonction ou Menu ;
-Command couvre actuellement les commandes d’édition. Les besoins de Calendar,
-collections, FindBar, ContextMenu et Form exigent des ajouts explicitement cibles
-aux enums et aux traductions plateforme. Ajouter ces valeurs en fin d’enum,
-préserver les valeurs numériques historiques et tester les événements normalisés.
-InputType::ContextMenu existe déjà ; sa présence ne valide pas tous les raccourcis
-natifs. Submit/Cancel restent des commandes explicites, sans convertir
-automatiquement Enter de tous les éditeurs en validation du formulaire.
+Reuse the toolkit's retained routing, pointer capture, focus scopes, commands and
+overlays. An interaction is canceled cleanly when its component is removed,
+hidden or disabled. Tab traverses widgets; groups using arrow keys retain a
+consistent Tab entry point. Collection typeahead defaults to ASCII case-insensitive
+matching; non-ASCII UTF-8 characters continue to match exactly. This v1 choice
+differs from MyGo's Unicode case folding and introduces no implicit Unicode backend.
+ListView defines the buffer and navigation contract for its consumers to reuse.
+Each page defines its local Space, Enter, Escape, wheel and release rules;
+extraction does not silently standardize them.
 
-Un callback déjà commencé qui lève n’est pas automatiquement rejoué. Restaurer
-captures, transactions et indicateurs de dispatch avant propagation C++.
-Les callbacks susceptibles de détruire leur propriétaire terminent le travail
-sur le composant avant l’appel, ou revalident une identité sûre après l’appel.
-Les fermetures différées portent des identités/lifetimes sûrs ; un échec de
-queue n’autorise pas une destruction synchrone sans garantie de durée de vie. Destruction et libération
-des abonnements restent no-throw.
+The current Key does not cover PageUp/PageDown, function keys or Menu; Command
+currently covers editing commands. Calendar, collections, FindBar, ContextMenu
+and Form require additions explicitly described as targets to the enums and
+platform translations. Append these values to the enums, preserve historical
+numeric values and test normalized events. InputType::ContextMenu already exists;
+its presence does not validate every native shortcut. Submit/Cancel remain
+explicit commands; Enter in every editor is not automatically converted into
+form submission.
 
-### Layout, style et ressources
+A callback that has already started and throws is not automatically replayed.
+Restore captures, transactions and dispatch flags before propagating C++ exceptions.
+Callbacks that may destroy their owner finish component work before invocation,
+or revalidate a safe identity afterward. Deferred closures carry safe identities
+and lifetimes; a queue failure does not permit synchronous destruction without
+a lifetime guarantee. Destruction and subscription cleanup remain no-throw.
 
-La géométrie publique est logique ; la frontière plateforme applique le facteur
-de framebuffer. Hit-test et peinture utilisent les mêmes clips. Toute invalidation
-de métriques entraîne le layout nécessaire, tandis qu’un changement purement
-visuel n’impose pas la reconstruction du sous-arbre. Form et Field spécifient un futur hook optionnel de première ligne de base,
-absent de ChildMetrics et Component actuels. L’extraction des layouts existants
-ne présuppose pas ce hook. Les recettes de style
-sont typées et leurs états disabled/read-only/selected/focused restent distincts.
+### Layout, style and resources
 
-Les widgets dessinent avec Painter ; Skia reste son implémentation. Décodage
-d’image, parsing SVG, métriques préparées, shaders et ressources sont préparés
-hors paint quand leur coût ou leur allocation l’exige. Aucun widget ne dépend
-de Pugl, AppKit, Win32, Xlib, HTML ou du moteur de rendu MyGo.
+Public geometry uses logical coordinates; the platform boundary applies the
+framebuffer scale factor. Hit testing and painting use the same clips. Metric
+invalidation triggers the required layout, while a purely visual change does not
+require rebuilding the subtree. Form and Field specify a future optional
+first-baseline hook, absent from the current ChildMetrics and Component.
+Extracting existing layouts does not assume this hook. Style recipes are typed,
+and disabled/read-only/selected/focused states remain distinct.
 
-### Plateforme, menus et navigation
+Widgets draw through Painter; Skia remains its implementation. Image decoding,
+SVG parsing, prepared metrics, shaders and resources are prepared outside paint
+when their cost or allocation requires it. No widget depends on Pugl, AppKit,
+Win32, Xlib, HTML or the MyGo rendering engine.
 
-ContextMenu, PopupMenu et l’overflow de Toolbar utilisent le même modèle de
-menu et les overlays retenus. MyGo emploie des menus système ; cette cible
-choisit des menus dessinés par NativeUI, avec les mêmes fonctions utilisateur
-explicitement spécifiées et sans créer une nouvelle abstraction de fenêtre.
-Toast spécifie une extension additive `OverlayPlacement::ViewportBottomCenter`
-pour placer une pile à sa taille naturelle ; elle reste dans le service Overlay
-existant. Ce placement n’est pas disponible dans le snapshot étudié.
-Link réutilise DesktopServices pour ouvrir une URL ou un callback pour une
-action locale. HistoryButton reçoit disponibilité et action de l’application ;
-le Router MyGo, son routage URL et son cache de pages ne sont pas portés ici.
+### Platform, menus and navigation
 
-### Accessibilité et IME
+ContextMenu, PopupMenu and Toolbar overflow use the same menu model and retained
+overlays. MyGo uses system menus; this target chooses menus drawn by NativeUI,
+with the same explicitly specified user features and without introducing a new
+window abstraction. Toast specifies an additive
+`OverlayPlacement::ViewportBottomCenter` extension to position a stack at its
+natural size; it remains in the existing Overlay service. This placement is
+unavailable in the inspected snapshot. Link reuses DesktopServices to open a URL,
+or a callback for a local action. HistoryButton receives availability and actions
+from the application; MyGo's Router, URL routing and page cache are not ported here.
 
-Le contrat de référence est [accessibility.md](accessibility.md), avec
-[SemanticInfo](../include/nativeui/semantics.hpp) et le hook
-`Component::semantics()`. La présence du hook ou d’un rôle dans l’enum ne prouve
-pas que tous les widgets actuels publient déjà ces informations. Chaque page
-indique la sémantique cible et les actions réellement permises par l’état.
+### Accessibility and IME
 
-Les ponts natifs macOS/Windows/Linux restent une dépendance de T068 différée
-dans le [roadmap](../ROADMAP.md). Aucun exemple n’atteste une conformité
-VoiceOver, UI Automation ou AT-SPI. Un nouveau rôle absent de l’enum v1
-utilise une composition des rôles existants ou Custom/Group ; toute extension
-du contrat fermé exige sa propre décision d’architecture, pas un enum supposé.
+The reference contract is [accessibility.md](accessibility.md), with
+[SemanticInfo](../include/nativeui/semantics.hpp) and the `Component::semantics()`
+hook. The presence of a hook or an enum role does not prove that every existing
+widget already publishes this information. Each page states its target semantics
+and the actions actually allowed by its state.
 
-Les widgets texte peuvent posséder des chemins de composition testables en
-headless. Le transport natif complet de préédition IME et des rectangles de
-candidats reste distinct du texte Unicode validé, conformément à DESIGN §17.4.
-Les nouveaux widgets consomment ce modèle commun au lieu d’inventer chacun
-un pont IME. Les relations label/description/erreur et les annonces de statut
-qui dépassent SemanticInfo actuel sont des extensions explicites.
+Native macOS/Windows/Linux bridges remain a deferred T068 dependency in the
+[roadmap](../ROADMAP.md). No example establishes VoiceOver, UI Automation or
+AT-SPI conformance. A new role absent from the v1 enum uses a composition of
+existing roles or Custom/Group; any extension to the closed contract requires
+its own architecture decision rather than an assumed enum value.
+
+Text widgets may have composition paths testable headlessly. Complete native
+transport of IME preedit and candidate rectangles remains distinct from committed
+Unicode text, in accordance with DESIGN §17.4. New widgets consume this shared
+model instead of inventing separate IME bridges. Label/description/error
+relationships and status announcements beyond the current SemanticInfo are
+explicit extensions.
 
 <a id="modeles-partages"></a>
-## 5. Modèles partagés
+<a id="shared-models"></a>
 
-Les modèles suivants sont des API cibles lorsqu’ils ne sont pas présents dans
-le snapshot. Les signatures complètes et règles de validation appartiennent
-aux pages qui les définissent ; les composants consommateurs réutilisent ces
-types plutôt que créer des variantes incompatibles.
+## 5. Shared models
 
-| Modèle | Définition et consommateurs |
+The following models are target APIs when absent from the snapshot. Complete
+signatures and validation rules belong to their defining pages; consuming
+components reuse these types instead of creating incompatible variants.
+
+| Model | Definition and consumers |
 | --- | --- |
-| `SelectionSnapshot<Key>`, `Selection<Key>`, `CollectionItem<Key>` | [ListView](list_view.md) définit sélection ordonnée, clé active, ancre et métadonnées ; TableView, GridView et outlines les réutilisent. |
-| `TreeNode<Key>` et état d’expansion | [TreeView](tree_view.md) définit snapshot hiérarchique, clés/parent et branches ; [OutlineView](outline_view.md) et Sidebar consomment cette identité. |
-| `TableColumn`, `TableLayout`, `SortOrder` | [TableView](table_view.md) définit IDs stables, géométrie/persistance et demande de tri ; [OutlineTableView](outline_table_view.md) réutilise ces types. |
-| `RadioGroup<T>` | [RadioButton](radio_button.md) garde le contrôleur de sélection partagé actuel ; il ne devient pas un widget autonome artificiel. |
-| `ScrollState`, `VirtualListState<Key>` | [Scroll](scroll.md), [ScrollView](scroll_view.md) et [ListView](list_view.md) préservent les contrôleurs actuels et définissent leurs enrichissements séparément. |
-| `PopupMenuItem` | [PopupMenu](popup_menu.md) garde actions/séparateurs existants et spécifie les extensions de menu ; ContextMenu et Toolbar les réutilisent. |
-| `OverlayHandle`, `DialogSpec`, `DialogResult` | [Dialog](dialog.md), [Popover](popover.md), [Tooltip](tooltip.md), [Toast](toast.md) conservent un propriétaire Overlay unique par UI. |
-| Date et heure civiles | [Calendar](calendar.md)/DateInput utilisent `std::chrono::sys_days`, absence via optional ; [TimeInput](time_input.md) utilise des secondes depuis minuit, sans fuseau horaire. |
-| Couleur et image | ColorPicker/ColorWell consomment `ui::Color` en sRGB ; ImageView/IconView partagent les handles immuables Image/SvgIcon existants. |
+| `SelectionSnapshot<Key>`, `Selection<Key>`, `CollectionItem<Key>` | [ListView](list_view.md) defines ordered selection, the active key, anchor and metadata; TableView, GridView and outlines reuse them. |
+| `TreeNode<Key>` and expansion state | [TreeView](tree_view.md) defines a hierarchical snapshot, keys/parent and branches; [OutlineView](outline_view.md) and Sidebar consume this identity. |
+| `TableColumn`, `TableLayout`, `SortOrder` | [TableView](table_view.md) defines stable IDs, geometry/persistence and sort requests; [OutlineTableView](outline_table_view.md) reuses these types. |
+| `RadioGroup<T>` | [RadioButton](radio_button.md) keeps the existing shared selection controller; it does not become an artificial standalone widget. |
+| `ScrollState`, `VirtualListState<Key>` | [Scroll](scroll.md), [ScrollView](scroll_view.md) and [ListView](list_view.md) preserve existing controllers and define their enhancements separately. |
+| `PopupMenuItem` | [PopupMenu](popup_menu.md) keeps existing actions/separators and specifies menu extensions; ContextMenu and Toolbar reuse them. |
+| `OverlayHandle`, `DialogSpec`, `DialogResult` | [Dialog](dialog.md), [Popover](popover.md), [Tooltip](tooltip.md) and [Toast](toast.md) retain one Overlay owner per UI. |
+| Civil date and time | [Calendar](calendar.md)/DateInput use `std::chrono::sys_days`, with absence represented by optional; [TimeInput](time_input.md) uses seconds since midnight without a time zone. |
+| Color and image | ColorPicker/ColorWell consume `ui::Color` in sRGB; ImageView/IconView share the existing immutable Image/SvgIcon handles. |
 
-Les collections utilisent des clés copiables et comparables par égalité ; elles
-n’imposent pas que les clés soient des entiers ou hashables. Le noyau non
-template reçoit des identités opaques/lifetime-safe et des adaptateurs de
-comparaison, construction et notification. Une clé retirée ne réactive pas
-une ancienne identité sémantique si elle est réinsérée. Les index de tokens
-séparent coût de préparation et coût de scroll : avec clés encodables, la
-préparation peut utiliser un index trié O(N log N) ; le fallback de clés
-comparables seulement par égalité peut coûter O(N²). Les copies de métadonnées
-restent O(N), et le scroll ne refait pas cette résolution de clés.
+Collections use copyable, equality-comparable keys; they do not require integer
+or hashable keys. The non-template kernel receives opaque identities with safe
+lifetimes and comparison, construction and notification adapters. Reinserting a
+removed key does not reactivate its old semantic identity. Token indexes separate
+preparation cost from scrolling cost: encodable keys can use a sorted O(N log N)
+preparation index; the fallback for equality-only keys may cost O(N²). Metadata
+copies remain O(N), and scrolling does not repeat key resolution.
 
-La virtualisation doit construire les lignes visibles et l’overscan, tout en
-exposant un dataset logique cohérent. Les snapshots de métadonnées O(N) sont
-partagés pendant les simples changements de scroll/focus ; les lectures
-sémantiques ne déclenchent ni row factory, ni mutation du Tree. Hauteurs
-variables, multisélection et hiérarchies doivent étendre ce contrat explicitement.
+Virtualization must construct visible rows and overscan while exposing a
+consistent logical dataset. O(N) metadata snapshots are shared during simple
+scroll/focus changes; semantic reads trigger neither the row factory nor Tree
+mutation. Variable heights, multiple selection and hierarchies must explicitly
+extend this contract.
 
-## 6. Un header et un cpp par composant
+## 6. One header and one cpp per component
 
-Pour chaque nom du catalogue :
+For every catalog name:
 
 ```text
-docs/<composant>.md
-include/nativeui/<composant>.hpp
-src/<composant>.cpp
+docs/<component>.md
+include/nativeui/<component>.hpp
+src/<component>.cpp
 ```
 
-Le `.hpp` contient les déclarations publiques, les types de configuration
-nécessaires, et uniquement les adaptations templates indispensables.
-Le `.cpp` contient un véritable noyau non template : comportement retenu,
-mesure/layout, interactions, résolution de présentation et peinture.
-L’effacement de type conserve les contraintes et capacités des clés utilisateurs ;
-des instanciations explicites sur trois types connus ne satisfont pas ce contrat.
+The `.hpp` contains public declarations, required configuration types and only
+essential template adapters. The `.cpp` contains a real non-template kernel:
+retained behavior, measurement/layout, interactions, presentation resolution and
+painting. Type erasure preserves user-key constraints and capabilities; explicit
+instantiations for three known types do not satisfy this contract.
 
-Les variantes (bouton accent, slider stepped, alerte, orientations, bouton
-précédent/suivant), items/sections et classes de runtime internes restent dans
-le couple du parent. Les contrôleurs partagés et types de données peuvent avoir
-leurs propres modules utiles, mais ne sont pas comptés comme widgets autonomes.
-Un cpp vide et une façade qui laisse toute l’implémentation dans un `.inc`
-ne valident pas la séparation.
+Variants (accent button, stepped slider, alert, orientations, back/forward button),
+items/sections and internal runtime classes stay in their parent's file pair.
+Shared controllers and data types may have useful modules of their own, but are
+not counted as standalone widgets. An empty cpp or a facade leaving all
+implementation in an `.inc` does not satisfy the separation requirement.
 
-Préserver les includes historiques : `widgets.hpp`, `layout.hpp`,
-`combo_popup.hpp`, `dynamic.hpp`, `component_state.hpp`, `nativeui.hpp`,
-ainsi que les headers de services et styles déjà publics. Ils deviennent
-des agrégateurs/compatibilité au fur et à mesure des extractions ; leurs
-includes transitifs actuellement utilisés sont conservés et testés.
-Préserver aussi les classes Component visibles publiquement, aliases,
-overloads State/Binding, guides de déduction, contraintes templates,
-qualifications `&`/`&&`, types d’options et styles.
+Preserve historical includes: `widgets.hpp`, `layout.hpp`, `combo_popup.hpp`,
+`dynamic.hpp`, `component_state.hpp`, `nativeui.hpp`, and already-public service
+and style headers. They become aggregators/compatibility entry points as
+extraction progresses; currently used transitive includes are preserved and tested.
+Also preserve publicly visible Component classes, aliases, State/Binding overloads,
+deduction guides, template constraints, `&`/`&&` qualifications, option types and styles.
 
-Les `.cpp` futurs sont inscrits dans `NativeUI::Core`. Leur extraction ne
-modifie ni le pin Skia/Pugl, ni les bridges macOS propres aux consommateurs,
-ni le modèle installed-package. Le remplacement d’un `.inc` n’intervient
-qu’après la migration de son contenu ; aucune seconde définition active
-du même runtime n’est conservée.
+Future `.cpp` files are registered in `NativeUI::Core`. Extraction changes neither
+the Skia/Pugl pins, consumer-specific macOS bridges nor the installed-package
+model. An `.inc` is replaced only after migrating its contents; no second active
+definition of the same runtime is retained.
 
-## 7. Dépendances et ordre de réalisation
+## 7. Dependencies and implementation order
 
-L’ordre ci-dessous organise les chantiers ; chaque composant conserve ses
-critères propres et les dépendances explicites de sa page.
+The following order organizes the work; each component retains its own acceptance
+criteria and its page's explicit dependencies.
 
-1. **Extraction compatible et exemples** : widgets/layout/wrappers existants,
-   headers autonomes, linkage Core et includes collectifs ; tests de baseline
-   avant tout changement comportemental.
-2. **Petits contrôles et conteneurs** : ToggleButton/ToggleGroup, SegmentedControl,
+1. **Compatible extraction and examples**: existing widgets/layouts/wrappers,
+   standalone headers, Core linkage and collective includes; baseline tests
+   before any behavioral change.
+2. **Small controls and containers**: ToggleButton/ToggleGroup, SegmentedControl,
    CheckboxGroup, Stepper/NumberInput, SearchField, Divider, Badge,
-   Collapsible/Accordion, SplitView et Form/Field/Fieldset.
-3. **Overlays et saisie composée** : modèle de menu enrichi, ContextMenu,
-   Popover, EditableComboBox/Autocomplete, EditableText, TokenField,
-   FindBar et Toast. Ces widgets réutilisent focus/input/text/overlay.
-4. **Collections** : modèle commun de sélection et dataset, enrichissement
-   ListView, TableView et TreeView, puis OutlineView/OutlineTableView,
-   GridView et Sidebar ; mesurer les coûts de scroll et publication des snapshots.
-5. **Navigation et présentation** : Breadcrumbs/HistoryButton, Toolbar et
-   overflow, ImageView/IconView/Avatar, RichText, progression indéterminée,
-   Spinner et seuils de Meter.
-6. **Dates et couleurs** : Calendar → DateInput ; TimeInput ; ColorPicker →
-   ColorWell. Aucun service de calendrier, timezone ou gestion système de
-   couleur implicite n’est introduit.
+   Collapsible/Accordion, SplitView and Form/Field/Fieldset.
+3. **Overlays and composed input**: enhanced menu model, ContextMenu, Popover,
+   EditableComboBox/Autocomplete, EditableText, TokenField, FindBar and Toast.
+   These widgets reuse focus/input/text/overlay.
+4. **Collections**: shared selection and dataset model, ListView enhancements,
+   TableView and TreeView, then OutlineView/OutlineTableView, GridView and Sidebar;
+   measure scrolling and snapshot-publication costs.
+5. **Navigation and presentation**: Breadcrumbs/HistoryButton, Toolbar and overflow,
+   ImageView/IconView/Avatar, RichText, indeterminate progress, Spinner and Meter thresholds.
+6. **Dates and colors**: Calendar → DateInput; TimeInput; ColorPicker → ColorWell.
+   No implicit calendar, time-zone or system color-management service is introduced.
 
-Le graphe concret comporte notamment TextInput → NumberInput/SearchField/
-EditableComboBox ; EditableComboBox → Autocomplete/TokenField ; ScrollView →
-ListView → TableView/GridView ; TreeView + ListView → OutlineView ;
-OutlineView + TableView → OutlineTableView ; PopupMenu + Overlay →
-ContextMenu/Toolbar ; Form + Field + Fieldset partagent une seule mesure
-des labels ; ressources Image/SvgIcon → ImageView/IconView/Avatar.
+The concrete graph includes TextInput → NumberInput/SearchField/EditableComboBox;
+EditableComboBox → Autocomplete/TokenField; ScrollView → ListView → TableView/GridView;
+TreeView + ListView → OutlineView; OutlineView + TableView → OutlineTableView;
+PopupMenu + Overlay → ContextMenu/Toolbar; Form + Field + Fieldset share one label
+measurement; Image/SvgIcon resources → ImageView/IconView/Avatar.
 
-## 8. Validation et livraison future
+## 8. Validation and future delivery
 
 ### Documentation
 
-Le contrôle documentaire vérifie la présence des 83 pages et onze rubriques,
-la couverture exacte des 54 familles MyGo, les liens locaux, les noms/API
-entre pages, et un couple header/cpp cible distinct par composant. Il contrôle
-que le diff du dépôt ne contient que les documents demandés. Les API futures
-sont relues comme propositions ; elles ne sont pas annoncées compilées ou
-testées sans implémentation.
+Documentation checks verify all 83 pages and eleven sections, exact coverage of
+the 54 MyGo families, local links, consistent names/APIs across pages and one
+distinct target header/cpp pair per component. For the initial documentation-only
+phase, they also verify that the repository diff contains only the requested documents.
+Future APIs are reviewed as proposals; they are not described as compiled or
+tested without implementation.
 
-### Implémentation de chaque composant
+### Implementation of each component
 
-- Compiler son header seul et à travers les includes historiques ; tester
-  aussi State/Binding, clés personnalisées et plusieurs translation units.
-- Ajouter l’exemple public `examples/features/<composant>.cpp` et son
-  `nativeui_example_<composant> --self-test`, utilisable sans affichage quand
-  le composant le permet. Les cpp et exemples sont des livrables futurs.
-- Tester pointeur/clavier, disabled/read-only, updates externes, limites,
-  retrait en cours d’interaction et précision du hit-test/layout.
-- Tester failure injection, récupération après exception/échec de scheduling,
-  destruction différée et scénario détruire A/continuer B dans deux UI.
-- Vérifier métriques/headless/goldens spécifiques, animations à l’arrêt au
-  repos et allocation/complexité des collections lorsque pertinent.
-- Appliquer CODE_REVIEW, tests/sanitizers/platform/package requis par le ticket,
-  avec les builds locaux exécutés en série et zéro avertissement non approuvé.
+- Compile its header alone and through historical includes; also test State/Binding,
+  custom keys and multiple translation units.
+- Add the public example `examples/features/<component>.cpp` and its
+  `nativeui_example_<component> --self-test`, usable without a display when the
+  component allows it. At the specification snapshot, cpp files and examples are future deliverables.
+- Test pointer/keyboard interactions, disabled/read-only states, external updates,
+  boundaries, removal during interaction and hit-test/layout accuracy.
+- Test failure injection, recovery after exceptions/scheduling failures, deferred
+  destruction and destroying A while continuing B in two UIs.
+- Verify component-specific metrics/headless/goldens, animations idle at rest and
+  collection allocation/complexity where applicable.
+- Apply CODE_REVIEW and the ticket's required tests/sanitizers/platform/package checks,
+  with local builds executed serially and zero unapproved warnings.
 
-Une spécification écrite n’est pas un statut Ready/Done automatique. Les issues,
-décisions d’architecture nécessaires, preuves d’exécution et gates de merge
-continuent de suivre [AGENTS.md](../AGENTS.md). Ces documents n’altèrent pas
-les dépendances officielles ni le contrat d’accessibilité v1 par simple rédaction.
+A written specification does not automatically confer Ready/Done status. Issues,
+required architecture decisions, execution evidence and merge gates continue to
+follow [AGENTS.md](../AGENTS.md). These documents do not change official dependencies
+or the v1 accessibility contract merely by describing them.

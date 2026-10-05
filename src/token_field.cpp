@@ -307,7 +307,7 @@ public:
         state->remove(index, serial, permission);
       }
     };
-    return {Spec{[action, name = "Retirer " + label_, style = style_.remove] {
+    return {Spec{[action, name = "Remove " + label_, style = style_.remove] {
                    return std::make_unique<detail::InputAction>(
                        name, "×", style, action, false, false);
                  },
@@ -575,7 +575,7 @@ public:
     info.role = SemanticRole::Group;
     info.name = label_;
     info.read_only = effective_read_only() || !state_->source.valid();
-    info.description = std::to_string(state_->seen.size()) + " éléments";
+    info.description = std::to_string(state_->seen.size()) + " items";
     return info;
   }
   void paint(PaintContext &context) const override {

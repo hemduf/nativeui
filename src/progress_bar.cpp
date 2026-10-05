@@ -199,7 +199,7 @@ SemanticInfo BoundedDisplayComponent::semantics() const {
   info.role = meter_ ? SemanticRole::Meter : SemanticRole::ProgressBar;
   const float effective = domain_.effective(state_.get());
   if (indeterminate_)
-    info.description = "progression indéterminée";
+    info.description = "indeterminate progress";
   else {
     info.numeric_value = effective;
     info.value_range =

@@ -1,114 +1,114 @@
 # Label
 
-**Statut : existant à extraire.**
+**Status: existing — extraction required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Afficher une chaîne immuable, sans édition ni action. Les usages principaux sont les libellés de contrôles et les textes de statut courts.
+Display an immutable string, without editing or actions. The main uses are control labels and short status text.
 
-Présent dans [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc) : `Label(std::string)`, alias `TextLabel`, et `LabelComponent` public dans [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc). Mesure par `TextService` ; peinture centrée verticalement avec alignement horizontal.
+Available in [widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc): `Label(std::string)`, alias `TextLabel`, and the public `LabelComponent` in [widgets_basic.inc](../include/nativeui/detail/widgets_basic.inc). Measurement uses `TextService`; painting is vertically centered with horizontal alignment.
 
-MyGo : `ui/widgets.go`, `Text` et `Textf`, même version de référence. MyGo enveloppe automatiquement les lignes selon la largeur ; le Label actuel mesure une chaîne sans layout de paragraphe. [RichText](rich_text.md) porte le nouveau contrat de paragraphe.
+MyGo: `ui/widgets.go`, `Text` and `Textf`, at the same reference version. MyGo automatically wraps lines to the available width; the current Label measures a string without paragraph layout. [RichText](rich_text.md) defines the new paragraph contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API existante à conserver exactement : constructeur par valeur ; fluent rvalue `size(float)`, `color(Color)`, `align(TextAlign)`, `weight(FontWeight)`, `bold(bool = true)`, `slant(FontSlant)`, `italic(bool = true)`, `family(std::string)`, `fallback_families(std::vector<std::string>)`, `style(TextStyle)` et `spec() &&`.
+Existing API to preserve exactly: constructor by value; rvalue fluent methods `size(float)`, `color(Color)`, `align(TextAlign)`, `weight(FontWeight)`, `bold(bool = true)`, `slant(FontSlant)`, `italic(bool = true)`, `family(std::string)`, `fallback_families(std::vector<std::string>)`, `style(TextStyle)`, and `spec() &&`.
 
-Exemple existant vérifié :
+Verified example using the existing API:
 
 ```cpp
-auto caption = ui::Label{"Niveau"}
+auto caption = ui::Label{"Level"}
     .size(14.0f)
     .bold()
     .align(ui::TextAlign::Left)
     .spec();
 ```
 
-Aucun Binding de texte ajouté dans cette extraction. Un texte réactif est reconstruit par la composition applicative existante ; ne pas inventer un observateur implicite sur une chaîne copiée.
+No text Binding is added in this extraction. Reactive text is rebuilt through existing application composition; do not invent an implicit observer on a copied string.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Le builder possède la chaîne et le `TextStyle`, dont famille et fallbacks. Le composant reçoit leurs valeurs par déplacement ; aucune `string_view` applicative conservée.
+The builder owns the string and `TextStyle`, including the family and fallbacks. Their values are moved into the component; no application `string_view` is retained.
 
-Le texte est immuable après montage. Aucun callback de changement ; aucune écriture dans un modèle applicatif.
+Text is immutable after mounting. There is no change callback and no write to an application model.
 
-L’identité appartient au nœud retenu. Une reconstruction de contenu doit respecter le mécanisme de réconciliation existant et ne doit pas changer la clé du parent par défaut.
+Identity belongs to the retained node. Rebuilding content must follow the existing reconciliation mechanism and must not change the parent key by default.
 
 ## 4. Interactions
 
-Pas de focus, capture, survol actif, glissement ou sélection. Pointeur, molette, clavier et texte sont ignorés pour permettre le routage aux parents.
+No focus, capture, active hover, dragging, or selection. Pointer, wheel, keyboard, and text events are ignored to allow routing to parents.
 
-Validation et annulation ne s’appliquent pas. Un libellé rendu dans un bouton ne remplace pas la cible d’activation du bouton.
+Confirmation and cancellation do not apply. A label rendered inside a button does not replace the button's activation target.
 
-Les actions d’accessibilité sont absentes. Le mode Disabled n’installe aucune interaction supplémentaire.
+There are no accessibility actions. Disabled mode does not install additional interactions.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Toutes les dimensions sont logiques. `TextService::measure(text, style)` fournit largeur et hauteur ; la peinture utilise exactement la même réparation UTF-8 et les mêmes polices.
+All dimensions are logical. `TextService::measure(text, style)` supplies width and height; painting uses exactly the same UTF-8 repair and fonts.
 
-L’alignement déplace l’ancre dans la place attribuée, sans modifier la mesure intrinsèque. La contrainte du parent et son clipping restent déterminants en cas de texte trop long.
+Alignment moves the anchor within the allocated space without changing intrinsic measurement. The parent constraint and clipping still determine the result when text is too long.
 
-Conserver le comportement actuel sans retour automatique ni ellipse ajoutée silencieusement. Une hauteur nulle ou une largeur réduite ne doit pas produire de géométrie non finie.
+Preserve current behavior without silently adding wrapping or ellipsis. Zero height or reduced width must not produce non-finite geometry.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-`TextStyle` reste le style public. `size` conserve son clamp à zéro ; `bold(false)` et `italic(false)` reviennent aux valeurs Regular/Upright.
+`TextStyle` remains the public style. `size` retains its clamp to zero; `bold(false)` and `italic(false)` restore Regular/Upright values.
 
-La couleur de style explicite prévaut ; ne pas promettre une souscription Theme absente du composant actuel. Les nouvelles propriétés de thème attendent un enrichissement distinct.
+An explicit style color takes precedence; do not promise a Theme subscription absent from the current component. New theme properties await a separate enhancement.
 
-Rendu headless : choix d’une police de test déterministe, texte identique à la mesure, et ancre verticale au milieu de la place. Pas de timer ni animation.
+Headless rendering: choose a deterministic test font, use the same text as measurement, and place the vertical anchor at the center of the allocated space. No timer or animation.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat cible : `SemanticRole::Text`, texte possédé exposé comme valeur lisible ; pas d’action ni de focus. Les décorations répétées peuvent être exclues par la composition.
+Target contract: `SemanticRole::Text`, with owned text exposed as a readable value; no action or focus. Repeated decorations may be excluded by composition.
 
-Le hook `Component::semantics` et le rôle existent ; ce composant actuel ne garantit pas leur publication. L’extraction doit ajouter ou préserver la publication conformément au contrat sémantique du toolkit.
+The `Component::semantics` hook and role exist; the current component does not guarantee their publication. Extraction must add or preserve publication according to the toolkit's semantic contract.
 
-Les ponts natifs VoiceOver/UIA/AT-SPI sont différés T068 ; une inspection du snapshot headless ne prouve pas leur fonctionnement.
+Native VoiceOver/UIA/AT-SPI bridges are deferred to T068; inspecting a headless snapshot does not prove they work.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread seulement ; aucune registration par instance n’est nécessaire pour le texte immuable.
+UI/main thread only; immutable text requires no per-instance registration.
 
-Une allocation ou une mesure de police qui échoue ne publie pas un composant partiel. Les caches éventuels de mesure sont privés et ne deviennent pas un registre mutable global.
+A failed allocation or font measurement does not publish a partial component. Any measurement caches are private and do not become a global mutable registry.
 
-Destruction no-throw ; aucun callback applicatif. Ne pas garder PaintContext ou Painter hors de paint ; les ressources de police suivent leur ownership existant.
+Destruction is no-throw; no application callback. Do not retain PaintContext or Painter outside paint; font resources follow their existing ownership.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépend de Component, TextService et Painter existants ; aucun chargeur de fichier ni API native de texte supplémentaire.
+Depends on the existing Component, TextService, and Painter; no additional file loader or native text API.
 
-Chaîne vide : largeur nulle et hauteur de texte conforme à TextService. UTF-8 invalide : mêmes U+FFFD à la mesure et à la peinture, sans modifier l’entrée applicative.
+Empty string: zero width and text height according to TextService. Invalid UTF-8: the same U+FFFD replacements in measurement and painting, without changing application input.
 
-Famille absente : utiliser le fallback existant. Taille zéro, longues chaînes, accents combinés et caractères hors latin sont des scénarios explicites.
+Missing family: use the existing fallback. Zero size, long strings, combining accents, and non-Latin characters are explicit scenarios.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/label.hpp` et `src/label.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/label.hpp` and `src/label.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : `widgets_builders.inc` et `widgets_basic.inc`. Conserver `TextLabel` et la classe publique `LabelComponent`, sa signature et les méthodes de style actuelles.
+Source to extract or reuse: `widgets_builders.inc` and `widgets_basic.inc`. Preserve `TextLabel` and the public `LabelComponent` class, its signature, and current style methods.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `label_utf8_measure_paint` : mesure et pixels concordent pour Unicode valide et invalide.
-- `label_alignment` : les trois alignements conservent la taille intrinsèque.
-- `label_empty_zero` : texte vide et taille zéro ne créent ni erreur ni géométrie invalide.
-- `label_legacy_alias` : TextLabel et tous les fluent existants compilent.
+- `label_utf8_measure_paint`: measurement and pixels agree for valid and invalid Unicode.
+- `label_alignment`: all three alignments preserve intrinsic size.
+- `label_empty_zero`: empty text and zero size cause neither errors nor invalid geometry.
+- `label_legacy_alias`: TextLabel and all existing fluent methods compile.
 
-Créer `examples/features/label.cpp` et la cible `nativeui_example_label`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/label.cpp` and target `nativeui_example_label`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Étendre les preuves existantes de `tests/label_tests.cpp` et `examples/features/t026_label.cpp`, sans supprimer leurs assertions.
+Extend the existing evidence in `tests/label_tests.cpp` and `examples/features/t026_label.cpp` without removing their assertions.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

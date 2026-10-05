@@ -1,102 +1,102 @@
 # Enabled
 
-Statut : **existant à enrichir**.
+Status: **existing — enhancements required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Enabled` restreint l’éligibilité d’interaction des descendants en conservant leur présence et taille. Source : [component_state.hpp](../include/nativeui/component_state.hpp), `Enabled`, `EnabledComponent`.
+`Enabled` restricts descendants’ interaction eligibility while preserving their presence and size. Source: [component_state.hpp](../include/nativeui/component_state.hpp), `Enabled`, `EnabledComponent`.
 
-La signature actuelle ne prend que State<bool>. MyGo porte la capacité via Disabled sur les éléments ; aucune famille autonome à copier. La cible ajoute Binding et extraction sans changer les règles d’héritage.
+The current signature takes only State<bool>. MyGo provides the capability through Disabled on elements; no independent family needs copying. The target adds Binding and extraction without changing inheritance rules.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Reviewed versions: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions refer to the current implementation; the requirements below define the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle :
+Current API:
 
 ```cpp
 template<class Child> Enabled(State<bool>& state, Child&& child);
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<bool> allowed{true};
-auto controls = ui::Enabled{allowed, ui::Button{"Appliquer", []{}}};
+auto controls = ui::Enabled{allowed, ui::Button{"Apply", []{}}};
 ```
 
-API cible supplémentaire : `template<class Child> Enabled(Binding<bool>, Child&&)`. State délègue au Binding ; aucun callback on_enabled propre, l’application observe son état.
+Additional target API: `template<class Child> Enabled(Binding<bool>, Child&&)`. State delegates to Binding; no on_enabled callback of its own, as the application observes its state.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to the `ui` namespace. The builder is consumed by `Spec spec() &&`; its children become owned `Spec` objects. Proposed declarations do not claim to be an API that has already shipped. Signature blocks are fragments of the members of the type being described, rather than complete programs; `Key` or `T` refers to that type’s template parameter where one exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership and notifications
 
-Enabled effectif = combinaison restrictive des ancêtres/descendant. Un parent false ne peut pas être annulé par un enfant true. Le modèle reste inchangé au disable. Nouvelle subscription Binding RAII par instance ; aucun listener global.
+Effective Enabled = a restrictive combination of ancestor/descendant states. A false parent cannot be overridden by a true child. The model remains unchanged when disabled. The new Binding subscription uses per-instance RAII; no global listener.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state and its notifications are confined to the UI/main thread. Historical APIs that genuinely borrow `State<T>&` directly require the borrowed State to remain alive; constructors that delegate to `state.binding()` retain the safe control block rather than the State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored and `observe()` is inactive; destruction does not automatically send a notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-False empêche activation et mutation, retire les descendants inéligibles du ciblage focus selon Tree. Une gesture en cours est terminée par availability recovery ; aucune activation au re-enable. Le wrapper n’est ni focusable ni targetable autonome. Ne pas transformer disable en ReadOnly : navigation/copie des champs suit leur contrat disabled.
+False prevents activation and mutation and removes ineligible descendants from focus targeting according to Tree. Availability recovery ends an active gesture; re-enabling triggers no activation. The wrapper is neither independently focusable nor targetable. Do not turn disable into ReadOnly: field navigation/copy follows each field’s disabled contract.
 
-- Réactiver un widget ne rétablit pas automatiquement une touche ou un pointeur resté physiquement pressé.
-- Un pointer-up ancien après disable ne doit pas activer le contrôle réactivé.
-- Le retrait du focus n’autorise pas le wrapper à lancer la validation métier d’un formulaire.
-- Les nœuds disabled gardent leurs données de lecture, même si leurs hit targets sont exclus.
-- Un raccourci routé à un autre scope suit ses propres contraintes ; le wrapper n’altère pas une table globale de raccourcis.
+- Re-enabling a widget does not automatically restore a key or pointer that remains physically pressed.
+- An old pointer-up after disable must not activate the re-enabled control.
+- Removing focus does not authorize the wrapper to initiate form business validation.
+- Disabled nodes retain their readable data even when their hit targets are excluded.
+- A shortcut routed to another scope follows its own constraints; the wrapper does not change a global shortcut table.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping and runtime capture. Do not add global shortcuts or access to audio parameters for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Minimum/préférée et placement transparents ; disabled garde son espace de layout. Un style enfant peut modifier ses métriques selon états, mais le wrapper ne réduit jamais la taille seul. Les bornes de hit test sont celles du descendant, avec disponibilité effective.
+Minimum/preferred size and placement are transparent; disabled preserves layout space. A child style may change its metrics according to state, but the wrapper never reduces size by itself. Hit-test bounds are those of the descendant, subject to effective availability.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions use NativeUI logical coordinates. The backend applies the scale-factor conversion exactly once; the component does not handle native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Paint vide. Les descendants résolvent l’apparence disabled ; aucune opacité uniforme appliquée aveuglément au sous-arbre. Paint ou layout seulement si la recette du descendant change effectivement ; pas d’invalidation full viewport du wrapper.
+No painting. Descendants resolve disabled appearance; do not blindly apply uniform opacity to the subtree. Paint or layout only when the descendant’s recipe actually changes; no full-viewport invalidation from the wrapper.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An unchanged effective state is a no-op; the component does not force a repaint of the entire window when repainting its bounds is sufficient.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Wrapper `None`. Descendants restent présents lorsque pertinents avec `enabled=false` et rejettent actions d’activation/mutation. Ne pas retirer automatiquement leurs noms/valeurs du snapshot au seul motif disabled.
+Wrapper `None`. Descendants remain present where relevant with `enabled=false` and reject activation/mutation actions. Do not automatically remove their names/values from the snapshot solely because they are disabled.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to the deferred T068 work; this specification does not validate VoiceOver, UIA or AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group` or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Lors du disable réentrant pendant une activation, finir l’invocation commencée au plus une fois, puis récupérer les gestes au checkpoint. Cible Binding invalide : état inerte sûr, sans dereference State*. Démontage déconnecte availability invalidator avant perte du propriétaire.
+During a reentrant disable within activation, finish the started invocation at most once, then recover gestures at the checkpoint. Invalid target Binding: safe inert state without dereferencing State*. Unmounting disconnects the availability invalidator before owner loss.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators and captures are per instance and released through RAII. A callback that has started and throws is never automatically replayed; invariants are restored before the C++ exception propagates. Unmounting is no-throw and does not invoke application destruction callbacks. Destruction of the UI owner from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Runtime de disponibilité, [ReadOnly](read_only.md), [Visibility](visibility.md) et styles descendants. Cas : disable sur pointer-down, clavier enfoncé, listener modifiant enabled récursivement, deux instances avec bindings séparés. Aucun appel système pour griser un contrôle.
+Availability runtime, [ReadOnly](read_only.md), [Visibility](visibility.md) and descendant styles. Cases: disable on pointer-down, a held key, a listener recursively changing enabled and two instances with separate bindings. No system call to gray out a control.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability and invalidation services; do not create competing local copies. IME limitations remain those described in [DESIGN.md §17.4](../DESIGN.md): native transport of committed text is available; full preedit/IME transport and candidate rectangles are deferred. Do not confuse this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/enabled.hpp` et `src/enabled.cpp`.
+Target: `include/nativeui/enabled.hpp` and `src/enabled.cpp`.
 
-enabled.hpp/cpp portent le wrapper et le noyau d’availability ; component_state.hpp réexporte pour compatibilité. Aucun changement de signatures existantes State& et aucune relocalisation de l’état dans Theme.
+enabled.hpp/cpp contain the wrapper and availability core; component_state.hpp re-exports them for compatibility. No change to existing State& signatures and no relocation of state into Theme.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained implementation for measurement/layout and, where applicable, input/paint; do not add empty files or a central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. Public signatures must not expose Pugl, Skia, OS, plugin or automation types.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `enabled_inheritance` : restriction parent non annulable.
-- `enabled_preserves_layout` : mêmes bounds et modèle.
-- `enabled_armed_button` : disable avant up ne déclenche pas click.
-- `enabled_semantics` : valeur lisible, actions mutantes refusées.
-- `enabled_binding_lifetime` : state expire sans UAF.
-- `enabled_reentrant_notify` : observer réentrant/throw puis reprise.
+- `enabled_inheritance`: a parent restriction cannot be overridden.
+- `enabled_preserves_layout`: identical bounds and model.
+- `enabled_armed_button`: disable before up does not trigger a click.
+- `enabled_semantics`: readable value, mutating actions rejected.
+- `enabled_binding_lifetime`: state expires without UAF.
+- `enabled_reentrant_notify`: reentrant/throwing observer followed by recovery.
 
-Créer l’exemple public futur `examples/features/enabled.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/enabled.cpp`; `--self-test` runs the assertions specific to this page and then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation work verifies sources, signatures and links; it does not report execution of these tests. Acceptance requires all named cases to pass, no regressions in historical APIs, no mutable global dependencies and no NativeUI warnings.

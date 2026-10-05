@@ -1,26 +1,22 @@
 # ComboBox<T>
 
-Statut : **existant à extraire**.
+**Status: existing — extraction required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Sélectionner une valeur exclusive dans une liste d’options. Le contrôle ne permet pas de taper ni de
-filtrer ; EditableComboBox est le composant dédié à cette fonction.
+Select one exclusive value from a list of options. The control does not allow typing or filtering; EditableComboBox is dedicated to that function.
 
-NativeUI : [combo_popup.hpp](../include/nativeui/combo_popup.hpp), ComboBoxOption<T>, ComboBox<T> et
-noyaux d’ancre/popup templatisés. Sélection, provider et snapshot de session sont déjà présents.
+NativeUI: [combo_popup.hpp](../include/nativeui/combo_popup.hpp), ComboBoxOption<T>, ComboBox<T>, and templated anchor/popup cores. Selection, provider, and session snapshot already exist.
 
-MyGo : `ui/widgets.go`, `Select` ; `ui/base.go`, `SelectBase[T]`, `SelectParts`. Cette
-correspondance avec Select évite de prétendre que la fonction MyGo Combobox éditable est déjà
-portée.
+MyGo: `ui/widgets.go`, `Select`; `ui/base.go`, `SelectBase[T]`, `SelectParts`. This correspondence with Select avoids claiming that MyGo's editable Combobox is already ported.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp
 template<class T>
@@ -41,183 +37,121 @@ public:
 };
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
 ui::State<int> quality{1};
 auto quality_box = ui::ComboBox<int>(quality,
-    std::vector<ui::ComboBoxOption<int>>{{1, "Normal", true}, {2, "Élevé", true}})
-    .placeholder("Aucune qualité").spec();
+    std::vector<ui::ComboBoxOption<int>>{{1, "Normal", true}, {2, "High", true}})
+    .placeholder("No quality").spec();
 ```
 
-Conserver exactement contraintes, surcharges et types de style. Le provider actuel est appelé une
-fois par le constructeur pour initial_options, puis lors ouverture ; aucun appel pendant paint.
+Preserve constraints, overloads, and style types exactly. The current provider is called once by the constructor for initial_options, then on opening; never during paint.
 
-Les adapters typed T restent en header ; le futur .cpp reçoit indices opaques et closures
-copy/get/set/equals/observe nécessaires, sans imposer un variant de types autorisés.
+Typed T adapters remain in the header; the future .cpp receives opaque indices and required copy/get/set/equals/observe closures without imposing a variant of allowed types.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<T> possède la sélection. Options du bouton et snapshot de popup sont possédés. Le label
-affiché est trouvé dans display_options ; valeur inconnue affiche placeholder sans écrire.
+Binding<T> owns selection. Button options and the popup snapshot are owned. The displayed label is found in display_options; an unknown value displays placeholder without writing.
 
-Le popup initialement surligne la sélection enabled si présente, sinon la première enabled. Déplacer
-le surligné ne publie pas la sélection ; commit uniquement lors choix.
+The popup initially highlights the enabled selection if present, otherwise the first enabled option. Moving highlight does not publish selection; commit only on choice.
 
-Une ouverture rafraîchit le snapshot du provider et met déjà display_options à jour avant commande
-overlay, conformément à la source ; annuler ne remet pas les anciens labels et ne change pas la
-sélection.
+Opening refreshes the provider snapshot and already updates display_options before the overlay command, according to the source; cancellation does not restore old labels or change selection.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Clic au relâchement, Entrée première pression, Espace relâché ou Bas ouvrent. La touche d’ouverture
-reste supprimée jusqu’au KeyUp pour éviter un choix accidentel.
+Click on release, first Enter press, Space release, or Down opens. The opening key remains suppressed until KeyUp to avoid accidental choice.
 
-Popup : Haut/Bas circulent sur enabled, Home/End premier/dernier ; Entrée/Espace valident. Clic item
-enabled choisit au relâchement ; séparateur inexistant dans ComboBoxOption.
+Popup: Up/Down cycle through enabled options, Home/End choose first/last; Enter/Space confirm. Clicking an enabled item selects on release; ComboBoxOption has no separator.
 
-Échap, Tab et clic extérieur ferment ; focus retourne à l’ancre ou suit le focus runtime selon
-raison. ReadOnly ferme/blocage du popup et empêche sélection ; Disabled retire interaction.
+Escape, Tab, and outside click close; focus returns to the anchor or follows focus runtime according to the reason. ReadOnly closes/blocks the popup and prevents selection; Disabled removes interaction.
 
-Molette du bouton ne change pas la sélection. Aucun typeahead implicite ni édition TextInput : ces
-comportements nécessitent EditableComboBox.
+The button wheel does not change selection. No implicit typeahead or TextInput editing: these behaviors require EditableComboBox.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Bouton mesure label courant + horizontal_padding deux fois, minimum_width et control_height du
-ComboBoxStyle ; aucune largeur maximum globale calculée par provider en paint.
+The button measures current label plus twice horizontal_padding, minimum_width, and control_height from ComboBoxStyle; no global maximum width computed by provider in paint.
 
-Popup mesure options du snapshot en coordonnées logiques ; service overlay retenu
-(OverlaySpec/OverlayHandle, detail::OverlayService) ancre sous le bouton et borne le viewport. Les
-très longues listes demandent un panneau scrollable lors enrichissement futur.
+The popup measures snapshot options in logical coordinates; the retained overlay service (OverlaySpec/OverlayHandle, detail::OverlayService) anchors it below the button and bounds the viewport. Very long lists require a scrollable panel in a future enhancement.
 
-Conserver géométrie et nombre de composants actuels pendant extraction ; ne pas proclamer
-virtualisation livrée. Changement de sélection observe et invalide layout/paint car label peut
-changer de largeur.
+Preserve current geometry and component count during extraction; do not claim virtualization is delivered. Selection changes are observed and invalidate layout/paint because label width may change.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-ComboBoxStyle pour l’ancre, MenuItemStyle pour lignes. Surligné local et selected affiché sont deux
-notions ; choix externe n’est pas une simulation de clic.
+ComboBoxStyle for the anchor, MenuItemStyle for rows. Local highlight and displayed selection are distinct; an external choice does not simulate a click.
 
-Style de ligne modifiant row_height demande remesure du panneau ; survol couleur seule demande
-paint. Les options disabled ont une apparence et une action distinctes.
+Row style changing row_height requires panel remeasurement; color-only hover requires paint. Disabled options have distinct appearance and action availability.
 
-Provider nul produit liste vide. La police et les caractères suivent TextService, avec réparation
-UTF-8 commune.
+A null provider produces an empty list. Fonts and characters follow TextService with common UTF-8 repair.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : ComboBox, name/label accessible fourni par composition, text_value=label courant, expanded ;
-popup et items sélectionnables nommés.
+Target: ComboBox, accessible name/label supplied by composition, text_value=current label, expanded state; named popup and selectable items.
 
-Le fichier actuel ne contient pas d’override semantics dans les noyaux ComboBox. Les IDs de session
-sont backend-neutres ; options T ne doivent pas fuir sous forme de pointeurs d’application vers un
-pont natif.
+The current file has no semantics override in ComboBox cores. Session IDs are backend-neutral; T options must not leak to a native bridge as application pointers.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Préparer snapshot/session avant publier commande overlay ; échec provider/construction doit laisser
-l’ancre fermée et réutilisable. suppress_until_key_up est restauré si aucun handle validé.
+Prepare snapshot/session before publishing the overlay command; provider/construction failure must leave the anchor closed and reusable. Restore suppress_until_key_up if no handle was validated.
 
-Fermer logiquement le popup puis copier Binding/valeur avant set. Observer retire l’ancre : vérifier
-token et ne pas effectuer un accès this après publication.
+Logically close the popup, then copy Binding/value before set. If an observer removes the anchor, check the token and do not access this after publication.
 
-Démontage désactive runtime et subscriptions, supprime commandes pending et ferme overlay. Commande
-tardive devient safe no-op ; rejet de queue ne force pas une ouverture synchrone.
+Unmounting disables runtime and subscriptions, removes pending commands, and closes the overlay. A late command becomes a safe no-op; queue rejection does not force synchronous opening.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : State, OverlayCommandSource, OverlayAnchorPolicy, styles et ThemeBinding ;
-[popup_menu](popup_menu.md) partage l’infrastructure panneau non template.
+Dependencies: State, OverlayCommandSource, OverlayAnchorPolicy, styles, and ThemeBinding; [popup_menu](popup_menu.md) shares non-template panel infrastructure.
 
-Liste vide ou all disabled : ouvrir un panneau sans élément sélectionnable selon comportement actuel
-; Échap/Tab le ferment. Le Binding n’est jamais remplacé par première option.
+Empty/all-disabled list: open a panel without selectable items according to current behavior; Escape/Tab close it. Binding is never replaced by the first option.
 
-La source ne rejette pas des valeurs T dupliquées : préserver ce comportement à extraction, premier
-label correspondant affiché ; ne pas introduire silencieusement une validation nouvelle.
+The source does not reject duplicate T values: preserve this during extraction, displaying the first matching label; do not silently introduce new validation.
 
-Retrait d’option après ouverture ne change pas le snapshot de session. Une action externe retirant
-ancre ferme la session ; aucune identité d’index d’un nouveau snapshot ne peut recevoir le choix
-ancien.
+Removing an option after opening does not change the session snapshot. An external action removing the anchor closes the session; an index identity in a new snapshot must never receive the old choice.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/combo_box.hpp` et `src/combo_box.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/combo_box.hpp` and `src/combo_box.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Conserver combo_popup.hpp comme façade historique. ComboBoxOption<T>/ComboBox<T> et signatures
-templates restent dans combo_box.hpp ; effacer uniquement le noyau retained/popup vers
-combo_box.cpp.
+Preserve combo_popup.hpp as the historical facade. ComboBoxOption<T>/ComboBox<T> and template signatures remain in combo_box.hpp; type-erase only the retained/popup core into combo_box.cpp.
 
-Pas de liste explicite d’instantiations int/string : les closures typed couvrent les types
-utilisateurs. La synchronisation des display_options et la session sont prises en charge par le
-noyau propriétaire.
+No explicit int/string instantiation list: typed closures cover user types. The owning core handles synchronization of display_options and the session.
 
-Inscrire `src/combo_box.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/combo_box.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`combo_box_unknown` : valeur inconnue affiche placeholder sans set au mount ou paint.
+`combo_box_unknown`: an unknown value displays placeholder without set at mount or paint.
 
-`combo_box_provider` : appel initial et ouverture vérifiés ; aucune exécution depuis paint.
+`combo_box_provider`: initial and opening calls verified; no execution from paint.
 
-`combo_box_choice_cancel` : navigation sans write ; validation une write ; Échap/clic extérieur
-aucune.
+`combo_box_choice_cancel`: navigation writes nothing; confirmation writes once; Escape/outside click write nothing.
 
-`combo_box_disabled_empty` : skip disabled et panneau vide fermable sans sélection inventée.
+`combo_box_disabled_empty`: disabled options skipped and empty panel closable without invented selection.
 
-`combo_box_typed_core` : T utilisateur avec copy/equals compile vers noyau .cpp ; signatures
-historiques conservées.
+`combo_box_typed_core`: user T with copy/equals compiles into the .cpp core; historical signatures preserved.
 
-`combo_box_failure_remove` : provider/enqueue/observer lèvent ou retirent ancre ; session et key
-suppression récupèrent.
+`combo_box_failure_remove`: provider/enqueue/observer throw or remove the anchor; session and key suppression recover.
 
-Ajouter `examples/features/combo_box.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/combo_box.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

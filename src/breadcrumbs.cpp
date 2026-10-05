@@ -137,7 +137,7 @@ struct CrumbRuntime : std::enable_shared_from_this<CrumbRuntime> {
         accept(std::move(next));
         ++generation;
       } else
-        diagnostic = "Clés de chemin invalides";
+        diagnostic = "Invalid breadcrumb keys";
       revision = current_revision;
       close();
       if (structure)
@@ -427,7 +427,7 @@ public:
     const auto owned = state_->path;
     const auto index = state_->index(key_);
     info.role = destination_ ? SemanticRole::Text : SemanticRole::Button;
-    info.name = overflow_               ? "Autres ancêtres"
+    info.name = overflow_               ? "More ancestors"
                 : index < owned->size() ? (*owned)[index].label
                                         : "";
     info.text_value = overflow_ ? "…" : info.name;

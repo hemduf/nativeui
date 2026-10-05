@@ -1,20 +1,20 @@
 # Tabs<T>
 
-Statut : **existant à extraire**.
+Status: **existing — extraction required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-`Tabs<T>` existe avec onglets key/label/panel, sélection Binding, style et navigation. Source : [widgets_list_tabs.inc](../include/nativeui/detail/widgets_list_tabs.inc), `Tabs`, `TabsRuntime`, `TabsComponent`, `TabPanelComponent`.
+`Tabs<T>` exists with key/label/panel tabs, Binding selection, style, and navigation. Source: [widgets_list_tabs.inc](../include/nativeui/detail/widgets_list_tabs.inc), `Tabs`, `TabsRuntime`, `TabsComponent`, `TabPanelComponent`.
 
-MyGo `ui/tabs.go`, `Tabs` et son usage de `TabsBase`, compose header et application panels séparément. NativeUI possède déjà les panels ; leur état monté est conservé même quand Collapsed. Le portage ici est l’extraction compatible, pas une nouvelle API d’onglets close/reorder.
+MyGo `ui/tabs.go`, `Tabs`, and its use of `TabsBase` compose the header and application panels separately. NativeUI already owns panels; their mounted state is retained even while Collapsed. The port here is compatible extraction, not a new close/reorder tab API.
 
-Version étudiée : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Les descriptions de sources indiquent le présent ; les prescriptions suivantes constituent le contrat cible.
+Version studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`. Source descriptions indicate the present; the following requirements form the target contract.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à préserver :
+Current API to preserve:
 
 ```cpp
 explicit Tabs(Binding<T> selection);
@@ -25,85 +25,85 @@ Tabs&& style(TabsStyle value) &&;
 Spec spec() &&;
 ```
 
-Exemple existant vérifié :
+Verified existing example:
 
 ```cpp
 ui::State<int> page{0};
-auto tabs = ui::Tabs<int>{page}.tab(0,"Général",ui::Label{"Réglages"})
-    .tab(1,"Avancé",ui::Label{"Autres options"});
+auto tabs = ui::Tabs<int>{page}.tab(0,"General",ui::Label{"Settings"})
+    .tab(1,"Advanced",ui::Label{"Other options"});
 ```
 
-Keys égales rejetées par invalid_argument à `.tab`. Conserver deduction guides implicites et T utilisateur equality-comparable, sans hash requis. Aucun callbacks on_change actuellement ; les modèles applicatifs observent leur State.
+Equal keys rejected with invalid_argument at `.tab`. Preserve implicit deduction guides and equality-comparable user T without a hash requirement. There are currently no on_change callbacks; application models observe their State.
 
-Toutes les signatures appartiennent au namespace `ui`. Le builder est consommé par `Spec spec() &&` ; les enfants deviennent des `Spec` possédés. Les déclarations proposées ne prétendent pas constituer une API déjà livrée. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe. Les blocs de signatures sont des fragments des membres du type décrit, pas des programmes complets ; le `Key` ou `T` correspond au paramètre du template de ce type lorsqu’il existe.
+All signatures belong to namespace `ui`. The builder is consumed by `Spec spec() &&`; children become owned `Spec` objects. Proposed declarations do not claim to be an already-delivered API. Signature blocks are fragments of members of the described type, not complete programs; `Key` or `T` corresponds to that type's template parameter where it exists.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding possédé, labels/keys/enabled/Spec copiés ou déplacés dans runtime. Selected key externe détermine panel visible même si onglet disabled ; disabled interdit navigation utilisateur vers ce tab mais ne force pas un nouveau modèle. Unknown selected key = aucun panel visible, pas de correction/writes par défaut. Les panels sont montés et la disponibilité les collapse selon selected key.
+Owned Binding, labels/keys/enabled/Spec copied or moved into runtime. The external selected key determines the visible panel even if the tab is disabled; disabled prevents user navigation to this tab without forcing a new model. Unknown selected key = no visible panel, no correction/default writes. Panels are mounted, and availability collapses them according to selected key.
 
-Le composant, son état et ses notifications sont confinés au thread UI/main-thread. Les véritables emprunts directs historiques de `State<T>&` doivent rester vivants ; les constructeurs qui délèguent à `state.binding()` conservent le control block sûr, pas le State. Après destruction de State, `valid()` devient faux, `get()` garde la dernière valeur, `set()` est ignoré et `observe()` inactif ; il n’y a pas de notification de destruction automatique. Les objets capturés par les modèles applicatifs gardent leur propre exigence de durée de vie.
+The component, its state, and its notifications are confined to the UI/main thread. Genuine historical direct borrows of `State<T>&` must remain alive; constructors delegating to `state.binding()` retain the safe control block, not State. After State destruction, `valid()` becomes false, `get()` retains the last value, `set()` is ignored, and `observe()` is inactive; there is no automatic destruction notification. Objects captured by application models retain their own lifetime requirements.
 
 ## 4. Interactions
 
-- Left/Right cycle entre onglets enabled avec wrap, Home/End premier/dernier.
-- Focus entrée utilise sélection enabled ou premier enabled comme active sans écrire automatiquement le Binding.
-- Click down capture et arme index ; up sur même onglet choisit, release hors onglet annule.
-- PointerCancel relâche capture ; hover non-selected enabled seulement.
-- Pas de molette/shortcut close/reorder/Enter ajoutés à l’extraction.
-- Navigation autoactive : arrows écrivent directement sélection, pas mode manuel confirmation.
-- Cible sécurité : Binding invalide refuse writes ; disponibilité/read-only est revalidée au moment du select.
+- Left/Right cycle among enabled tabs with wrapping, Home/End first/last.
+- Entering focus uses the enabled selection or first enabled tab as active without automatically writing the Binding.
+- Click down captures and arms an index; up on the same tab chooses, release outside the tab cancels.
+- PointerCancel releases capture; hover only on enabled nonselected tabs.
+- No wheel/close/reorder/Enter shortcut added during extraction.
+- Automatic activation navigation: arrows write selection directly, without manual confirmation mode.
+- Safety target: invalid Binding refuses writes; availability/read-only is revalidated when selecting.
 
-Le routage respecte disponibilité héritée, clipping et capture du runtime. Aucun raccourci global ni accès aux paramètres audio ne doit être ajouté pour ce composant.
+Routing respects inherited availability, clipping, and runtime capture. No global shortcut or audio parameter access should be added for this component.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Header de hauteur résolue TabsStyle, tabs répartis en largeurs égales `bounds.w/count`. Panels sous header+panel_gap et reçoivent les mêmes bounds, les non sélectionnés collapsed ne contribuent pas. Preferred width au moins 120 DIP, minimum width zéro ; header borné par height disponible. Aucun scroll header automatique ou natural tab widths ajouté. Empty tabs ne divise pas par zéro.
+Header with resolved TabsStyle height, tabs evenly sized at `bounds.w/count`. Panels below header+panel_gap receive identical bounds; nonselected collapsed panels do not contribute. Preferred width at least 120 DIP, minimum width zero; header bounded by available height. No automatic header scrolling or natural tab widths added. Empty tabs do not divide by zero.
 
-Les tailles et positions sont des coordonnées logiques NativeUI. Le backend effectue la conversion de facteur d’échelle une seule fois ; le composant ne manipule aucune coordonnée écran native.
+Sizes and positions are NativeUI logical coordinates. The backend performs scale factor conversion exactly once; the component handles no native screen coordinates.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-TabsStyle/list_tabs_style.hpp conservé avec résolveurs et VisualState. Selected underline/disabled text/focus/hover suivent recipe actuelle. Style metric header_height/panel_gap demande layout, couleurs demandent paint. Panel subtree conserve son state local puisqu’il reste monté ; animation non ajoutée.
+TabsStyle/list_tabs_style.hpp preserved with resolvers and VisualState. Selected underline/disabled text/focus/hover follow the current recipe. Style metrics header_height/panel_gap require layout; colors require paint. Panel subtrees retain local state since they remain mounted; no animation added.
 
-L’invalidation distingue changement de pixels et changement de métriques. Un état effectif identique est un no-op ; le composant ne force pas un repaint de toute la fenêtre lorsque ses limites suffisent.
+Invalidation distinguishes pixel changes from metric changes. An identical effective state is a no-op; the component does not force a whole-window repaint when its bounds suffice.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Contrat normatif Tabs/Tab/TabPanel et relation key pair dans accessibility.md. Les hooks complets/native bridges ne doivent pas être annoncés comme déjà livrés : implémentation cible étend les snapshots selon rôle fermé existant, nodes stables, inactive panels absents. Focus requests passent par Tree, pas par action key synthétique.
+Normative Tabs/Tab/TabPanel contract and paired-key relationship in accessibility.md. Complete hooks/native bridges must not be claimed as already delivered: the target implementation extends snapshots under the existing closed role set, stable nodes, and absent inactive panels. Focus requests go through Tree, not synthetic key actions.
 
-Le contrat utilise les hooks et snapshots backend-neutres de [semantics.hpp](../include/nativeui/semantics.hpp) et [accessibility.md](accessibility.md). Les ponts natifs relèvent de T068, différé ; cette spécification ne valide ni VoiceOver, ni UIA, ni AT-SPI. Tout rôle absent de l’enum actuel nécessite une extension distincte ; jusque-là employer `None`, `Group` ou `Custom` selon le cas.
+The contract uses the backend-neutral hooks and snapshots in [semantics.hpp](../include/nativeui/semantics.hpp) and [accessibility.md](accessibility.md). Native bridges belong to deferred T068; this specification validates neither VoiceOver, UIA, nor AT-SPI. Any role absent from the current enum requires a separate extension; until then, use `None`, `Group`, or `Custom` as appropriate.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Le runtime partagé reste own, chaque panel observer RAII. Choisir un nouvel onglet pendant input peut cacher un panel sous capture : availability recovery libère au checkpoint. Setter observer throwing ne laisse pas pressed/capture flag actif ; callback commencé non rejoué. Unmounted subscription inactive ; state invalid get dernière valeur, aucun observer de destruction automatique.
+The shared runtime remains owned, with an RAII observer per panel. Choosing a new tab during input may hide a captured panel: availability recovery releases it at the checkpoint. A throwing setter observer leaves no active pressed/capture flag; a started callback is not replayed. Unmounted subscription inactive; invalid state get returns the last value, without an automatic destruction observer.
 
-Les abonnements, invalidateurs et captures sont propres à chaque instance et libérés par RAII. Un callback commencé qui lève n’est jamais rejoué automatiquement ; les invariants sont restaurés avant propagation C++. Le démontage est no-throw et ne déclenche pas de callback applicatif de destruction. La destruction du propriétaire UI depuis une pile de callback doit être différée au checkpoint sûr existant.
+Subscriptions, invalidators, and captures belong to each instance and are released through RAII. A started callback that throws is never automatically replayed; invariants are restored before C++ propagation. Unmounting is no-throw and triggers no application destruction callback. UI owner destruction from a callback stack must be deferred to the existing safe checkpoint.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Binding<T>, TabsStyle, retained availability/focus, [Visibility](visibility.md). Cas : empty, all disabled, unknown/external disabled selected key, petits bounds, labels longs, key égal duplicate et equality throwing. Ne pas importer Router MyGo pour choisir un panel.
+Binding<T>, TabsStyle, retained availability/focus, [Visibility](visibility.md). Cases: empty, all disabled, unknown/external disabled selected key, small bounds, long labels, equal duplicate key, and throwing equality. Do not import MyGo Router to choose a panel.
 
-Réutiliser les services `Tree`, focus, disponibilités et invalidation ; ne pas en créer de copies locales concurrentes. Les limites d’IME restent celles de [DESIGN.md §17.4](../DESIGN.md) : le transport natif du texte commité est disponible ; le transport complet de préédition/IME et des rectangles de candidats est différé. Ne pas assimiler cette limite plateforme à une impossibilité de tester les modèles textuels en headless.
+Reuse the `Tree`, focus, availability, and invalidation services; do not create competing local copies. IME limits remain those of [DESIGN.md §17.4](../DESIGN.md): native committed-text transport is available; full preedit/IME and candidate rectangle transport are deferred. Do not equate this platform limitation with an inability to test text models headlessly.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/tabs.hpp` et `src/tabs.cpp`.
+Target: `include/nativeui/tabs.hpp` and `src/tabs.cpp`.
 
-tabs.hpp déclare templates key/panel adapters et types publics existants ; tabs.cpp porte noyau non template headers/panels, input/paint/layout avec adaptateurs equality/selection. widgets.hpp et list_tabs_style.hpp restent includes compatibles ; extraire Tabs depuis widgets_list_tabs.inc sans toucher ListView duplicate implementations.
+tabs.hpp declares key/panel adapter templates and existing public types; tabs.cpp contains the non-template header/panel core, input/paint/layout with equality/selection adapters. widgets.hpp and list_tabs_style.hpp remain compatible includes; extract Tabs from widgets_list_tabs.inc without touching duplicate ListView implementations.
 
-Le header contient déclarations et seuls adaptateurs templates nécessaires. Le `.cpp` doit porter un véritable noyau retenu, de mesure/layout et, si applicable, d’entrée/paint ; aucun fichier vide ni switch central de widgets. Ajouter ce `.cpp` à `NativeUI::Core` lors de l’implémentation. Aucun type Pugl, Skia, OS, plugin ou automation n’entre dans les signatures publiques.
+The header contains declarations and only the necessary template adapters. The `.cpp` must contain a real retained measurement/layout core and, where applicable, input/paint; no empty file or central widget switch. Add this `.cpp` to `NativeUI::Core` during implementation. No Pugl, Skia, OS, plugin, or automation type enters public signatures.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-- `tabs_legacy_keyboard` : wrap enabled et Home/End.
-- `tabs_panel_retention` : mêmes identities/state montés après switch.
-- `tabs_disabled_external_key` : panel affiché sans interaction enabled.
-- `tabs_unknown_empty` : aucun panel/default write/divide by zero.
-- `tabs_pointer_cancel` : release hors tab, cancel et capture recovered.
-- `tabs_style_invalidation` : metrics vs colors classés.
-- `tabs_setter_fault` : next input fonctionne après observer throw.
-- Réutiliser tests T036 list/tabs pour compatibility baseline.
+- `tabs_legacy_keyboard`: enabled wrapping and Home/End.
+- `tabs_panel_retention`: same mounted identities/state after switching.
+- `tabs_disabled_external_key`: panel displayed without enabled interaction.
+- `tabs_unknown_empty`: no panel/default write/division by zero.
+- `tabs_pointer_cancel`: release outside tab, cancel, and recovered capture.
+- `tabs_style_invalidation`: classified metrics versus colors.
+- `tabs_setter_fault`: next input works after an observer throws.
+- Reuse T036 list/tabs tests as the compatibility baseline.
 
-Créer l’exemple public futur `examples/features/tabs.cpp` ; `--self-test` exécute les assertions propres à cette page puis quitte sans interaction manuelle. Compléter par rendu headless des états pertinents, destruction/remontage, deux instances simultanées et injection d’exception aux frontières applicatives.
+Create the future public example `examples/features/tabs.cpp`; `--self-test` runs this page's assertions, then exits without manual interaction. Add headless rendering of relevant states, destruction/remounting, two simultaneous instances, and exception injection at application boundaries.
 
-Ces tests sont à implémenter avec le composant. La rédaction présente vérifie sources, signatures et liens ; elle ne rapporte aucune exécution de ces tests. Acceptation : tous les cas nommés passent, aucune régression des API historiques, aucune dépendance globale mutable et aucun warning NativeUI.
+These tests are to be implemented with the component. This documentation verifies sources, signatures, and links; it reports no execution of these tests. Acceptance: all named cases pass, no historical API regressions, no global mutable dependency, and no NativeUI warnings.

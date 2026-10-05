@@ -205,7 +205,7 @@ public:
   SemanticInfo semantics() const override {
     SemanticInfo info;
     info.role = SemanticRole::Custom;
-    info.name = index_ == 0 ? "heures" : index_ == 1 ? "minutes" : "secondes";
+    info.name = index_ == 0 ? "hours" : index_ == 1 ? "minutes" : "seconds";
     info.focusable = true;
     info.focused = focused_;
     info.enabled = effective_enabled();
@@ -225,7 +225,7 @@ public:
       info.actions.push_back(SemanticAction::Decrement);
     }
     if (current && !valid_time(current))
-      info.description = "Heure hors domaine";
+      info.description = "Time out of range";
     return info;
   }
   void paint(PaintContext &context) const override {
@@ -327,7 +327,7 @@ public:
       };
       result.push_back(Spec{[action, style = style_.clear] {
                               return std::make_unique<detail::InputAction>(
-                                  "Effacer l’heure", "×", style, action, true,
+                                  "Clear time", "×", style, action, true,
                                   false);
                             },
                             {}});
@@ -340,7 +340,7 @@ public:
     info.name = label_;
     info.read_only = effective_read_only() || !state_->source.valid();
     if (state_->seen && !valid_time(state_->seen))
-      info.description = "Heure hors domaine";
+      info.description = "Time out of range";
     return info;
   }
   void paint(PaintContext &context) const override {

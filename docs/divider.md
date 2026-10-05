@@ -1,22 +1,22 @@
 # Divider
 
-**Statut : nouveau à implémenter.**
+**Status: new — implementation required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Référence NativeUI : `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; référence MyGo : `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+NativeUI reference: `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo reference: `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Séparateur visuel horizontal ou vertical, distinct des poignées de SplitView. Il contribue une épaisseur au layout et s’étire sur son axe principal.
+A horizontal or vertical visual separator, distinct from SplitView handles. It contributes thickness to layout and stretches along its main axis.
 
-Pas de builder Divider dans NativeUI ; [Header](header.md) dessine aujourd’hui une ligne interne. Les primitives ligne/rectangle existent dans [component_base.hpp](../include/nativeui/component_base.hpp).
+No Divider builder in NativeUI; [Header](header.md) currently draws an internal line. Line/rectangle primitives exist in [component_base.hpp](../include/nativeui/component_base.hpp).
 
-MyGo : `ui/widgets.go`, `Divider`, déduit l’orientation du parent row et impose 1 DIP de largeur ou hauteur. Le portage choisit une orientation explicite et déterministe, sans lecture cachée du parent.
+MyGo: `ui/widgets.go`, `Divider`, infers orientation from the parent row and sets width or height to 1 DIP. The port chooses an explicit, deterministic orientation without hidden parent inspection.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée :
+Proposed target API:
 
 ```cpp
 enum class DividerOrientation { Horizontal, Vertical };
@@ -29,89 +29,89 @@ public:
 };
 ```
 
-Épaisseur par défaut 1 unité logique ; couleur de défaut = bordure du thème. Valeur finie >= 0 obligatoire pour thickness ; invalide = invalid_argument avant publication.
+Default thickness is 1 logical unit; default color is the theme border color. thickness requires a finite value >= 0; invalid input causes invalid_argument before publication.
 
-Exemple cible proposé : `ui::Divider{ui::DividerOrientation::Vertical}.thickness(1.0).spec()`. L’orientation verticale doit être choisie par l’application dans une Row.
+Proposed target example: `ui::Divider{ui::DividerOrientation::Vertical}.thickness(1.0).spec()`. The application must choose vertical orientation inside a Row.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Options possédées ; aucun état mutable applicatif, Binding ni callback. L’identité suit le nœud retenu.
+Owned options; no mutable application state, Binding, or callback. Identity follows the retained node.
 
-La couleur explicite est distincte de la couleur de défaut thémée. Seul l’abonnement au Theme de l’instance peut mettre à jour une couleur implicite.
+Explicit color is distinct from the themed default color. Only the instance's Theme subscription may update an implicit color.
 
-Le séparateur ne communique ni valeur ni position de drag. Aucun événement de changement.
+The separator communicates neither a value nor a drag position. No change event.
 
 ## 4. Interactions
 
-Aucun focus, capture, survol, molette, glissement, clavier ou texte ; tous les inputs sont Ignored.
+No focus, capture, hover, wheel, drag, keyboard, or text; all inputs are Ignored.
 
-Validation/annulation non applicables. Une orientation Vertical ne donne pas un comportement de resize.
+Confirmation/cancellation do not apply. Vertical orientation does not provide resize behavior.
 
-Une superposition avec un Button laisse l’activation au Button ; le Divider ne doit pas masquer une cible d’entrée interactive.
+An overlap with a Button leaves activation to the Button; Divider must not obscure an interactive input target.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Horizontal : préféré {0, épaisseur}, minimum de l’épaisseur borné par contrainte. Vertical : préféré {épaisseur, 0}. Le parent fournit la longueur finale.
+Horizontal: preferred {0, thickness}, with minimum thickness bounded by the constraint. Vertical: preferred {thickness, 0}. The parent supplies the final length.
 
-Axe principal étiré dans la place reçue ; épaisseur max bornée à la dimension transverse disponible. Zéro d’épaisseur ne peint rien et ne doit pas exiger une taille artificielle.
+The main axis stretches within the allocated space; maximum thickness is bounded to the available cross-axis dimension. Zero thickness paints nothing and must not require an artificial size.
 
-Dessiner dans les coordonnées logiques sans arrondir la place retenue au DPR. Ne jamais peindre au-delà des bounds lors de fenêtre minuscule.
+Draw in logical coordinates without rounding retained space to DPR. Never paint beyond bounds in a tiny window.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Rectangle/ligne de couleur bordure ; pas d’animation, focus ring, hover ou accent implicite. Un alpha nul garde la géométrie sans pixels.
+Border-colored rectangle/line; no animation, focus ring, hover, or implicit accent. Zero alpha preserves geometry without pixels.
 
-Theme implicite change = paint ; épaisseur ou orientation modifiée par reconstruction = layout et paint.
+An implicit Theme change invalidates paint; changing thickness or orientation through reconstruction invalidates layout and paint.
 
-Pas de DividerStyle obligatoire pour trois propriétés ; si étendu, le type appartient au couple Divider et ne fait pas apparaître un slot Theme existant fictif.
+No mandatory DividerStyle for three properties; if extended, the type belongs to the Divider file pair and must not invent an existing Theme slot.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Séparateur décoratif : SemanticRole::None. Ne pas inventer Role::Separator, absent du contrat actuel.
+Decorative separator: SemanticRole::None. Do not invent Role::Separator, which is absent from the current contract.
 
-Si l’application doit signaler une séparation fonctionnelle, ses Group sont nommés autour du Divider ; la ligne ne se substitue pas à cette structure.
+If the application needs to indicate a functional separation, name its Groups around the Divider; the line does not replace this structure.
 
-Ponts natifs T068 différés. Aucun texte/IME ni action.
+Native T068 bridges are deferred. No text/IME or action.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-UI/main-thread ; abonnement au Theme privé RAII si couleur implicite. Il cesse au démontage.
+UI/main thread; private RAII Theme subscription for implicit color. It ends at unmounting.
 
-Construction échouée ne laisse aucun abonnement. Un invalidateur stale est lifetime-safe ; aucune lambda ne capture un nœud brut.
+Failed construction leaves no subscription. A stale invalidator is lifetime-safe; no lambda captures a raw node.
 
-Destruction no-throw, aucune notification applicative. Deux instances peuvent choisir des épaisseurs/couleurs indépendantes.
+Destruction is no-throw, with no application notification. Two instances may choose independent thicknesses/colors.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Réutilise Component et Painter. Pas de lien à Pugl, Skia public ou au parent Row.
+Reuses Component and Painter. No dependency on Pugl, public Skia, or the parent Row.
 
-Dimensions nulles, contraintes non bornées et alpha transparent sont autorisés. NaN/inf ou épaisseur négative sont rejetés pour la nouvelle API.
+Zero dimensions, unbounded constraints, and transparent alpha are allowed. NaN/inf or negative thickness are rejected by the new API.
 
-La présence de plusieurs Divider successifs est valide ; aucun collapse de lignes ni gap implicite.
+Several successive Dividers are valid; no line collapsing or implicit gap.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/divider.hpp` et `src/divider.cpp`. Le header contient les déclarations publiques ; le `.cpp` contient un véritable noyau retenu, la mesure, le layout, les événements applicables et le rendu.
+Target: `include/nativeui/divider.hpp` and `src/divider.cpp`. The header contains public declarations; the `.cpp` contains a real retained core, measurement, layout, applicable events, and rendering.
 
-Origine à extraire ou réutiliser : primitives Painter existantes ; comportement nouveau. Le Header conserve son séparateur historique ou réutilise ce noyau explicitement, sans dépendance circulaire entre composants.
+Source to extract or reuse: existing Painter primitives; new behavior. Header preserves its historical separator or explicitly reuses this core without circular component dependencies.
 
-Les adaptateurs templates indispensables restent dans le header et délèguent au noyau non template. Préserver les includes historiques via leurs headers collectifs ; ne pas laisser une seconde implémentation dans les `.inc`.
+Essential template adapters remain in the header and delegate to the non-template core. Preserve historical includes through their aggregate headers; do not leave a second implementation in the `.inc` files.
 
-Inscrire le futur `.cpp` dans `NativeUI::Core`, sans fichier vide ni switch central de widgets. Aucun type Pugl, Skia, OS ou SDK de plugin dans cette API.
+Register the future `.cpp` in `NativeUI::Core`, with no empty file or central widget switch. This API must not expose Pugl, Skia, OS, or plugin SDK types.
 
-Cette livraison est documentaire : aucune extraction ni modification de CMake n’est effectuée.
+This delivery consists of documentation: no extraction or CMake changes are performed.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests à réaliser lors de l’implémentation :
+Tests to implement during implementation:
 
-- `divider_orientation` : tailles et pixels horizontaux/verticaux sont cohérents.
-- `divider_zero_narrow` : épaisseur zéro et place trop étroite ne débordent pas.
-- `divider_pass_through` : aucun input ni focus capturé.
-- `divider_theme_isolation` : couleur implicite change seulement dans son UI.
+- `divider_orientation`: horizontal/vertical sizes and pixels are consistent.
+- `divider_zero_narrow`: zero thickness and insufficient space do not overflow.
+- `divider_pass_through`: no input or focus is captured.
+- `divider_theme_isolation`: implicit color changes only within its own UI.
 
-Créer `examples/features/divider.cpp` et la cible `nativeui_example_divider`, liés à `NativeUI::Core`. Le mode `--self-test` utilise des événements et une horloge déterministes, fonctionne sans écran et retourne un code non nul au premier échec.
+Create `examples/features/divider.cpp` and target `nativeui_example_divider`, linked to `NativeUI::Core`. The `--self-test` mode uses deterministic events and a deterministic clock, runs without a display, and returns a nonzero code on the first failure.
 
-Vérifier compilation du header seul, composition publique, rendu headless et coexistence de deux UI indépendantes. Couvrir les reprises après les fautes décrites ci-dessus sous ASan/UBSan lorsque la durée de vie est concernée.
+Verify standalone header compilation, public composition, headless rendering, and coexistence of two independent UIs. Cover recovery from the failures described above under ASan/UBSan when lifetime is involved.
 
-Acceptation : les tests nommés passent, aucune capture/inscription ne subsiste après démontage, et l’API publiée correspond à ces contrats. Vérification effectuée ici : lecture des déclarations et sources ; aucun test C++ ni test interactif exécuté.
+Acceptance: the named tests pass, no capture or registration remains after unmounting, and the published API matches these contracts. Verification performed here: declarations and sources were read; no C++ or interactive tests were run.

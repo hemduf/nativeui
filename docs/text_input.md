@@ -1,29 +1,29 @@
 # TextInput
 
-Statut : **existant à enrichir**.
+Status: **existing — enhancements required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Saisir une ligne UTF-8 avec curseur, sélection, clipboard et validation de soumission. La valeur du
-Binding est mise à jour pendant l’édition ; Entrée est un événement submit distinct.
+Enter a single UTF-8 line with a cursor, selection, clipboard support, and submission validation.
+The Binding value is updated during editing; Enter is a separate submit event.
 
-NativeUI : [widgets_text_input.inc](../include/nativeui/detail/widgets_text_input.inc),
-TextInputComponent public ; builder dans
-[widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), modèle
-[text_edit.hpp](../include/nativeui/text_edit.hpp). Sélection, undo/redo, max codepoints, scroll
-horizontal et Escape snapshot sont présents.
+NativeUI: [widgets_text_input.inc](../include/nativeui/detail/widgets_text_input.inc), public
+TextInputComponent; builder in
+[widgets_builders.inc](../include/nativeui/detail/widgets_builders.inc), model in
+[text_edit.hpp](../include/nativeui/text_edit.hpp). Selection, undo/redo, a codepoint limit,
+horizontal scrolling, and an Escape snapshot are present.
 
-MyGo : `ui/editor.go`, `TextInput`, `textInput` ; `ui/base.go`, `TextInputBase`. L’essentiel existe
-déjà. Enrichissement cible : extraction du noyau, publication sémantique et sécurité des
-callbacks/observations réentrants.
+MyGo: `ui/editor.go`, `TextInput`, `textInput`; `ui/base.go`, `TextInputBase`. The essentials already
+exist. Target enhancements: core extraction, semantic publication, and safe reentrant callbacks
+and observations.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Preserve the current API; the following declarations are in `namespace ui`.
 
 ```cpp
 using SubmitCallback = std::function<void(const std::string&)>;
@@ -36,193 +36,190 @@ TextInput&& style(TextInputStyle value) &&;
 Spec spec() &&;
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
 ui::State<std::string> name{"Oreto"};
-auto input = ui::TextInput("Nom", name).placeholder("Votre nom")
+auto input = ui::TextInput("Name", name).placeholder("Your name")
     .max_length(128).on_submit([](const std::string&) {}).spec();
 ```
 
-Default max_length=256 codepoints ; max_length(0) signifie illimité dans TextEditModel. Label est
-distinct du placeholder ; ne pas ajouter password ou contrôle IME natif comme fonctionnalité
-actuelle.
+The default max_length is 256 codepoints; max_length(0) means unlimited in TextEditModel. The label
+is distinct from the placeholder; do not present password entry or native IME control as current
+features.
 
-Conserver TextInputComponent public, son SubmitCallback et TextInputStyle ; les extensions
-nécessaires à la composition spécialisée doivent être privées au noyau sans modifier ces signatures.
+Preserve the public TextInputComponent, its SubmitCallback, and TextInputStyle; extensions needed
+for specialized composition must remain private to the core without changing these signatures.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<string> est vérité persistante, TextEditModel contient texte/curseur/anchor/historique
-locaux. Les offsets sont alignés aux frontières codepoint UTF-8, pas des indices d’octets
-arbitraires.
+Binding<string> is the persistent source of truth; TextEditModel holds local text, cursor, anchor,
+and history. Offsets align with UTF-8 codepoint boundaries, rather than arbitrary byte indices.
 
-Chaque edit réel commit une nouvelle string ; observation d’une valeur différente remplace modèle,
-remet scroll_x et historique comme actuellement. Une valeur externe identique ne repositionne pas le
-curseur.
+Each actual edit commits a new string; observing a different value replaces the model and resets
+scroll_x and history as it does today. An identical external value does not reposition the cursor.
 
-focus_snapshot pris à l’entrée ; Entrée le met à jour avant submit ; Escape restaure ce snapshot via
-Binding si texte diffère. Conserver cet effet historique même si une valeur externe est arrivée
-depuis l’entrée, et le documenter clairement.
+focus_snapshot is taken on entry; Enter updates it before submit; Escape restores this snapshot
+through the Binding if the text differs. Preserve this historical behavior even if an external
+value has arrived since entry, and document it clearly.
 
-Pour nouveaux composants dérivés, utiliser leur propre politique de draft/conflict plutôt que
-modifier silencieusement la restauration historique de TextInput.
+New derived components should use their own draft/conflict policy rather than silently changing
+TextInput's historical restoration behavior.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Pointeur : clic place caret ; double clic sélectionne mot, triple clic tout ; Shift étend ; drag
-sélectionne avec capture et fait défiler pour garder curseur visible.
+Pointer: clicking places the caret; double-click selects a word, triple-click selects all; Shift
+extends selection; dragging selects with capture and scrolls to keep the cursor visible.
 
-Clavier : Gauche/Droite caractère ou mot selon modifiers, Home/Haut début et End/Bas fin, Shift
-étend ; Backspace/Delete retirent ; commandes Copy/Cut/Paste/SelectAll/Undo/Redo normalisées.
+Keyboard: Left/Right move by character or word depending on modifiers, Home/Up to the beginning
+and End/Down to the end; Shift extends selection; Backspace/Delete remove text; normalized
+Copy/Cut/Paste/SelectAll/Undo/Redo commands.
 
-Entrée appelle SubmitCallback et met à jour snapshot ; Escape restaure. ReadOnly autorise
-sélection/copie/focus mais bloque insert/cut/paste/undo et restauration mutante ; disabled suit
-disponibilité.
+Enter calls SubmitCallback and updates the snapshot; Escape restores it. ReadOnly permits
+selection, copying, and focus but blocks insert/cut/paste/undo and mutating restoration; disabled
+follows availability.
 
-TextInput nettoie CR/LF/Tab en séparations de ligne unique et retire contrôles non imprimables à
-insertion. La molette ne modifie pas le texte ; pas de drag/drop applicatif automatique.
+TextInput converts CR/LF/Tab to single-line separators and removes non-printable controls on
+insertion. The wheel does not change text; there is no automatic application drag/drop.
 
-Le noyau traite Composition Start/Update/Commit/Cancel et déduplique le TextInput consécutif au
-commit. Ces handlers headless ne prouvent pas une couverture native preedit/candidate ; la livraison
-plateforme avancée est séparée (DESIGN §17.4).
+The core handles Composition Start/Update/Commit/Cancel and deduplicates the TextInput following a
+commit. These headless handlers do not demonstrate native preedit/candidate coverage; advanced
+platform delivery is separate (DESIGN §17.4).
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Taille préférée issue de TextInputStyle control_width/control_height, indépendante du texte ; label
-et aire de texte gardent le découpage source. Le scroll horizontal maintient caret dans content.
+Preferred size comes from TextInputStyle control_width/control_height, independently of text;
+the label and text area retain their source partitioning. Horizontal scrolling keeps the caret
+inside the content area.
 
-Mesure et hit-test utilisent TextService et style de police identique à paint ; clipping content,
-selection et caret bornés au champ.
+Measurement and hit-testing use TextService and the same font style as painting; content clipping
+bounds the selection and caret to the field.
 
-Resize et font replacement recalculent offsets/scroll en unités logiques. Max length s’applique aux
-codepoints, sans couper une séquence UTF-8 ; aucun auto-grow implicite.
+Resize and font replacement recalculate offsets/scroll in logical units. Maximum length applies to
+codepoints without cutting a UTF-8 sequence; there is no implicit auto-grow.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Conserver TextInputStyle avec états base/hovered/pressed/focused/disabled/read_only ; placeholder
-distinct, caret/selection et underline de composition dans le noyau existant.
+Preserve TextInputStyle with base/hovered/pressed/focused/disabled/read_only states; a distinct
+placeholder, caret/selection, and composition underline are in the existing core.
 
-Tick du caret actif seulement focusé et visible ; perte de focus/démontage stoppe text input et
-composition. Couleur seule paint, dimensions/police layout puis recompute scrolling.
+Caret ticking is active only while focused and visible; loss of focus/unmounting stops text input
+and composition. Color changes require only painting; dimensions/fonts require layout and then
+scrolling recomputation.
 
-L’entrée external n’écrit pas de valeur par défaut et n’appelle pas submit. Le renderer commun
-répare les bytes UTF-8 invalides pour mesure et peinture sans changer le Binding automatiquement.
+External input does not write a default value or call submit. The common renderer repairs invalid
+UTF-8 bytes for measurement and painting without automatically changing the Binding.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : TextInput, nom label, text_value modèle, read_only/enabled et actions Focus/SetValue
-appropriées. Placeholder n’est pas le nom accessible ni la valeur.
+Target: TextInput, label as name, model text_value, read_only/enabled, and appropriate Focus/SetValue
+actions. The placeholder is neither the accessible name nor the value.
 
-La source actuelle ne publie pas semantics ; sélection/caret textuels demandent un modèle sémantique
-enrichi distinct si un pont en a besoin. Éviter de revendiquer une API text range native livrée.
+The current source does not publish semantics; textual selection/caret require a separate enriched
+semantic model if a bridge needs them. Do not claim a delivered native text range API.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-La source observe actuellement avec capture this ; l’extraction doit remplacer cette dépendance
-dangereuse par token/runtime détaché pour résister au retrait par un observateur antérieur.
+The source currently observes with a this capture; extraction must replace this hazardous
+dependency with a detached token/runtime to tolerate removal by an earlier observer.
 
-Submit actuel poursuit des opérations de modèle après on_submit : cible copie texte/callback,
-termine selection/invalidation avant l’appel et ne relit plus le composant ensuite.
+Current submit continues model operations after on_submit: the target copies text/callback,
+finishes selection/invalidation before the call, and never reads the component afterward.
 
-Clipboard est différé : réponse conserve un jeton faible d’instance et génération de requête.
-Réponse après retrait, State invalid, passage ReadOnly ou nouvelle requête est ignorée sans
-insertion.
+Clipboard delivery is deferred: the response retains a weak instance token and request generation.
+Ignore a response after removal, an invalid State, a switch to ReadOnly, or a newer request without
+inserting text.
 
-Échec insert/clipboard/submit restaure toutes les captures et flags de dispatch. Destruction annule
-composition sans commit ni submit, no-throw.
+Insert/clipboard/submit failures restore all captures and dispatch flags. Destruction cancels
+composition without commit or submit and is no-throw.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : TextEditModel, TextService, PlatformServices clipboard/text input, ThemeBinding et
-focus ; [text_area](text_area.md) partage le moteur d’édition.
+Dependencies: TextEditModel, TextService, PlatformServices clipboard/text input, ThemeBinding, and
+focus; [TextArea](text_area.md) shares the editing engine.
 
-Texte vide, >max fourni externement, UTF-8 multioctet/malformed et remplacement externe pendant
-sélection suivent le modèle existant ; tester roundtrip de la valeur plutôt qu’inventer une
-validation de contenu.
+Empty text, externally supplied text exceeding the maximum, multibyte/malformed UTF-8, and external
+replacement during selection follow the existing model; test value round-tripping rather than
+inventing content validation.
 
-Aucune promesse full grapheme navigation ou mot linguistique : l’édition actuelle est codepoint et
-classes mots du modèle. La limitation native IME est explicite, sans bloquer les committed text.
+No full grapheme navigation or linguistic word behavior is promised: current editing uses
+codepoints and the model's word classes. The native IME limitation is explicit and does not block
+committed text.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/text_input.hpp` et `src/text_input.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/text_input.hpp` and `src/text_input.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-Déplacer TextInputComponent public et builder vers text_input.hpp/text_input.cpp en préservant les
-signatures, max defaults et style header historique.
+Move the public TextInputComponent and builder to text_input.hpp/text_input.cpp, preserving
+signatures, maximum defaults, and the historical style header.
 
-Le .cpp porte callbacks sûrs, abonnement détaché, selection/clipboard/scroll/caret/paint ; le header
-conserve seulement adaptateurs nécessaires aux autres builders, sans un .inc de comportement
-permanent.
+The .cpp contains safe callbacks, the detached subscription, selection/clipboard/scroll/caret/paint;
+the header retains only adapters needed by other builders, without a permanent behavior .inc.
 
-Inscrire `src/text_input.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/text_input.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`text_input_utf8_max` : insert multioctets respecte limite codepoint et normalise single-line sans
-découpe byte.
+`text_input_utf8_max`: multibyte insertion respects the codepoint limit and normalizes single-line
+text without cutting bytes.
 
-`text_input_selection_history` : clics/drag/word/Shift, Copy/Cut/Paste et undo/redo donnent
-résultats attendus.
+`text_input_selection_history`: clicks/drag/word/Shift, Copy/Cut/Paste, and undo/redo produce the
+expected results.
 
-`text_input_submit_escape` : Entrée snapshot puis submit ; Escape restaure baseline historique avec
-external change.
+`text_input_submit_escape`: Enter snapshots then submits; Escape restores the historical baseline
+with an external change.
 
-`text_input_composition` : synthetic preedit ne commit pas ; Commit suivi texte identique ne double
-pas.
+`text_input_composition`: synthetic preedit does not commit; Commit followed by identical text does
+not duplicate it.
 
-`text_input_stale_clipboard` : réponse après retrait/ReadOnly/modèle invalid ignorée.
+`text_input_stale_clipboard`: responses after removal/ReadOnly/an invalid model are ignored.
 
-`text_input_remove_throw` : observer ou submit retire/ lève ; caret/capture/dispatch réutilisables.
+`text_input_remove_throw`: an observer or submit removes/throws; caret/capture/dispatch remain
+reusable.
 
-`text_input_headless_clip` : caret/selection/placeholder restent clippés à plusieurs fonts/scales.
+`text_input_headless_clip`: caret/selection/placeholder stay clipped across several fonts/scales.
 
-Ajouter `examples/features/text_input.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/text_input.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

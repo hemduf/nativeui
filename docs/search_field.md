@@ -1,25 +1,25 @@
 # SearchField
 
-Statut : **nouveau à implémenter**.
+Status: **new — implementation required**.
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources studied: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Champ de recherche avec loupe, texte et effacement, sans moteur de recherche incorporé. Le Binding
-transporte la requête pour filtrage applicatif.
+A search field with a magnifier, text, and clearing, without a built-in search engine. The Binding
+carries the query for application filtering.
 
-NativeUI fournit TextInput et primitives d’icône, mais aucun SearchField. La loupe et le bouton
-clear restent des sous-parties du même composant.
+NativeUI provides TextInput and icon primitives, but no SearchField. The magnifier and clear button
+remain subparts of the same component.
 
-MyGo : `ui/combobox.go`, `SearchField`, `magnifier`. Effacer par bouton ou Escape, Enter Submitted,
-placeholder “Search” et maintien du focus sont portés en API retenue.
+MyGo: `ui/combobox.go`, `SearchField`, `magnifier`. Clearing by button or Escape, Enter Submitted,
+the “Search” placeholder, and retaining focus are ported into the retained API.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API cible proposée, non implémentée ; les déclarations suivantes sont dans `namespace ui`.
+Proposed target API, not implemented; the following declarations are in `namespace ui`.
 
 ```cpp
 class SearchField {
@@ -34,170 +34,164 @@ public:
 };
 ```
 
-Exemple utilisant l’API cible proposée :
+Example using the proposed target API:
 
 ```cpp
 ui::State<std::string> query{""};
-auto search = ui::SearchField("Chercher dans les presets", query)
-    .placeholder("Rechercher").on_submit([](const std::string&) {}).spec();
+auto search = ui::SearchField("Search presets", query)
+    .placeholder("Search").on_submit([](const std::string&) {}).spec();
 ```
 
-Defaults : placeholder “Rechercher”, max_length=0 illimité. SearchFieldStyle : TextInputStyle,
-taille/gap loupe, clear ButtonStyle et métriques internes ; aucun slot Theme nouveau supposé.
+Defaults: placeholder “Search”, max_length=0 meaning unlimited. SearchFieldStyle: TextInputStyle,
+magnifier size/gap, clear ButtonStyle, and internal metrics; no new Theme slot is assumed.
 
-Query changes sont les notifications Binding ; on_submit reçoit copie de la requête au Enter. Aucun
-debounce, requête réseau ou scheduler applicatif caché.
+Query changes are Binding notifications; on_submit receives a copy of the query on Enter. No hidden
+debounce, network request, or application scheduler.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<string> est la requête live ; caret/selection/undo locaux au noyau TextInput. Une écriture
-externe remplace texte selon contrat sûr d’éditeur sans provoquer submit.
+Binding<string> is the live query; caret/selection/undo are local to the TextInput core. An external
+write replaces text under the safe editor contract without triggering submit.
 
-Le clear met query à vide une fois et remet caret/history de la requête effacée ; il ne publie ni
-search result ni rollback de filtre.
+Clear sets query to empty once and resets the cleared query's caret/history; it publishes neither
+search results nor filter rollback.
 
-La baseline Escape de TextInput est remplacée par la politique SearchField : Escape sur query non
-vide efface, au lieu de restaurer un snapshot historique. Ce remplacement est limité au nouveau
-composant.
+TextInput's Escape baseline is replaced by the SearchField policy: Escape on a nonempty query
+clears it instead of restoring a historical snapshot. This replacement is limited to the new
+component.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction,
+Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and
+observe() remains inactive. There is no implicit destruction notification: check valid at every
+dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not
+extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+An external observation invalidates presentation without simulating a user gesture. State
+notifications are synchronous: a stable snapshot, additions on the next pass, skipped removals,
+and coalesced recursive writes. After an exception, the published value remains, notifications
+for the rest of the pass stop, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-Clic dans champ donne caret/focus, éditions et clipboard suivent TextInput. Bouton clear apparaît si
-query non vide ; clic le déclenche puis maintient focus dans l’éditeur.
+Clicking the field provides caret/focus; editing and clipboard follow TextInput. The clear button
+appears for a nonempty query; clicking triggers it and keeps focus in the editor.
 
-Enter submit la query courante sans transformation ; Escape query non vide clear ; Escape query vide
-remonte pour Dialog/FindBar parent. Pendant composition, la première annulation composition ne clear
-pas la query.
+Enter submits the current query unchanged; Escape clears a nonempty query; Escape on an empty query
+bubbles to the parent Dialog/FindBar. During composition, the first composition cancellation does
+not clear the query.
 
-Clear n’est pas un arrêt Tab supplémentaire ; la commande sémantique d’effacement reste accessible.
-Loupe non interactive. Molette remonte au parent.
+Clear is not an additional Tab stop; the semantic clearing command remains accessible. The
+magnifier is noninteractive. The wheel bubbles to the parent.
 
-ReadOnly bloque frappe/clear, garde sélection/copie. Disabled bloque focus/action ; PointerCancel
-clear armé ne publie rien.
+ReadOnly blocks typing/clear and retains selection/copying. Disabled blocks focus/actions;
+PointerCancel on an armed clear action publishes nothing.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Champ en Row de hauteur TextInput : loupe fixe, editor flex, zone clear de largeur réservée même
-vide afin de ne pas déplacer le texte.
+A Row with TextInput height: fixed magnifier, flexible editor, and a clear area with reserved width
+even when empty so text does not move.
 
-La largeur préférée inclut padding, loupe/gaps, zone editor et clear. Clipping de texte ne doit pas
-atteindre loupe/bouton ; caret visible via scroll horizontal du noyau.
+Preferred width includes padding, magnifier/gaps, editor area, and clear. Text clipping must not
+reach the magnifier/button; the core's horizontal scrolling keeps the caret visible.
 
-Coordonnées logiques et scale via paint ; longue requête ne fait pas croître tout le formulaire.
+Logical coordinates and scale through paint; a long query does not grow the entire form.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Loupe couleur muted, clear en affordance secondaire au hover ; Focus ring autour du champ complet.
-Placeholder distinct de query empty.
+Muted magnifier color, clear as a secondary affordance on hover; focus ring around the complete
+field. The placeholder is distinct from an empty query.
 
-Query non vide->vide repaint visibilité clear et content ; largeur réservée évite layout. Style
-metrics de loupe/gap/font demandent layout.
+A nonempty-to-empty query repaints clear visibility and content; reserved width avoids layout.
+Magnifier/gap/font style metrics require layout.
 
-Pas d’animation permanente ni de spinner de recherche implicite. L’application peut ajouter Spinner
-à côté via composition.
+No permanent animation or implicit search spinner. The application can compose a Spinner beside it.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-SemanticRole n’a pas SearchField : utiliser TextInput avec nom descriptif et text_value, actions
-Focus/SetValue. Le clear est un Button nommé “Effacer la recherche”, avec action Activate et identité retenue interne au composant.
+SemanticRole has no SearchField: use TextInput with a descriptive name and text_value, plus
+Focus/SetValue actions. Clear is a Button named “Clear search”, with an Activate action and an
+internal retained identity in the component.
 
-La loupe et icônes décoratives Role None. Le résultat et son count sont exposés par la vue qui
-effectue la recherche, pas inventés par le champ.
+The magnifier and decorative icons have Role None. Results and their count are exposed by the
+view performing the search, rather than invented by the field.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role
+specified here is a target contract: its presence in the enum does not prove that the current
+component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI result is claimed; verify the
+headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-Copier query/callback après fin d’édition et invalidation avant submit ; une action peut retirer le
-SearchField sans accès postérieur.
+Copy query/callback after editing and invalidation finish, before submit; an action may remove
+SearchField without subsequent access.
 
-Clear termine capture, prépare la valeur vide et met le caret cohérent avant Binding.set. Exception
-d’observer laisse query vide et composant récupérable.
+Clear ends capture, prepares the empty value, and makes the caret consistent before Binding.set.
+An observer exception leaves the query empty and the component recoverable.
 
-Clipboard différé utilise token/génération de l’éditeur ; query invalid, composant retiré ou
-ReadOnly ignore sa réponse. Destruction ne clear pas le Binding.
+Deferred clipboard delivery uses the editor's token/generation; an invalid query, removed component,
+or ReadOnly state causes its response to be ignored. Destruction does not clear the Binding.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released
+per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before
+publishing a value or calling the application. A callback that has started and throws is never
+replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback
+must go through a deferred safe point; synchronous owner destruction safety is not promised.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a
+monotonic identity; after removal they become inert, without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : [text_input](text_input.md), [button](button.md), primitives icône et State.
-[find_bar](find_bar.md) ajoute count/navigation, pas SearchField.
+Dependencies: [TextInput](text_input.md), [Button](button.md), icon primitives, and State.
+[FindBar](find_bar.md) adds count/navigation; SearchField does not.
 
-Query vide : Enter peut submit vide, clear absent, Escape remonte. Espaces sont conservés exactement
-; aucune normalisation trim/case imposée au moteur applicatif.
+Empty query: Enter may submit empty text, clear is absent, Escape bubbles. Spaces are preserved
+exactly; no trim/case normalization is imposed on the application engine.
 
-IME : committed Unicode et composition headless hérités ; couverture native preedit/candidate
-séparée. Externe query change pendant clear annule l’ancienne action au checkpoint si identité
-remplacée.
+IME: committed Unicode and headless composition are inherited; native preedit/candidate coverage is
+separate. An external query change during clear cancels the old action at the checkpoint if its
+identity was replaced.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/search_field.hpp` et `src/search_field.cpp`. Le header expose les
-déclarations publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un
-véritable noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/search_field.hpp` and `src/search_field.cpp`. The header exposes public
+declarations and only the necessary template adapters; the .cpp must contain a real retained core,
+interactions, measurement, and rendering, never an empty file.
 
-SearchFieldStyle et sous-parties clear/loupe dans le même couple ; search_field.cpp porte routage
-spécialisé, layout et composition du noyau texte.
+SearchFieldStyle and clear/magnifier subparts belong in the same pair; search_field.cpp contains
+specialized routing, layout, and text core composition.
 
-Inscrire `src/search_field.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/search_field.cpp` in NativeUI::Core during implementation. Preserve historical aggregate
+includes as compatible entry points; no Pugl, Skia, OS, or plugin types belong in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed by
+this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests are required during implementation; this documentation reports no execution results.
 
-`search_field_live_query` : édition publie requête exacte, espaces/multioctets conservés.
+`search_field_live_query`: editing publishes the exact query, preserving spaces/multibyte text.
 
-`search_field_clear_focus` : clear/Escape effacent une fois et maintiennent caret ; aucun arrêt Tab
-de plus.
+`search_field_clear_focus`: clear/Escape clear once and retain the caret; no additional Tab stop.
 
-`search_field_escape_empty` : Escape vide remonte ; preedit cancel précède clear.
+`search_field_escape_empty`: empty Escape bubbles; preedit cancellation precedes clear.
 
-`search_field_submit` : Enter passe un snapshot exact y compris vide, pas de debounce caché.
+`search_field_submit`: Enter passes an exact snapshot, including empty text, without hidden debounce.
 
-`search_field_layout` : zone clear réservée sans déplacement caret ; clipping/scales corrects.
+`search_field_layout`: the clear area is reserved without caret movement; correct clipping/scales.
 
-`search_field_throw_stale` : observer/submit lève/retire et stale clipboard n’altère aucun nouveau
-champ.
+`search_field_throw_stale`: an observer/submit throws/removes and stale clipboard does not alter a
+new field.
 
-Ajouter `examples/features/search_field.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/search_field.cpp`, compilable by a public consumer, with a `--self-test` mode
+verifying the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared with stable geometry,
+two independent instances work, historical includes compile, and new sources are warning-free.

@@ -1,25 +1,22 @@
 # Checkbox
 
-Statut : **existant à extraire**.
+**Status: existing — extraction required.**
 
-[Catalogue des composants](widgets.md)
+[Component catalog](widgets.md)
 
-Sources étudiées : NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c` ; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
+Sources reviewed: NativeUI `e10077ff39b8cb977669a7d5604562f66d07cb4c`; MyGo `40df43e3f7fd759616f7d3896c74ef9c51d5d6dc`.
 
-## 1. Objectif et état actuel
+## 1. Purpose and current state
 
-Éditer une option booléenne indépendante, avec marque et label cliquables comme une seule cible.
+Edit an independent boolean option, with mark and label clickable as a single target.
 
-NativeUI : [widgets_checkbox_radio.inc](../include/nativeui/detail/widgets_checkbox_radio.inc),
-Checkbox, CheckboxStyle et noyau detail::CheckboxComponent. Observe le Binding pour classer
-précisément layout/paint et utilise PressActivationState.
+NativeUI: [widgets_checkbox_radio.inc](../include/nativeui/detail/widgets_checkbox_radio.inc), Checkbox, CheckboxStyle, and detail::CheckboxComponent core. It observes Binding to classify layout/paint precisely and uses PressActivationState.
 
-MyGo : `ui/widgets.go`, `Checkbox` ; `ui/base.go`, `CheckboxBase`. Le bool simple est déjà couvert ;
-le choix mixed appartient à CheckboxGroup et ne remplace pas la signature bool de Checkbox.
+MyGo: `ui/widgets.go`, `Checkbox`; `ui/base.go`, `CheckboxBase`. The simple bool is already covered; mixed state belongs to CheckboxGroup and does not replace Checkbox's bool signature.
 
-## 2. API publique et composition
+## 2. Public API and composition
 
-API actuelle à conserver ; les déclarations suivantes sont dans `namespace ui`.
+Current API to preserve; the following declarations are in `namespace ui`.
 
 ```cpp
 Checkbox(Binding<bool> state, std::string label);
@@ -28,164 +25,113 @@ Checkbox&& style(CheckboxStyle value) &&;
 Spec spec() &&;
 ```
 
-Exemple utilisant l’API actuelle :
+Example using the current API:
 
 ```cpp
 ui::State<bool> notifications{false};
 auto checkbox = ui::Checkbox(notifications, "Notifications").spec();
 ```
 
-Respecter l’ordre actuel état puis label, contrairement à Toggle(label, état). Ne pas introduire une
-seconde valeur interne qui pourrait diverger du Binding.
+Respect the current state-then-label order, unlike Toggle(label, state). Do not introduce a second internal value that could diverge from Binding.
 
-CheckboxStyle et CheckboxStylePatch existants restent disponibles depuis style.hpp et widgets.hpp ;
-l’extraction n’impose pas un nouveau modèle d’options.
+Existing CheckboxStyle and CheckboxStylePatch remain available through style.hpp and widgets.hpp; extraction does not impose a new options model.
 
-## 3. État, propriété et notifications
+## 3. State, ownership, and notifications
 
-Binding<bool> possède la vérité du choix ; marque checked relue dans le Binding. La session
-pointeur/Espace ne conserve qu’un armement, pas un snapshot de bool.
+Binding<bool> owns the choice's source of truth; checked state is reread from Binding. The pointer/Space session retains only arming, not a bool snapshot.
 
-Au commit, copier le Binding puis publier !state.get(). Une écriture externe pendant l’appui est
-donc prise en compte ; il n’y a pas de restauration d’une ancienne valeur au relâchement.
+At commit, copy Binding and publish !state.get(). An external write during the press is therefore taken into account; release does not restore an old value.
 
-Les surcharges State<T>& sont converties en Binding et ne gardent pas un emprunt brut. Après
-destruction du State, Binding::valid() devient false, get() conserve la dernière valeur lisible,
-set() est ignoré et observe() reste inactive. Aucune notification implicite de destruction :
-vérifier valid à chaque dispatch/checkpoint pour couper mutation et callbacks utilisateur du modèle
-disparu. Les modèles applicatifs capturés par une fermeture ne sont pas prolongés par Binding.
+State<T>& overloads are converted to Binding and retain no raw borrow. After State destruction, Binding::valid() becomes false, get() retains the last readable value, set() is ignored, and observe() remains inactive. No implicit destruction notification: check valid at each dispatch/checkpoint to stop mutations and user callbacks for the vanished model. Binding does not extend the lifetime of application models captured by a closure.
 
-Une observation externe invalide la présentation sans simuler de geste utilisateur. Notifications
-State synchrones : snapshot stable, ajouts au passage suivant, retraits sautés et écritures
-récursives coalescées. Après exception, la valeur publiée demeure, les notifications du passage
-restant sont interrompues et le dispatch doit être réutilisable.
+External observation invalidates presentation without simulating a user gesture. Synchronous State notifications: stable snapshot, additions on the next pass, removals skipped, and recursive writes coalesced. After an exception, the published value remains, the rest of that notification pass is interrupted, and dispatch must remain reusable.
 
 ## 4. Interactions
 
-PointerDown arme et capture ; PointerUp intérieur bascule une fois ; sortie puis relâchement dehors
-et PointerCancel ne publient aucune mutation. Le label fait partie de la cible.
+PointerDown arms and captures; PointerUp inside toggles once; leaving and releasing outside, and PointerCancel, publish no mutation. The label is part of the target.
 
-Espace bascule au KeyUp après le premier KeyDown ; répétitions ne multiplient pas. Entrée n’est pas
-un choix dans l’API actuelle : laisser l’événement suivre le routage parent.
+Space toggles at KeyUp after the first KeyDown; repeats do not multiply it. Enter is not a selection key in the current API: let the event follow parent routing.
 
-Tab et disponibilité utilisent le focus commun ; ReadOnly reste focusable mais consomme les entrées
-mutantes et annule une capture déjà armée. Disabled ne reçoit pas l’activation.
+Tab and availability use shared focus; ReadOnly remains focusable but consumes mutating input and cancels already armed capture. Disabled receives no activation.
 
-Molette sans effet ; aucun drag-reorder ou menu contextuel automatique. Le groupe de plusieurs cases
-n’impose pas une exclusivité.
+Wheel has no effect; no automatic drag-reorder or context menu. A group of checkboxes does not impose exclusivity.
 
-## 5. Mesure et layout
+## 5. Measurement and layout
 
-Mesure actuelle : max(minimum_width, texte + leading_padding + box_size + label_gap + 5), hauteur
-control_height. Conserver cette géométrie pendant extraction.
+Current measurement: max(minimum_width, text + leading_padding + box_size + label_gap + 5), height control_height. Preserve this geometry during extraction.
 
-Box centrée verticalement ; label placé après box_size et label_gap. Utiliser les limites logiques
-du composant pour hit-test et clipping du texte.
+Box vertically centered; label placed after box_size and label_gap. Use logical component bounds for hit testing and text clipping.
 
-Une case cochée ne grossit pas à moins qu’un patch checked change explicitement une métrique. Parent
-étroit : garder indicateur lisible et clipper texte, sans affecter valeur.
+A checked box does not grow unless a checked patch explicitly changes a metric. Narrow parent: preserve a readable indicator and clip text without affecting the value.
 
-## 6. Présentation et invalidation
+## 6. Presentation and invalidation
 
-Conserver CheckboxStyle : base/checked/hovered/pressed/focused/disabled/read_only et ordre de
-résolution. Checkmark visible seulement si état true et métriques/couleur permettent peinture.
+Preserve CheckboxStyle: base/checked/hovered/pressed/focused/disabled/read_only and resolution order. Checkmark visible only when state is true and metrics/color permit painting.
 
-La classification d’invalidation tient compte d’un changement checked qui fait apparaître la marque
-même si les styles sont identiques. Le patch checked qui change box_size doit aussi remesurer.
+Invalidation classification accounts for a checked change revealing the mark even when styles are identical. A checked patch changing box_size must also remeasure.
 
-Le ring reste visible au clavier ; le style local ne mute pas Theme. Deux cases partageant un
-Binding peuvent être cochées ensemble sans partager hover/capture.
+The ring remains visible for keyboard use; local style does not mutate Theme. Two boxes sharing a Binding can be checked together without sharing hover/capture.
 
-## 7. Accessibilité
+## 7. Accessibility
 
-Cible : Checkbox, name=label, checked Checked/Unchecked, action Toggle et Focus si disponibles.
-ReadOnly retire Toggle mais conserve checked.
+Target: Checkbox, name=label, checked Checked/Unchecked, Toggle and Focus actions when available. ReadOnly removes Toggle but preserves checked.
 
-detail::CheckboxComponent ne fournit pas actuellement d’override semantics dans le fichier étudié ;
-publier ce contrat via les hooks Component est une condition de l’extraction complète.
+In the reviewed file, detail::CheckboxComponent currently provides no semantics override; publishing this contract through Component hooks is required for complete extraction.
 
-SemanticInfo et SemanticAction sont les interfaces backend-neutres déjà disponibles. Le rôle indiqué
-ici est un contrat cible : sa présence dans l’enum ne prouve pas sa publication par le composant
-actuel.
+SemanticInfo and SemanticAction are the backend-neutral interfaces already available. The role specified here is a target contract: its presence in the enum does not prove that the current component publishes it.
 
-Les ponts natifs restent différés (T068). Aucun résultat VoiceOver, UIA ou AT-SPI n’est revendiqué ;
-vérifier le snapshot headless indépendamment du futur pont.
+Native bridges remain deferred (T068). No VoiceOver, UIA, or AT-SPI results are claimed; verify the headless snapshot independently of the future bridge.
 
-## 8. Cycle de vie et récupération
+## 8. Lifecycle and recovery
 
-L’observation utilise déjà un objet d’invalidation détaché du composant avec flag active ; conserver
-cette protection contre un observateur précédent retirant le nœud pendant un passage.
+Observation already uses an invalidation object detached from the component with an active flag; preserve this protection against a preceding observer removing the node during a pass.
 
-unmount désactive la classification puis retire l’abonnement. L’activation termine les opérations de
-contexte avant state.set ; aucun accès this après publication.
+unmount disables classification and then removes the subscription. Activation completes context operations before state.set; no this access after publication.
 
-Tout état et routage restent confinés au thread UI/main. Les abonnements et captures sont libérés
-par instance ; aucun registre mutable global ne transporte les interactions.
+All state and routing remain confined to the UI/main thread. Subscriptions and captures are released per instance; no global mutable registry carries interactions.
 
-Les callbacks sont possédés et copiés avant appel. Restaurer captures, drapeaux et identité avant de
-publier une valeur ou appeler l’application. Un callback commencé qui lève ne sera jamais rejoué ;
-les exceptions C++ directes peuvent repartir après restauration des invariants.
+Callbacks are owned and copied before invocation. Restore captures, flags, and identity before publishing a value or calling the application. A callback that has started and throws is never replayed; direct C++ exceptions may propagate after invariants are restored.
 
-La suppression d’un sous-arbre suit la réconciliation sûre. La destruction du propriétaire UI/window
-depuis un callback doit passer par un point sûr différé ; aucune sécurité de destruction synchrone
-du propriétaire n’est promise.
+Subtree removal follows safe reconciliation. Destruction of the UI/window owner from a callback must go through a deferred safe point; synchronous owner destruction is not guaranteed to be safe.
 
-Destruction et démontage sont no-throw. Les invalidateurs différés portent un jeton faible de
-propriétaire et une identité monotone ; après retrait ils deviennent inopérants, sans retenir un
-Node ou contexte emprunté.
+Destruction and unmounting are no-throw. Deferred invalidators carry a weak owner token and a monotonic identity; after removal they become inert without retaining a Node or borrowed context.
 
-## 9. Dépendances et cas limites
+## 9. Dependencies and edge cases
 
-Dépendances : State, TextService, ThemeBinding et PressActivationState ;
-[checkbox_group](checkbox_group.md) compose des bindings indépendants sans modifier Checkbox.
+Dependencies: State, TextService, ThemeBinding, and PressActivationState; [checkbox_group](checkbox_group.md) composes independent bindings without changing Checkbox.
 
-Binding dont le State a expiré : respecter la sécurité de Binding existante, ne pas transformer le
-contrôle en pointeur brut. Label vide admis avec nom sémantique par composition.
+Binding with an expired State: preserve existing Binding safety rather than turning the control into a raw pointer. Empty label allowed with a semantic name supplied by composition.
 
-Valeur bool externe unique, aucun état mixed inventé. Le contenu de Form ne doit pas réinitialiser
-la valeur au montage ou par focus.
+One external bool value, with no invented mixed state. Form content must not reset the value at mounting or through focus.
 
-## 10. Fichiers et compatibilité
+## 10. Files and compatibility
 
-Cible : `include/nativeui/checkbox.hpp` et `src/checkbox.cpp`. Le header expose les déclarations
-publiques et uniquement les adaptateurs templates nécessaires ; le .cpp doit porter un véritable
-noyau retenu, interactions, mesure et rendu, jamais un fichier vide.
+Target: `include/nativeui/checkbox.hpp` and `src/checkbox.cpp`. The header exposes public declarations and only the necessary template adapters; the .cpp must contain a real retained core, interactions, measurement, and rendering, and must never be an empty file.
 
-Déplacer l’implémentation bool hors de widgets_checkbox_radio.inc ; préserver Checkbox et styles,
-puis faire importer checkbox.hpp par les headers historiques.
+Move the bool implementation out of widgets_checkbox_radio.inc; preserve Checkbox and styles, then import checkbox.hpp through historical headers.
 
-detail::CheckboxComponent reste privé ; aucune instanciation template prédéfinie ni remplacement de
-State<bool> requis.
+detail::CheckboxComponent remains private; no predefined template instantiation or replacement of State<bool> is required.
 
-Inscrire `src/checkbox.cpp` dans NativeUI::Core lors de l’implémentation. Préserver les includes
-collectifs historiques comme points d’entrée compatibles ; aucun type Pugl, Skia, OS ou plugin dans
-l’API publique.
+Register `src/checkbox.cpp` in NativeUI::Core during implementation. Preserve historical aggregate includes as compatible entry points; no Pugl, Skia, OS, or plugin types in the public API.
 
-Cette page spécifie le travail futur ; l’extraction, les ajouts C++ et la modification CMake ne sont
-pas réalisés par le présent lot documentaire.
+This page specifies future work; extraction, C++ additions, and CMake changes are not performed in this documentation batch.
 
-## 11. Tests et critères d’acceptation
+## 11. Tests and acceptance criteria
 
-Tests requis lors de l’implémentation ; aucun résultat d’exécution n’est annoncé par cette
-documentation.
+Tests required during implementation; this documentation reports no execution results.
 
-`checkbox_release` : clic et Espace écrivent une fois au relâchement ; Enter laisse le bool
-identique.
+`checkbox_release`: clicks and Space write once on release; Enter leaves bool unchanged.
 
-`checkbox_cancel_read_only` : annulation ou ReadOnly pendant appui ne publie pas ; capture libérée.
+`checkbox_cancel_read_only`: cancellation or ReadOnly during a press publishes nothing; capture released.
 
-`checkbox_external_value` : valeur externe changée pendant appui sert de base au commit.
+`checkbox_external_value`: an external value changed during a press becomes the commit basis.
 
-`checkbox_style_classifier` : marque, couleur et box_size entraînent les invalidations adaptées.
+`checkbox_style_classifier`: mark, color, and box_size produce appropriate invalidations.
 
-`checkbox_remove_listener` : observateur précédent retire nœud ; classificateur detached reste sûr.
+`checkbox_remove_listener`: a preceding observer removes the node; detached classification remains safe.
 
-`checkbox_observer_throw` : State récupère après exception ; clic ultérieur possible et aucune
-relance.
+`checkbox_observer_throw`: State recovers after an exception; a later click is possible, with no retry.
 
-Ajouter `examples/features/checkbox.cpp`, compilable par le consommateur public, avec mode
-`--self-test` vérifiant les transitions ci-dessus sans fenêtre interactive.
+Add `examples/features/checkbox.cpp`, compilable by a public consumer, with a `--self-test` mode that verifies the transitions above without an interactive window.
 
-Acceptation : cas comportementaux et de récupération passent, rendu headless comparé à géométrie
-stable, deux instances indépendantes, includes historiques compilables et nouvelles sources sans
-avertissement.
+Acceptance: behavioral and recovery cases pass, headless rendering is compared against stable geometry, two instances are independent, historical includes compile, and new sources are warning-free.

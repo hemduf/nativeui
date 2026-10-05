@@ -135,7 +135,7 @@ SemanticInfo AvatarComponent::semantics() const {
   info.role = SemanticRole::Image;
   info.name = snapshot_->data.name;
   if (info.name.empty())
-    info.description = "avatar sans nom";
+    info.description = "Unnamed avatar";
   info.enabled = effective_enabled();
   info.read_only = effective_read_only();
   return info;
