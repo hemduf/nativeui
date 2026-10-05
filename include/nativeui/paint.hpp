@@ -45,6 +45,9 @@ namespace detail {
 struct PainterLayerFaultAccess;
 struct PainterEffectFaultAccess;
 struct PainterTransformHistoryFaultAccess;
+struct PainterSvgFaultAccess;
+struct SvgAccess;
+struct ShapedTextPaintAccess;
 struct ShaderBrushSnapshot;
 
 [[nodiscard]] sk_sp<SkShader> materialize_shader_brush(
@@ -94,9 +97,13 @@ class Painter {
         AfterEffectOutputClip,
         AfterEffectSaveLayer,
         AfterEffectSourceClip,
+        AfterSvgTransform,
     };
 
     friend struct detail::PainterLayerFaultAccess;
+    friend struct detail::PainterSvgFaultAccess;
+    friend struct detail::SvgAccess;
+    friend struct detail::ShapedTextPaintAccess;
     friend struct detail::PainterEffectFaultAccess;
     friend struct detail::PainterTransformHistoryFaultAccess;
 

@@ -180,6 +180,7 @@ struct Transform2D {
 }
 
 struct Color {
+    [[nodiscard]] bool operator==(const Color&) const = default;
     float r{};
     float g{};
     float b{};

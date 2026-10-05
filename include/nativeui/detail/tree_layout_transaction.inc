@@ -73,6 +73,7 @@
         // so an allocation failure leaves the recorded rollback prefix usable.
         layout_transaction_journal_ = &journal;
         layout_transaction_active_ = true;
+        layout_requested_during_transaction_ = false;
         layout_dirty_ = true;
     }
 
@@ -87,13 +88,30 @@
     }
 
     void commit_layout_geometry_transaction() noexcept {
-        if (layout_transaction_journal_) layout_transaction_journal_->clear();
+        input_layout_rollback_ = false;
+        if (layout_transaction_journal_) {
+            // Geometry has succeeded as a whole. Keep the mutation guard until
+            // internal no-throw activity notifications finish, then retire the
+            // rollback journal. No speculative pass can publish these hooks.
+            for (std::size_t i = 0; i < layout_transaction_journal_->size(); ++i) {
+                const auto& checkpoint = (*layout_transaction_journal_)[i];
+                checkpoint.node->component->layout_committed(checkpoint.bounds, checkpoint.node->bounds);
+            }
+            if (layout_requested_during_transaction_) {
+                for (std::size_t i = 0; i < layout_transaction_journal_->size(); ++i)
+                    (*layout_transaction_journal_)[i].node->layout_dirty = true;
+            }
+            layout_transaction_journal_->clear();
+        }
         layout_transaction_journal_ = nullptr;
         layout_transaction_active_ = false;
-        layout_dirty_ = false;
+        layout_dirty_ = std::exchange(layout_requested_during_transaction_, false);
     }
 
     void rollback_layout_geometry_transaction() noexcept {
+        input_layout_rollback_ = layout_geometry_published_ &&
+            layout_geometry_published_epoch_ == structural_epoch_ && !layout_requested_during_transaction_;
+        input_layout_rollback_epoch_ = structural_epoch_;
         if (layout_transaction_journal_) {
             for (std::size_t index = layout_transaction_journal_->size(); index-- > 0;) {
                 auto& checkpoint = (*layout_transaction_journal_)[index];
@@ -168,6 +186,8 @@
 
     void commit_layout_publication() {
         commit_layout_geometry_transaction();
+        layout_geometry_published_ = true;
+        layout_geometry_published_epoch_ = structural_epoch_;
         active_layout_publication_ = nullptr;
 
         // Successful layout supersedes all prior geometry damage. Reuse the
@@ -193,7 +213,23 @@
             throw;
         }
         commit_layout_geometry_transaction();
+        if (&node == root_.get()) {
+            layout_geometry_published_ = true;
+            layout_geometry_published_epoch_ = structural_epoch_;
+        }
         publish_visual_bounds(node);
+    }
+
+    [[nodiscard]] bool input_geometry_is_rolled_back() const noexcept {
+        return input_layout_rollback_ && layout_geometry_published_ &&
+            input_layout_rollback_epoch_ == structural_epoch_;
+    }
+    void ensure_input_geometry() {
+        // A failed explicit layout restored a complete published geometry.
+        // Route it until new geometry work is requested, retaining dirty state
+        // for paint/resize recovery rather than rerunning a failed callback.
+        if (input_geometry_is_rolled_back()) return;
+        ensure_layout();
     }
 
     void ensure_layout() {
@@ -243,3 +279,9 @@
     LayoutTransactionJournal* layout_transaction_journal_{};
     LayoutPublicationCheckpoint* active_layout_publication_{};
     bool layout_transaction_active_{};
+    bool layout_requested_during_transaction_{};
+
+    bool layout_geometry_published_{};
+    std::uint64_t layout_geometry_published_epoch_{};
+    bool input_layout_rollback_{};
+    std::uint64_t input_layout_rollback_epoch_{};

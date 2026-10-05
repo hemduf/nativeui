@@ -13,6 +13,8 @@
         Deactivate,
         Unmount,
         Paint,
+        Refresh,
+        Semantic,
     };
 
     class LifecycleTransitionScope {
@@ -48,6 +50,23 @@
         Tree& tree_;
         LifecycleTransition previous_{LifecycleTransition::None};
         bool owns_{};
+    };
+
+    /// Pins structural/lifecycle state across fallible semantic reads/actions.
+    /// Separate from focus recovery: neither query nor nested resize can retire
+    /// a component while its semantic callback is still on the stack.
+    class SemanticOperationScope final {
+    public:
+        explicit SemanticOperationScope(Tree& tree)
+            : tree_(tree), lifecycle_(tree, LifecycleTransition::Semantic, false) {
+            ++tree_.semantic_operation_running_;
+        }
+        ~SemanticOperationScope() noexcept { --tree_.semantic_operation_running_; }
+        SemanticOperationScope(const SemanticOperationScope&) = delete;
+        SemanticOperationScope& operator=(const SemanticOperationScope&) = delete;
+    private:
+        Tree& tree_;
+        LifecycleTransitionScope lifecycle_;
     };
 
     class PaintDamageTransaction final {
@@ -94,6 +113,7 @@
         void commit() noexcept {
             if (!owner_) return;
             owner_->scene_frame_transaction_active_ = false;
+            owner_->retain_descendant_action_frame();
             owner_ = nullptr;
             count_ = 0;
         }
@@ -283,6 +303,7 @@
     }
 
     void retire_mount_identity(NodeId id) noexcept {
+        std::erase(retained_checkpoint_nodes_, id);
         const auto live = std::lower_bound(retained_invalidation_live_nodes_.begin(),
                                            retained_invalidation_live_nodes_.end(), id);
         if (live != retained_invalidation_live_nodes_.end() && *live == id) {
@@ -306,6 +327,8 @@
         auto& progress = journal.back();
 
         progress.live_identity_started = retain_mount_identity(node);
+        if (progress.live_identity_started && node.component->uses_retained_checkpoint())
+            retained_checkpoint_nodes_.push_back(node.id);
 
         if (auto* binding = dynamic_cast<detail::ThemeBinding*>(node.component.get())) {
             progress.theme_setup_started = true;
@@ -333,7 +356,10 @@
                 &Tree::retained_paint_invalidator_factory,
                 &Tree::retained_layout_invalidator_factory,
                 &Tree::retained_focus_invalidator_factory,
-                &Tree::retained_availability_invalidator_factory},
+                &Tree::retained_availability_invalidator_factory,
+                &Tree::retained_focus_requester_factory,
+                &Tree::retained_descendant_action_factory,
+                &Tree::retained_input_capability_factory},
             overlay_service_};
         progress.component_started = true;
         node.component->mount(context);
@@ -367,7 +393,8 @@
                         node.id,
                         node.bounds,
                         paint_invalidator(node),
-                        layout_invalidator(node)};
+                        layout_invalidator(node),
+                        lifecycle_dispatcher_};
                     node.component->unmount(context);
                 } catch (...) {
                     // The original mount exception owns propagation. Rollback
@@ -430,7 +457,8 @@
             node.id,
             node.bounds,
             paint_invalidator(node),
-            layout_invalidator(node)};
+            layout_invalidator(node),
+                        lifecycle_dispatcher_};
         node.component->activate(context);
         for (auto& child : node.children) activate_node_recorded(*child, journal);
     }
@@ -444,7 +472,8 @@
                     node->id,
                     node->bounds,
                     paint_invalidator(*node),
-                    layout_invalidator(*node)};
+                    layout_invalidator(*node),
+                    lifecycle_dispatcher_};
                 node->component->deactivate(context);
             } catch (...) {
                 // Preserve the original activate exception while completing the
@@ -496,7 +525,7 @@
         unmount_node_untracked(node);
     }
 
-    LifecycleTransition lifecycle_transition_{LifecycleTransition::None};
+    mutable LifecycleTransition lifecycle_transition_{LifecycleTransition::None};
     bool scene_frame_transaction_active_{};
     Node* failed_mount_root_{};
     Node* failed_activation_root_{};

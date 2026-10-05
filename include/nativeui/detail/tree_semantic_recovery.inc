@@ -1,3 +1,4 @@
+    mutable std::size_t semantic_operation_running_{};
     std::vector<NodeId> dynamic_teardown_quarantine_ids_;
     std::uint64_t dynamic_teardown_quarantine_epoch_{};
 
@@ -44,9 +45,13 @@
     };
 
     void reset_semantic_recovery() noexcept {
+        pending_descendant_actions_.clear();
         focus_transition_stack_.clear();
         pending_focus_target_ = kInvalidNodeId;
         pending_focus_request_ = false;
+        pending_focus_reason_ = FocusChangeReason::Ordinary;
+        retained_focus_target_ = kInvalidNodeId;
+        retained_focus_request_ = false;
         focus_blur_started_ = kInvalidNodeId;
         focus_blur_started_from_availability_ = false;
         availability_cleared_focus_ = nullptr;

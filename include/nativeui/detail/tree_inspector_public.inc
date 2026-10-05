@@ -61,6 +61,7 @@
         SkCanvas& canvas,
         PlatformServices& platform) {
         if (lifecycle_transition_active()) return {};
+        refresh_retained_components();
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
@@ -72,5 +73,6 @@
         Painter painter{canvas};
         paint_node(*root_, painter, platform, viewport_rect());
         paint_dirty_.clear();
+        retain_descendant_action_frame();
         return snapshot;
     }

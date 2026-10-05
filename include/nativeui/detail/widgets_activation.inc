@@ -38,6 +38,16 @@ public:
                 return {EventResult::Handled, false};
             }
 
+            case InputType::PointerLeave: {
+                const bool changed = hovered_ || (pointer_armed_ && pointer_inside_);
+                hovered_ = false;
+                pointer_inside_ = false;
+                // Keep the armed contact and keyboard latches. A captured
+                // pointer may reenter before release; leave is not cancellation.
+                if (changed && invalidate_visual_changes) context.invalidate();
+                return {EventResult::Handled, false};
+            }
+
             case InputType::PointerUp: {
                 if (!pointer_armed_) return {EventResult::Ignored, false};
                 const bool inside = context.bounds().contains(event.position);

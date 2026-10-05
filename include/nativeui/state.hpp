@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -48,6 +51,12 @@ class Binding;
 
 template <detail::StateValue T>
 class State {
+    struct ReadCopyFrame {
+        ReadCopyFrame* previous{};
+        std::unique_ptr<T> pending_value;
+        std::function<bool()> condition;
+        bool intent{};
+    };
     struct Listener {
         std::size_t id{};
         bool active{true};
@@ -79,6 +88,10 @@ class State {
         void invalidate_owner() noexcept {
             owner_alive = false;
             pending_value.reset();
+            pending_condition = {};
+            copied_pending_value.reset();
+            copied_condition = {};
+            copied_intent = false;
             for (auto& listener : listeners) {
                 if (listener) listener->active = false;
             }
@@ -94,8 +107,14 @@ class State {
         }
 
         T value;
+        std::uint64_t revision{};
         std::vector<std::unique_ptr<Listener>> listeners;
         std::optional<T> pending_value;
+        std::function<bool()> pending_condition;
+        ReadCopyFrame* read_copy{};
+        std::unique_ptr<T> copied_pending_value;
+        std::function<bool()> copied_condition;
+        bool copied_intent{};
         std::size_t next_listener_id{1};
         bool dispatching{false};
         bool cleanup_needed{false};
@@ -156,8 +175,27 @@ public:
 
     [[nodiscard]] const T& get() const noexcept { return control_->value; }
 
+    // A committed change advances this counter before observers run. Reading
+    // it does not compare/copy T or call user code; discarded recursive writes
+    // and writes of an equal value do not advance it.
+    [[nodiscard]] std::uint64_t revision() const noexcept { return control_->revision; }
+
+    // Opt-in owned read. Reentrant writes made while T is being copied are
+    // coalesced and committed after the copy; a failed copy discards only its
+    // own writes. get() keeps its historical borrowed-reference contract.
+    [[nodiscard]] T snapshot() const requires std::copy_constructible<T> {
+        return snapshot_control(control_);
+    }
+
     void set(T value) {
         set_control(control_, std::move(value));
+    }
+
+    // The condition is checked after equality and immediately before each
+    // value commit, including a queued recursive write. A rejected write does
+    // not advance revision or notify observers.
+    void set_if(T value, std::function<bool()> condition) {
+        set_control(control_, std::move(value), std::move(condition));
     }
 
     Subscription observe(Callback callback) {
@@ -170,33 +208,82 @@ private:
     // Shared mutation entry point for State<T> and Binding<T>. Taking the
     // control block by value is deliberate: a callback is allowed to destroy
     // the owning State while the synchronous notification stack is active.
-    static void set_control(std::shared_ptr<Control> control, T value) {
+    static void set_control(std::shared_ptr<Control> control, T value,
+                            std::function<bool()> condition = {}) {
         if (!control->owner_alive) return;
 
+        if (control->read_copy) {
+            const bool unchanged = value == control->value;
+            if (!control->owner_alive) return;
+            auto prepared = unchanged ? std::unique_ptr<T>{}
+                                      : std::make_unique<T>(std::move(value));
+            if (!control->owner_alive) return;
+            auto& frame = *control->read_copy;
+            frame.pending_value = std::move(prepared);
+            frame.condition = std::move(condition);
+            frame.intent = true;
+            return;
+        }
         if (control->dispatching) {
             // Recursive writes never mutate the value visible to the current
             // pass. The latest write wins for the next pass; writing the current
             // value cancels an earlier pending write.
-            if (value == control->value) {
+            const bool unchanged = value == control->value;
+            if (!control->owner_alive) return;
+            control->copied_intent = false;
+            control->copied_pending_value.reset();
+            control->copied_condition = {};
+            if (unchanged) {
                 control->pending_value.reset();
+                control->pending_condition = {};
             } else {
                 control->pending_value = std::move(value);
+                control->pending_condition = std::move(condition);
             }
             return;
         }
 
-        if (value == control->value) return;
+        const bool unchanged = value == control->value;
+        if (!control->owner_alive || unchanged) return;
 
         control->pending_value = std::move(value);
+        control->pending_condition = std::move(condition);
+        dispatch_control(std::move(control));
+    }
+
+    static void dispatch_control(std::shared_ptr<Control> control) {
         control->dispatching = true;
 
         try {
-            while (control->owner_alive && control->pending_value.has_value()) {
-                T next_value = std::move(*control->pending_value);
-                control->pending_value.reset();
-                if (next_value == control->value) continue;
+            while (control->owner_alive &&
+                   (control->pending_value.has_value() || control->copied_intent)) {
+                std::optional<T> prepared_value;
+                std::function<bool()> condition;
+                if (control->copied_intent) {
+                    auto owned = std::move(control->copied_pending_value);
+                    condition = std::move(control->copied_condition);
+                    control->copied_intent = false;
+                    control->pending_value.reset();
+                    control->pending_condition = {};
+                    if (!owned) continue;
+                    prepared_value.emplace(std::move(*owned));
+                } else {
+                    condition = std::move(control->pending_condition);
+                    prepared_value.emplace(std::move(*control->pending_value));
+                    control->pending_value.reset();
+                }
+                T& next_value = *prepared_value;
+                const bool unchanged = next_value == control->value;
+                if (!control->owner_alive) break;
+                if (unchanged) continue;
+                if (condition && !condition()) continue;
+                if (!control->owner_alive) break;
 
+                if (control->revision == std::numeric_limits<std::uint64_t>::max()) {
+                    throw std::overflow_error("NativeUI State revision exhausted");
+                }
                 control->value = std::move(next_value);
+                ++control->revision;
 
                 // Heap-stable listener slots avoid copying callback objects on
                 // each set(). Capturing the pass size prevents observers added
@@ -217,6 +304,10 @@ private:
             // bookkeeping/registry state while unwinding, then propagate the
             // original observer exception to the direct C++ caller.
             control->pending_value.reset();
+            control->pending_condition = {};
+            control->copied_pending_value.reset();
+            control->copied_condition = {};
+            control->copied_intent = false;
             control->dispatching = false;
             if (control->cleanup_needed) control->compact_inactive();
             throw;
@@ -224,6 +315,38 @@ private:
 
         control->dispatching = false;
         if (control->cleanup_needed) control->compact_inactive();
+    }
+
+    static T snapshot_control(std::shared_ptr<Control> control)
+        requires std::copy_constructible<T> {
+        ReadCopyFrame frame;
+        frame.previous = control->read_copy;
+        control->read_copy = &frame;
+        try {
+            T result{control->value};
+            control->read_copy = frame.previous;
+            if (control->owner_alive && frame.intent) {
+                if (frame.previous) {
+                    frame.previous->pending_value = std::move(frame.pending_value);
+                    frame.previous->condition = std::move(frame.condition);
+                    frame.previous->intent = true;
+                } else {
+                    control->copied_pending_value = std::move(frame.pending_value);
+                    control->copied_condition = std::move(frame.condition);
+                    control->copied_intent = true;
+                }
+            }
+            if (!control->read_copy && !control->dispatching &&
+                control->owner_alive && control->copied_intent) {
+                dispatch_control(control);
+            }
+            return result;
+        } catch (...) {
+            if (control->read_copy == &frame) control->read_copy = frame.previous;
+            // This frame owns its unpublished intent. Existing writes queued
+            // before it and outer read frames remain intact; no callback runs.
+            throw;
+        }
     }
 
     static Subscription observe_control(std::shared_ptr<Control> control,
@@ -274,8 +397,21 @@ public:
         return control_->value;
     }
 
+    // An expired binding retains the revision of its last committed value.
+    [[nodiscard]] std::uint64_t revision() const noexcept {
+        return control_->revision;
+    }
+
+    [[nodiscard]] T snapshot() const requires std::copy_constructible<T> {
+        return State<T>::snapshot_control(control_);
+    }
+
     void set(T value) {
         State<T>::set_control(control_, std::move(value));
+    }
+
+    void set_if(T value, std::function<bool()> condition) {
+        State<T>::set_control(control_, std::move(value), std::move(condition));
     }
 
     Subscription observe(Callback callback) {

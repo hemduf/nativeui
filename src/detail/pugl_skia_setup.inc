@@ -846,6 +846,12 @@ Key translate_key(uint32_t key, PuglMods mods) {
     case PUGL_KEY_RIGHT: return Key::Right;
     case PUGL_KEY_UP: return Key::Up;
     case PUGL_KEY_DOWN: return Key::Down;
+    case PUGL_KEY_F2: return Key::F2;
+    case PUGL_KEY_PAGE_UP: return Key::PageUp;
+    case PUGL_KEY_PAGE_DOWN: return Key::PageDown;
+    case PUGL_KEY_F3: return Key::F3;
+    case PUGL_KEY_MENU: return Key::Menu;
+    case PUGL_KEY_F10: return Key::F10;
     case PUGL_KEY_HOME: return Key::Home;
     case PUGL_KEY_END: return Key::End;
     case PUGL_KEY_BACKSPACE: return Key::Backspace;

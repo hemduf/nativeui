@@ -1,4 +1,6 @@
 #include <nativeui/nativeui.hpp>
+#include "detail/shaped_text_backend.hpp"
+#include "include/core/SkSpan.h"
 
 #include <algorithm>
 #include <atomic>
@@ -480,6 +482,113 @@ void include_metrics(TextMetrics& output, const SkFontMetrics& input, bool first
 }
 
 } // namespace
+
+struct ShapingFonts {
+    std::shared_ptr<const EmbeddedFaces> embedded;
+    sk_sp<SkFontMgr> manager;
+};
+
+ShapingFontSnapshot capture_shaping_fonts() {
+#if defined(__EMSCRIPTEN__)
+    auto manager = platform_font_manager();
+    auto embedded = embedded_faces_snapshot();
+#else
+    auto embedded = embedded_faces_snapshot();
+    auto manager = platform_font_manager();
+#endif
+    return std::make_shared<const ShapingFonts>(
+        ShapingFonts{std::move(embedded), std::move(manager)});
+}
+
+sk_sp<SkFontMgr> shaping_font_manager(const ShapingFonts& fonts) noexcept {
+    return fonts.manager;
+}
+
+std::optional<ShapingFontMatch> resolve_shaping_font(
+    const ShapingFonts& fonts, const TextStyle& style,
+    std::span<const char32_t> required_scalars) {
+    if (!std::isfinite(style.size) || style.size < 0.0f) {
+        throw std::invalid_argument("Shaping font size must be finite and nonnegative");
+    }
+    for (const auto scalar : required_scalars) {
+        if (scalar > 0x10FFFF || (scalar >= 0xD800 && scalar <= 0xDFFF)) {
+            throw std::invalid_argument("Shaping coverage requires Unicode scalars");
+        }
+    }
+    const auto first = required_scalars.empty() ? U'\0' : required_scalars.front();
+    const auto covers = [&](const sk_sp<SkTypeface>& face) {
+        return face && std::all_of(required_scalars.begin(), required_scalars.end(),
+                                  [&](char32_t scalar) { return has_glyph(face, scalar); });
+    };
+    const auto matched = [&](const sk_sp<SkTypeface>& face, bool complete) {
+        return ShapingFontMatch{make_font(face, style, synthetic_bold(face, style)), complete};
+    };
+    std::size_t priority{};
+    const auto named = [&](std::string_view family) -> std::optional<ShapingFontMatch> {
+        if (family.empty()) return {};
+        const auto face = match_named_family(*fonts.embedded, fonts.manager, family,
+                                            style, first, priority++, true);
+        if (covers(face.typeface)) return matched(face.typeface, true);
+        return {};
+    };
+    if (auto candidate = named(style.family)) return candidate;
+    for (const auto& family : style.fallback_families) {
+        if (auto candidate = named(family)) return candidate;
+    }
+    if (fonts.manager) {
+        for (const auto scalar : required_scalars) {
+            auto face = fonts.manager->matchFamilyStyleCharacter(
+                nullptr, requested_style(style), nullptr, 0,
+                static_cast<SkUnichar>(scalar));
+            if (covers(face)) return matched(face, true);
+        }
+    }
+#if defined(__EMSCRIPTEN__)
+    for (const auto& embedded : *fonts.embedded) {
+        if (covers(embedded.typeface)) return matched(embedded.typeface, true);
+    }
+#endif
+    const auto fallback = resolve_face(style, first, *fonts.embedded, fonts.manager);
+    if (!fallback.typeface) return {};
+    return matched(fallback.typeface, covers(fallback.typeface));
+}
+
+void ShapedTextPaintAccess::draw_glyph_run(
+    Painter& painter, Point origin, const SkFont& font,
+    std::span<const SkGlyphID> glyphs, std::span<const SkPoint> positions,
+    std::span<const std::uint32_t> clusters, std::string_view utf8, Color color) {
+    if (glyphs.size() != positions.size() || glyphs.size() != clusters.size()) {
+        throw std::invalid_argument("Shaped glyph arrays must have equal sizes");
+    }
+    if (glyphs.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        utf8.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::length_error("Shaped text exceeds backend count limits");
+    }
+    if (!std::isfinite(origin.x) || !std::isfinite(origin.y) ||
+        !std::isfinite(font.getSize())) {
+        throw std::invalid_argument("Shaped text coordinates must be finite");
+    }
+    for (std::size_t offset{}; offset < utf8.size();) {
+        const auto scalar = decode_utf8(utf8, offset);
+        if (!scalar.valid) throw std::invalid_argument("Shaped text requires repaired UTF-8");
+        offset = scalar.next;
+    }
+    for (std::size_t index{}; index < glyphs.size(); ++index) {
+        const auto cluster = clusters[index];
+        if (!std::isfinite(positions[index].x()) || !std::isfinite(positions[index].y()) ||
+            cluster >= utf8.size() ||
+            (static_cast<unsigned char>(utf8[cluster]) & 0xC0u) == 0x80u) {
+            throw std::invalid_argument("Invalid shaped position or UTF-8 cluster");
+        }
+    }
+    if (glyphs.empty()) return;
+    const auto paint = painter.make_fill_paint(color, {});
+    painter.canvas_.drawGlyphs(
+        SkSpan<const SkGlyphID>{glyphs.data(), glyphs.size()},
+        SkSpan<const SkPoint>{positions.data(), positions.size()},
+        SkSpan<const std::uint32_t>{clusters.data(), clusters.size()},
+        SkSpan<const char>{utf8.data(), utf8.size()}, {origin.x, origin.y}, font, paint);
+}
 
 ResolvedTextLayout resolve_text_layout(std::string_view text, const TextStyle& style) {
     ResolvedTextLayout layout{};

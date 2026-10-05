@@ -83,6 +83,7 @@ private:
     std::weak_ptr<detail::DispatcherState> state_;
 
     friend class AnimationContext;
+    friend class Toast;
     friend class detail::DispatcherOwner;
     friend struct detail::DispatcherTestAccess;
 };

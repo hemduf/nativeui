@@ -11,12 +11,18 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace ui {
+struct TooltipStyle {
+    std::optional<Color> background, text, border;
+    std::optional<float> border_width, radius, padding, max_width;
+    std::optional<TextStyle> text_style;
+};
 namespace detail {
 
 inline constexpr float kTooltipDefaultMaxWidth = 320.0f;
@@ -34,99 +40,53 @@ public:
     TooltipController(Dispatcher dispatcher,
                       DispatcherDuration delay,
                       Callback show,
-                      Callback hide)
-        : state_(std::make_shared<State>(
-              std::move(dispatcher),
-              delay.count() < 0.0 ? DispatcherDuration::zero() : delay,
-              std::move(show),
-              std::move(hide))) {}
+                      Callback hide);
 
     TooltipController(const TooltipController&) = delete;
     TooltipController& operator=(const TooltipController&) = delete;
     TooltipController(TooltipController&&) = delete;
     TooltipController& operator=(TooltipController&&) = delete;
 
-    ~TooltipController() noexcept { shutdown(); }
+    ~TooltipController() noexcept;
 
-    void set_hovered(bool hovered) { set_trigger(Trigger::Hover, hovered); }
-    void set_focused(bool focused) { set_trigger(Trigger::Focus, focused); }
+    void set_hovered(bool hovered);
+    void set_focused(bool focused);
 
     /// A pointer button interaction anywhere in the owning tree makes hover
     /// ineligible: a plain hover must never arm a tooltip during a drag. The
     /// end of the interaction is deliberately not a new eligibility
     /// transition, so releasing a stationary pointer does not immediately
     /// re-show after a PointerDown dismissal.
-    void set_pointer_interaction_active(bool active) {
-        if (!state_ || state_->shutting_down ||
-            state_->pointer_interaction_active == active) {
-            return;
-        }
-
-        state_->pointer_interaction_active = active;
-        if (active) {
-            state_->suppressed = true;
-            cancel_pending(*state_);
-            hide_visible(*state_);
-        }
-    }
+    void set_pointer_interaction_active(bool active);
 
     /// Hidden/Collapsed/Disabled anchors cannot present a tooltip. Losing
     /// availability cancels both pending and visible work and suppresses
     /// stationary eligibility until the retained hover/focus state actually
     /// becomes false and then true again. Availability restoration alone is
     /// therefore never treated as a synthetic hover/focus trigger.
-    void set_anchor_available(bool available) {
-        if (!state_ || state_->shutting_down || state_->anchor_available == available) {
-            return;
-        }
-
-        state_->anchor_available = available;
-        if (!available) {
-            state_->suppressed = true;
-            cancel_pending(*state_);
-            hide_visible(*state_);
-        }
-    }
+    void set_anchor_available(bool available);
 
     /// T061 closed the presentation externally (anchor became unavailable,
     /// overlay-stack dismissal, view teardown). Drop the visible flag without
     /// invoking the hide callback because the overlay lifetime already ended.
-    void notify_presentation_closed() noexcept {
-        if (!state_ || !state_->visible) return;
-        state_->visible = false;
-    }
+    void notify_presentation_closed() noexcept;
 
     /// PointerDown is a terminal dismissal for the current continuous
     /// eligibility interval. Remaining hovered/focused does not silently arm a
     /// new timer; at least one complete ineligible -> eligible transition is
     /// required before another presentation attempt.
-    void dismiss_until_eligibility_transition() {
-        if (!state_) return;
-        state_->suppressed = true;
-        cancel_pending(*state_);
-        hide_visible(*state_);
-    }
+    void dismiss_until_eligibility_transition();
 
     /// Cancel the current pending/visible presentation without installing the
     /// stronger PointerDown suppression rule. A later eligibility transition
     /// may arm a fresh full delay.
-    void cancel() {
-        if (!state_) return;
-        cancel_pending(*state_);
-        hide_visible(*state_);
-    }
+    void cancel();
 
-    [[nodiscard]] bool pending() const noexcept {
-        return state_ && state_->timer.valid();
-    }
+    [[nodiscard]] bool pending() const noexcept;
 
-    [[nodiscard]] bool visible() const noexcept {
-        return state_ && state_->visible;
-    }
+    [[nodiscard]] bool visible() const noexcept;
 
-    [[nodiscard]] bool eligible() const noexcept {
-        return state_ && state_->eligible();
-    }
+    [[nodiscard]] bool eligible() const noexcept;
 
 private:
     enum class Trigger {
@@ -163,194 +123,26 @@ private:
         bool shutting_down{};
     };
 
-    static void cancel_pending(State& state) {
-        if (!state.timer.valid()) return;
-        (void)state.dispatcher.cancel(state.timer);
-        state.timer = {};
-    }
+    static void cancel_pending(State& state);
 
-    static void hide_visible(State& state) {
-        if (!state.visible) return;
+    static void hide_visible(State& state);
 
-        // Publish the hidden state before crossing the integration callback so
-        // a reentrant dismissal cannot observe a half-hidden controller. If the
-        // overlay close itself fails, roll back the exact publication and keep
-        // the only state that can drive a later retry.
-        state.visible = false;
-        auto hide = state.hide;
-        try {
-            if (hide) hide();
-        } catch (...) {
-            state.visible = true;
-            throw;
-        }
-    }
+    static void arm(const std::shared_ptr<State>& state);
 
-    static void arm(const std::shared_ptr<State>& state) {
-        if (!state || state->shutting_down || state->suppressed ||
-            !state->eligible() || state->visible || state->timer.valid()) {
-            return;
-        }
+    void set_trigger(Trigger trigger, bool value);
 
-        std::weak_ptr<State> weak = state;
-        state->timer = state->dispatcher.schedule_after(state->delay, [weak] {
-            const auto locked = weak.lock();
-            if (!locked) return;
-
-            locked->timer = {};
-            if (locked->shutting_down || locked->suppressed ||
-                !locked->eligible() || locked->visible) {
-                return;
-            }
-
-            // Publish visibility before integration code runs so a reentrant
-            // dismissal cannot observe a half-shown controller. A failed
-            // OverlayState transaction never commits a usable handle, so roll
-            // this flag back before propagating and allow a future eligibility
-            // transition to retry normally.
-            locked->visible = true;
-            auto show = locked->show;
-            try {
-                if (show) show();
-            } catch (...) {
-                locked->visible = false;
-                throw;
-            }
-        });
-    }
-
-    void set_trigger(Trigger trigger, bool value) {
-        if (!state_ || state_->shutting_down) return;
-
-        const bool was_eligible = state_->eligible();
-        bool& field = trigger == Trigger::Hover ? state_->hovered : state_->focused;
-        if (field == value) return;
-        field = value;
-        const bool is_eligible = state_->eligible();
-
-        if (!is_eligible) {
-            cancel_pending(*state_);
-            hide_visible(*state_);
-            // Only the retained hover/focus state reaching false clears
-            // suppression. Availability restoration itself is deliberately not
-            // a new presentation trigger, and neither is the end of a pointer
-            // button interaction.
-            if (!state_->triggered() && !state_->pointer_interaction_active) {
-                state_->suppressed = false;
-            }
-            return;
-        }
-
-        if (!was_eligible && is_eligible) {
-            state_->suppressed = false;
-            arm(state_);
-        }
-    }
-
-    void shutdown() noexcept {
-        if (!state_) return;
-        state_->shutting_down = true;
-        cancel_pending(*state_);
-        try {
-            hide_visible(*state_);
-        } catch (...) {
-            // Destruction/unmount is a no-unwind boundary. OverlayState owns
-            // the authoritative structural lifetime; a failed best-effort hide
-            // must never terminate the process while the controller is dying.
-        }
-        state_->show = {};
-        state_->hide = {};
-        state_.reset();
-    }
+    void shutdown() noexcept;
 
     std::shared_ptr<State> state_;
 };
 
-[[nodiscard]] inline std::size_t tooltip_utf8_sequence_length(unsigned char lead) noexcept {
-    if (lead < 0x80) return 1;
-    if ((lead >> 5) == 0x6) return 2;
-    if ((lead >> 4) == 0xE) return 3;
-    if ((lead >> 3) == 0x1E) return 4;
-    return 1;
-}
+[[nodiscard]] std::size_t tooltip_utf8_sequence_length(unsigned char lead) noexcept;
 
 /// Deterministic UTF-8 line wrapping for tooltip text. Words are split on
 /// ASCII spaces/newlines only, so multi-byte sequences are never split except
 /// by a codepoint-aligned hard break for a word wider than the limit.
-[[nodiscard]] inline std::vector<std::string> wrap_tooltip_text(
-    std::string_view text, const TextStyle& style, float max_width) {
-    const float limit = max_width > 0.0f ? max_width : 1.0f;
-    std::vector<std::string> lines;
-    std::string current;
-
-    auto flush_current = [&] {
-        while (!current.empty() && current.back() == ' ') current.pop_back();
-        lines.push_back(std::move(current));
-        current.clear();
-    };
-    auto fits = [&](std::string_view candidate) {
-        return TextService::measure(candidate, style).width <= limit;
-    };
-
-    std::size_t index = 0;
-    while (index < text.size()) {
-        const char lead = text[index];
-        if (lead == '\n') {
-            flush_current();
-            ++index;
-            continue;
-        }
-        if (lead == ' ') {
-            ++index;
-            continue;
-        }
-
-        const std::size_t word_start = index;
-        while (index < text.size() && text[index] != ' ' && text[index] != '\n') {
-            const auto length = tooltip_utf8_sequence_length(
-                static_cast<unsigned char>(text[index]));
-            index += std::min(length, text.size() - index);
-        }
-        std::string_view word = text.substr(word_start, index - word_start);
-
-        if (!current.empty()) {
-            std::string candidate = current;
-            candidate.push_back(' ');
-            candidate.append(word);
-            if (!fits(candidate)) flush_current();
-        }
-
-        if (current.empty() && !fits(word)) {
-            // Hard-break an unbreakable word on codepoint boundaries.
-            while (!word.empty()) {
-                std::size_t bytes = 0;
-                while (bytes < word.size()) {
-                    const auto length = std::min(
-                        tooltip_utf8_sequence_length(static_cast<unsigned char>(word[bytes])),
-                        word.size() - bytes);
-                    if (bytes > 0 && !fits(word.substr(0, bytes + length))) break;
-                    bytes += length;
-                }
-                if (bytes == 0) bytes = 1;
-                if (bytes >= word.size()) {
-                    current.assign(word);
-                    word = {};
-                    break;
-                }
-                lines.push_back(std::string{word.substr(0, bytes)});
-                word.remove_prefix(bytes);
-            }
-            continue;
-        }
-
-        if (!current.empty()) current.push_back(' ');
-        current.append(word);
-    }
-
-    while (!current.empty() && current.back() == ' ') current.pop_back();
-    if (!current.empty() || lines.empty()) lines.push_back(std::move(current));
-    return lines;
-}
+[[nodiscard]] std::vector<std::string> wrap_tooltip_text(
+    std::string_view text, const TextStyle& style, float max_width);
 
 /// Non-interactive presentation surface for one tooltip overlay entry. It
 /// resolves deterministic internal defaults that map 1:1 to the future typed
@@ -358,62 +150,24 @@ private:
 /// temporary public style API is introduced before T038/T039.
 class TooltipSurfaceComponent final : public Component, public ThemeBinding {
 public:
-    TooltipSurfaceComponent(std::string text, float max_width)
-        : text_(std::move(text)), max_width_(max_width) {}
+    TooltipSurfaceComponent(std::string text, float max_width);
+    TooltipSurfaceComponent(std::string text, TooltipStyle style);
 
-    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override {
-        const auto style = text_style();
-        const float content_max = std::max(1.0f, max_width_ - padding() * 2.0f);
-        const auto lines = wrap_tooltip_text(text_, style, content_max);
-        float width = 0.0f;
-        for (const auto& line : lines) {
-            width = std::max(width, TextService::measure(line, style).width);
-        }
-        const float line_height = TextService::measure("Ag", style).height;
-        return Size{
-            width + padding() * 2.0f,
-            static_cast<float>(lines.size()) * line_height + padding() * 2.0f};
-    }
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>&) const override;
 
-    void paint(PaintContext& context) const override {
-        const auto bounds = context.bounds();
-        const auto style = text_style();
-        auto& painter = context.painter();
-
-        painter.fill_rounded_rect(bounds, radius(), background());
-        if (border_width() > 0.0f) {
-            painter.stroke_rounded_rect(bounds, radius(), border_width(), border());
-        }
-
-        const float inset = padding();
-        const float content_max = std::max(1.0f, max_width_ - inset * 2.0f);
-        const auto lines = wrap_tooltip_text(text_, style, content_max);
-        const float line_height = TextService::measure("Ag", style).height;
-        TextStyle line_style = style;
-        line_style.align = TextAlign::Left;
-        float center_y = bounds.y + inset + line_height * 0.5f;
-        for (const auto& line : lines) {
-            painter.text({bounds.x + inset, center_y}, line, line_style);
-            center_y += line_height;
-        }
-    }
+    void paint(PaintContext& context) const override;
 
 private:
-    [[nodiscard]] TextStyle text_style() const {
-        const auto& theme = current_theme();
-        TextStyle style{};
-        style.size = theme.typography.control_size;
-        style.color = theme.palette.text;
-        return style;
-    }
-    [[nodiscard]] Color background() const { return current_theme().palette.surface; }
-    [[nodiscard]] Color border() const { return current_theme().palette.border; }
-    [[nodiscard]] float border_width() const { return current_theme().controls.border_width; }
-    [[nodiscard]] float radius() const { return current_theme().radii.sm; }
-    [[nodiscard]] float padding() const { return current_theme().spacing.sm; }
+    [[nodiscard]] TextStyle text_style() const;
+    [[nodiscard]] Color background() const;
+    [[nodiscard]] Color border() const;
+    [[nodiscard]] float border_width() const;
+    [[nodiscard]] float radius() const;
+    [[nodiscard]] float padding() const;
 
     std::string text_;
     float max_width_{};
+    TooltipStyle style_;
 };
 
 /// Text-only Tooltip decorator.
@@ -430,184 +184,58 @@ class TooltipComponent final : public Component,
                                public RetainedInteractionObserver,
                                public TransientPresentation {
 public:
-    TooltipComponent(std::string text, std::chrono::milliseconds delay)
-        : text_(std::move(text)),
-          delay_(delay.count() < 0 ? std::chrono::milliseconds{0} : delay) {}
+    TooltipComponent(std::string text, std::chrono::milliseconds delay);
+    TooltipComponent(std::string text, std::chrono::milliseconds delay, TooltipStyle style);
 
-    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override {
-        return children.empty() ? Size{} : children.front().preferred;
-    }
+    [[nodiscard]] Size measure(const std::vector<ChildMetrics>& children) const override;
 
-    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override {
-        return children.empty() ? Size{} : children.front().minimum;
-    }
+    [[nodiscard]] Size minimum_size(const std::vector<ChildMetrics>& children) const override;
 
     [[nodiscard]] Constraints child_constraints(
-        const Constraints& constraints, std::size_t, std::size_t) const override {
-        return constraints;
-    }
+        const Constraints& constraints, std::size_t, std::size_t) const override;
 
     void layout_children(
         Rect bounds,
         const std::vector<ChildMetrics>&,
-        std::vector<ChildPlacement>& placements) const override {
-        if (!placements.empty()) placements.front().bounds = bounds;
-    }
+        std::vector<ChildPlacement>& placements) const override;
 
-    void mount(MountContext& context) override {
-        node_id_ = context.node_id();
-        overlay_service_ = context.overlay_service();
-        layout_invalidator_ = context.layout_invalidator();
-        mounted_ = true;
-    }
+    void mount(MountContext& context) override;
 
-    void unmount(LifecycleContext&) override {
-        mounted_ = false;
-        // Retained teardown must not invalidate a dying UI or close an overlay
-        // through a platform callback. Drop the borrowed seams first; T061
-        // removes any still-registered anchored overlay with the UI/overlay
-        // state itself.
-        overlay_service_ = nullptr;
-        layout_invalidator_ = {};
-        controller_.reset();
-        overlay_ = {};
-    }
+    void unmount(LifecycleContext&) override;
 
-    void activate(LifecycleContext&) override {
-        reconcile_presentation();
-        refresh_anchor_availability();
-    }
+    void activate(LifecycleContext&) override;
 
-    void deactivate(LifecycleContext&) override {
-        dismiss_transient_presentation();
-        overlay_ = {};
-    }
+    void deactivate(LifecycleContext&) override;
 
     void retained_pointer_hover_changed(
-        bool hovered, bool pointer_interaction_active, Dispatcher dispatcher) override {
-        reconcile_presentation();
-        refresh_anchor_availability();
-        hovered_ = hovered;
-        pointer_interaction_active_ = pointer_interaction_active;
-        ensure_controller(dispatcher);
-        if (controller_) {
-            controller_->set_pointer_interaction_active(pointer_interaction_active_);
-            controller_->set_hovered(hovered);
-        }
-    }
+        bool hovered, bool pointer_interaction_active, Dispatcher dispatcher) override;
 
     void retained_focus_within_changed(
-        bool focused, bool pointer_interaction_active, Dispatcher dispatcher) override {
-        reconcile_presentation();
-        refresh_anchor_availability();
-        focused_ = focused;
-        pointer_interaction_active_ = pointer_interaction_active;
-        ensure_controller(dispatcher);
-        if (controller_) {
-            controller_->set_pointer_interaction_active(pointer_interaction_active_);
-            controller_->set_focused(focused);
-        }
-    }
+        bool focused, bool pointer_interaction_active, Dispatcher dispatcher) override;
 
-    void dismiss_transient_presentation() override {
-        if (controller_) controller_->dismiss_until_eligibility_transition();
-    }
+    void dismiss_transient_presentation() override;
 
-    [[nodiscard]] SemanticInfo semantics() const override {
-        SemanticInfo info;
-        if (!text_.empty()) info.description = text_;
-        return info;
-    }
+    [[nodiscard]] SemanticInfo semantics() const override;
 
-    void paint(PaintContext&) const override {}
+    void paint(PaintContext&) const override;
 
 private:
-    [[nodiscard]] bool anchor_available() const noexcept {
-        return effective_availability().interactive();
-    }
+    [[nodiscard]] std::optional<DescendantSemanticDecoration> descendant_semantic_decoration() const override;
+    [[nodiscard]] bool anchor_available() const noexcept;
 
-    void refresh_anchor_availability() {
-        if (!controller_) return;
-        controller_->set_anchor_available(anchor_available());
-    }
+    void refresh_anchor_availability();
 
-    void ensure_controller(Dispatcher dispatcher) {
-        if (controller_ || text_.empty() || !dispatcher.valid()) return;
+    void ensure_controller(Dispatcher dispatcher);
 
-        const auto delay = std::chrono::duration<double>(delay_);
-        controller_ = std::make_shared<TooltipController>(
-            dispatcher,
-            delay,
-            [this] { present(); },
-            [this] { hide(); });
-        controller_->set_anchor_available(anchor_available());
-        controller_->set_pointer_interaction_active(pointer_interaction_active_);
-        if (hovered_) controller_->set_hovered(true);
-        if (focused_) controller_->set_focused(true);
-    }
+    void reconcile_presentation();
 
-    void reconcile_presentation() {
-        if (controller_ && controller_->visible() && !overlay_.valid()) {
-            controller_->notify_presentation_closed();
-        }
-    }
+    void present();
 
-    void present() {
-        if (!mounted_ || text_.empty() || !overlay_service_) {
-            if (controller_) controller_->notify_presentation_closed();
-            return;
-        }
-        if (!anchor_available()) {
-            // Availability can change while the timer is in flight. Cancel and
-            // suppress stationary eligibility instead of showing for a
-            // Hidden/Collapsed/Disabled anchor.
-            controller_->set_anchor_available(false);
-            return;
-        }
-        if (overlay_.valid()) return;
-
-        OverlaySpec overlay;
-        overlay.mode = OverlayMode::NonModal;
-        overlay.pointer_policy = OverlayPointerPolicy::Ignore;
-        overlay.anchor = node_id_;
-        overlay.placement = OverlayPlacement::Auto;
-        overlay.dismiss_on_escape = false;
-        overlay.dismiss_on_outside_pointer_down = false;
-        std::string text = text_;
-        overlay.content = Spec{
-            [text = std::move(text)]() mutable {
-                return std::make_unique<TooltipSurfaceComponent>(
-                    text, kTooltipDefaultMaxWidth);
-            },
-            {}};
-        overlay_ = overlay_service_->present(std::move(overlay));
-
-        // OverlayState::show() is the transaction commit point. A secondary
-        // layout notification after that point must not make the controller
-        // roll visibility back while a valid committed handle is retained.
-        try {
-            if (layout_invalidator_) layout_invalidator_();
-        } catch (...) {
-        }
-    }
-
-    void hide() {
-        if (overlay_service_ && overlay_.valid()) {
-            (void)overlay_service_->dismiss(overlay_);
-        }
-        overlay_ = {};
-
-        // As above, OverlayState::close() is the commit point. Keep any later
-        // notification failure from resurrecting the controller-visible state
-        // after its only overlay handle has been deterministically cleared.
-        try {
-            if (layout_invalidator_) layout_invalidator_();
-        } catch (...) {
-        }
-    }
+    void hide();
 
     std::string text_;
     std::chrono::milliseconds delay_;
+    TooltipStyle style_;
     NodeId node_id_{kInvalidNodeId};
     OverlayService* overlay_service_{};
     std::function<void()> layout_invalidator_;
@@ -638,36 +266,22 @@ public:
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
-    Tooltip&& delay(std::chrono::milliseconds value) && noexcept {
-        set_delay(value);
-        return std::move(*this);
-    }
+    Tooltip&& style(TooltipStyle value) &&;
+    Tooltip&& delay(std::chrono::milliseconds value) && noexcept;
 
-    Tooltip& delay(std::chrono::milliseconds value) & noexcept {
-        set_delay(value);
-        return *this;
-    }
+    Tooltip& delay(std::chrono::milliseconds value) & noexcept;
 
-    [[nodiscard]] std::chrono::milliseconds delay() const noexcept { return delay_; }
-    [[nodiscard]] const std::string& text() const noexcept { return text_; }
+    [[nodiscard]] std::chrono::milliseconds delay() const noexcept;
+    [[nodiscard]] const std::string& text() const noexcept;
 
-    Spec spec() && {
-        auto text = std::move(text_);
-        const auto delay_value = delay_;
-        return Spec{
-            [text = std::move(text), delay_value] {
-                return std::make_unique<detail::TooltipComponent>(text, delay_value);
-            },
-            std::move(children_)};
-    }
+    Spec spec() &&;
 
 private:
-    void set_delay(std::chrono::milliseconds value) noexcept {
-        delay_ = value.count() < 0 ? std::chrono::milliseconds{0} : value;
-    }
+    void set_delay(std::chrono::milliseconds value) noexcept;
 
     std::string text_;
     std::chrono::milliseconds delay_{kDefaultDelay};
+    TooltipStyle style_;
     std::vector<Spec> children_;
 };
 
