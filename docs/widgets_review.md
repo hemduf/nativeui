@@ -7,51 +7,176 @@ This review applies [CODE_REVIEW.md](../CODE_REVIEW.md) to PR #493 on
 
 ## Main integration on October 5, 2026
 
-The conflict resolution integrates main `6c850ab044ba99b7ccbea7076765cd4efe722adb`
-into branch head `99933d32c1102ebb45d29aafa792436ebc9ab8d1`. All thirteen
-conflicted paths are resolved. The extracted component file pairs and RichText
-crash correction are retained alongside main's rendering-resource/raster-cache
-contracts, focus geometry and teardown guards, ScalarSource and edit sessions.
-Pugl uses main's exact pin `a4bdafe38f48cf906560e40bd1e9e87986369b06`, including
-the Cocoa embedded-focus hooks; dependency versions are not substituted.
+Merge `0666bc591b14f8f0b73154104d1edfd3e9bb3554` integrates main
+`6c850ab044ba99b7ccbea7076765cd4efe722adb` into the widget branch. All thirteen
+conflicted paths are resolved. Final executable source is **`2c36d801d417c78824dc11961f258b3fe3808ab9`**;
+subsequent documentation bookkeeping does not change it. The extracted file pairs
+and RichText crash correction coexist with main's rendering resources/raster
+caches, ScalarSource, focus geometry/teardown guards and edit sessions. Pugl uses
+main's exact pin `a4bdafe38f48cf906560e40bd1e9e87986369b06` with the Cocoa
+embedded-focus hooks; dependency versions are not substituted.
 
-Knob, Slider and Toggle preserve main's `on_edit` API and wheel opt-in where
-applicable. TextInput preserves `on_key_down` after the IME guard. Historical
+Knob, Slider and Toggle preserve upstream `on_edit`; Knob/Slider wheel input stays
+opt-in. TextInput preserves `on_key_down` after the IME guard. Historical
 constructors, includes, State/Binding overloads and template adapters remain.
-Owned sessions and originating-contact release actions protect callback removal,
+Owned sessions and originating-contact release actions protect subtree retirement,
 exception recovery and newer reentrant contacts.
 
-The integration review reproduced and corrected three additional seams:
+### Integration findings and recovery
 
-- EditSession rejects a State guarded read before any begin/change callback or
-  queued write. Standalone strict C++ selectors `set`, `begin` and `update` each
-  fail before correction and pass afterward. Rejection remains silent, an active
-  edit survives a rejected update, and the next ordinary edit produces `BCE`.
-- Slider keyboard cancellation and Slider/Toggle keyboard failure release the
-  originating tracked touch rather than contact zero. The unchanged production
-  probes fail with touch 7 still captured. Corrected cases preserve a separately
-  captured mouse, then prove another normal touch edit succeeds.
-- Toggle layout invalidation stops before a second borrowed paint invalidation.
-  The unchanged production probe fails when the layout callback removes the
-  subtree. The correction suppresses the stale action and allows remount/edit.
+- **Blocking — EditSession guarded reads:** strict standalone `set`, `begin` and
+  `update` selectors reproduce an edit queued after a rejected State read.
+  Reject before any callback/write. Rejection stays silent; the active edit
+  survives, and the next ordinary edit produces `BCE`.
+- **Blocking — contact cleanup:** Slider/Toggle keyboard cancellation/failure
+  originally leaves touch 7 captured. Knob's existing focus-fault regression also
+  exposes capture left active when invalidation throws; a new Knob selector
+  reproduces the same keyboard/touch failure. Move/release the originating action
+  on every failure path while preserving an independent mouse capture. Each
+  corrected case proves a subsequent normal edit.
+- **Blocking — Knob newer contact:** the unchanged lifetime selector reproduces
+  value `0.6` instead of `0.7` after a newer PointerDown inside a throwing State
+  observer. Its physical contact survives, but starting the logical edit during
+  notification is correctly rejected. Start it on the next valid move and
+  recheck owned generation, Binding, gesture and permission before publication.
+- **Blocking — Toggle borrowed invalidation:** a layout callback removes the
+  subtree before a second borrowed paint invalidation. Stop after layout
+  invalidation; the original probe fails before correction and remount/edit
+  succeeds afterward.
+- **Blocking — build compatibility:** strict GCC rejects a partial ToggleStyle
+  fixture initializer; initialize the same style explicitly. Full macOS build
+  exposes duplicate SVG linkage in an isolated ScalarSource target and the two
+  Toast headless fixture calls missing the new private resource-hook argument.
+  Rely on Core's public SVG dependency and pass `nullptr` for the headless hook.
+  Public APIs, dependency pins, warning allowance and assertions are preserved.
+- **Important — overlay fault location:** the strengthened T063 fixture's
+  unconditional close fault now hits extracted panels' pre-action paint
+  invalidation, before any close command is accepted. Use the public Rect
+  invalidation overload to fault the full-viewport structural notification;
+  guard owned popup-bound snapshots before inspection. Show failure remains
+  unconditional, and every original close/retry/commit-count assertion stays.
 
-The merged Release Core and eight focused edit/TextInput/RichText suites pass
-with the default empty warning allowance. Tests cover begin/change/end removal,
-throwing callbacks, stale-event suppression, remount, external Knob replacement,
-TextInput callable-copy/invocation removal, and capture/text-input teardown.
-Independent bounded tree and widget re-reviews report **0 Blocking / 0 Important**.
-The pre-merge baseline at `99933d32` also passes its full serial build with zero
-warnings and **384/384** CTest checks (201.29 seconds).
+The first integrated full run at `abcab1d1` reports **406/408**, exposing the Knob
+focus-capture failure and T063 fault-location mismatch. Both are corrected; the
+additional unchanged/new Knob probes also execute RED before correction. The
+three focused Knob/edit-retirement/dialog checks then pass **3/3** (1.90 CTest
+seconds), without warnings. Independent final source/fixture re-review reports
+**0 Blocking / 0 Important**. The earlier eight focused integration suites and
+exact pre-merge `99933d32` baseline (zero warnings, **384/384**) keep their original
+source identities; they are not substituted for final qualification.
 
-The full integrated Release suite, sanitizer qualification and native checks are
-in progress. Complete Linux qualification remains a separate merge gate; the
-PR stays Draft while qualification is active. Historical results below retain
-their original source identities and are not substituted for integrated results.
+### Final local qualification
 
-The executable source/test/example diff from `0f890150`, produced by
+At `2c36d801d417c78824dc11961f258b3fe3808ab9`, the complete serial Release rebuild passes with **zero warnings**
+(91.63 seconds), including Core, platform, all examples/tests and
+**120 standalone public-header probes**. The complete suite passes **408/408**
+(219.38 wall seconds), including 221 unit suites and both embedded
+keyboard fixtures, with **no skips**. The final sanitizer build passes with zero
+warnings (32.69 seconds); **24/24 ASan/UBSan suites pass**
+(32.88 wall seconds), without diagnostics or skips. Seven additional
+native checks pass: embedded visibility, per-view resource recreation/isolation,
+ScalarSource and FractalNoise GPU references, T095/T096 scene recovery, and the
+real gallery's first render/deferred close.
+
+Linux Core CI is **still running** on this same source revision and remains a merge gate. The PR stays Draft while that qualification is active. The exact run is
+[Linux Core smoke #37332592202](https://github.com/hemduf/nativeui/actions/runs/37332592202).
+Earlier failed/cancelled runs are not final evidence. Linux's first strict-GCC
+failure prompted the style initializer correction; every executable correction
+is followed by dispatch on its new source SHA.
+
+Release configuration enables platform, feature examples and tests, while
+`NATIVEUI_BUILD_PACKAGE_TESTS`, `NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS`, inspector
+and sanitizers are OFF. The two keyboard fixtures remain registered; the seven
+additional native checks above are run explicitly. Debug sanitizer configuration
+has platform/examples/package tests/inspector OFF and sanitizers/tests ON. Both
+use the pinned prebuilt Skia at
+`/Volumes/T7/Code/nativeui/build/_deps/skia_prebuilt-src`; Release leaves
+`NATIVEUI_PUGL_SOURCE` empty so CPM acquires the exact upstream pin. Both keep the
+default empty `NATIVEUI_ALLOWED_WARNINGS`.
+
+No Windows/native Linux, complete IME, OS accessibility, installed-package,
+inspector, LSan or TSan qualification is inferred. The existing Skia vptr
+exclusion and uninstrumented prebuilt archives remain limits; macOS leak
+checking is disabled. Live keyboard fixtures do not establish a real DAW test.
+The 83 file pairs do not claim completion of every future specification contract.
+
+Documentation verification covers **95 Markdown pages**, **862 valid local file links**
+and all **83 eleven-section specifications with matching header/source pairs**.
+No missing link, file pair or section is found.
+
+### Current mandatory review record
+
+| Required field | Assessment |
+| --- | --- |
+| **CODE_REVIEW.md** | Applicable integration review completed; independent tree/widget and final Knob/fixture re-reviews report 0 Blocking / 0 Important. Historical component review retains its source identity. |
+| **Instance isolation** | Pass. Sessions, generations, retained identities and contact release actions belong to each component/UI. Independent mouse/touch capture, two-model gallery and two-view GPU recovery checks pass. |
+| **Globals/statics** | Pass. No new mutable production global, singleton or thread-local state; existing resource ownership boundaries are preserved. |
+| **Threading/RT** | Pass. State, retained trees, input and rendering remain UI-thread confined. No audio callback, plug-in-format API or cross-thread transport changes. |
+| **Lifetime/reentrancy** | Pass. Owned guards suppress stale writes/callbacks after subtree removal and preserve newer contacts. Knob resumes a newer physical drag only after its earlier State transaction finishes. Borrowed contexts are not reused after exposed callbacks. Whole-owner destruction follows the existing deferred contract, except explicitly qualified safe public-entry paths. |
+| **Transactional state** | Pass. Guarded reads/notifications reject edits before callbacks or queued writes. Layout rollback, retained checkpoints and raster/resource cache invalidation coexist. Failed overlay preparation leaves accepted work available for one later retry. |
+| **Scheduling/queue failure** | Pass. Existing accepted overlay/descendant/timer recovery remains enabled. No synchronous teardown fallback, replay of started callbacks or new Dispatcher queue. |
+| **Exception/unwind** | Pass. Originating contacts release even when invalidation throws; secondary release/cancel failures are contained and the first error propagates. Matching generations protect newer interactions. Unmount/destructor cancellation is contained; foreign ABI boundaries are unchanged. |
+| **Partial construction** | Pass for the integration scope. Existing native acquisition rollback and registration ownership remain; edit/session ownership is prepared before exposure. No new native acquisition step. |
+| **Objective-C runtime** | Pass for preserved integration. Consumer-specific Objective-C bridge prefixing and upstream Cocoa focus hooks remain; no new runtime class/category or shared bridge. |
+| **Platform integration** | Pass locally. Final macOS embedded keyboard/visibility, per-view resource recreation, GPU references, scene recovery and gallery startup/closure checks pass. Focused Linux Core CI is pending at the exact executable source SHA; it is a merge gate. |
+| **Performance/allocation** | Reasoned impact: cancellation moves existing release actions; pointer publication adds an active-edit check and starts a deferred logical edit only when needed. No new steady-state allocation or layout staging is introduced by this correction. Historical benchmark numbers are not relabeled as measurements of the integrated source. |
+| **Privacy** | Pass. No personal data, credentials or user-file content introduced in production sources, tests, examples or generated project metadata. |
+| **Tests** | Final serial Release build: zero warnings; 408/408 CTest checks, no skips. Final targeted ASan/UBSan build: zero warnings; 24/24 suites, no diagnostics or skips. Seven additional native checks pass. Exact source, commands and limits are recorded below. |
+| **Remaining findings** | No remaining Blocking/Important finding in the bounded integration review. Linux Core qualification remains a merge gate; future contracts and platform limits stay explicit. |
+
+### Final executable commands
+
+All local builds and tests are serial. Temporary diagnostics use `/Volumes/T7/tmp`;
+final implementation files remain in this repository.
+
+```bash
+export TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp
+export CMAKE_BUILD_PARALLEL_LEVEL=1 CTEST_PARALLEL_LEVEL=1
+cmake --build build-widgets
+ctest --test-dir build-widgets --output-on-failure
+sanitizer_targets=(
+  nativeui_edit_session_tests
+  nativeui_edit_read_transaction_tests
+  nativeui_widget_edit_tests
+  nativeui_widget_edit_retirement_tests
+  nativeui_text_input_tests
+  nativeui_widget_text_input_key_retirement_tests
+  nativeui_widget_rich_text_tests
+  nativeui_widget_rich_text_layout_tests
+  nativeui_widget_rich_text_recovery_tests
+  nativeui_widget_rich_text_paint_tests
+  nativeui_widget_rich_text_contact_generation_tests
+  nativeui_component_state_tests
+  nativeui_routing_tests
+  nativeui_focus_tests
+  nativeui_paint_culling_tests
+  nativeui_layout_constraints_tests
+  nativeui_lifecycle_tests
+  nativeui_t067_retained_tests
+  nativeui_widget_retained_checkpoint_tests
+  nativeui_widget_focus_reason_tests
+  nativeui_raster_cache_epoch_tests
+  nativeui_raster_cache_tree_tests
+  nativeui_widget_toast_quiet_paint_tests
+  nativeui_widget_knob_lifetime_tests
+)
+cmake --build build-review-sanitize --target "${sanitizer_targets[@]}"
+printf -v sanitizer_pattern '%s|' "${sanitizer_targets[@]}"
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  ctest --test-dir build-review-sanitize --output-on-failure \
+  -R "^(${sanitizer_pattern%|})$"
+for target in nativeui_embedded_visibility_tests nativeui_render_resource_gpu_tests \
+  nativeui_scalar_source_gpu_reference_tests nativeui_fractal_noise_gpu_reference_tests \
+  nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests; do
+  "build-widgets/$target"
+done
+build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --window-self-test
+```
+
+The source/test/example diff from `0f890150`, produced by
 `git diff --no-ext-diff --no-color --binary 0f890150735c0b575dff0ca12cf0226c674f10a5 -- include src tests examples`,
-has SHA-256 `76ed92322c00c443f3e6a3c024c0bba806af35ed2be3c08be5527acb8e648999`.
-Documentation-only bookkeeping does not change this identity.
+has SHA-256 **`4043a3cd89ed7770064b2ad3eea5b99c40950eabb6c2c8973f176f076b947617`**. Historical evidence below retains its
+original source identity.
 
 ## Findings and corrections
 

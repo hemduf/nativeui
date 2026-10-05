@@ -84,5 +84,9 @@ The subsequent [mandatory widget review](widgets_review.md) records the earlier
 exposed a RichText retirement crash. Its correction at `615a8b83` passes all five
 RichText suites under ASan/UBSan and six Release checks. The gallery is relinked
 with that fix; its eight-page headless self-test and real macOS first-render/
-deferred-close test pass. Complete Linux and integrated-head qualification remain
-explicit merge gates in the review record.
+deferred-close test pass. Those targeted results preceded the final integrated
+qualification recorded below.
+
+## Main integration qualification
+
+At executable source `2c36d801d417c78824dc11961f258b3fe3808ab9`, the relinked gallery passes its eight-page headless self-test in the **408/408** complete Release run and its real macOS first-render/deferred-close check. The final build has zero warnings; **24/24** focused ASan/UBSan suites and the six additional embedded/GPU/scene checks pass. All thirteen merge conflicts with main are resolved. Linux Core CI is **still running** on this same source revision and remains a merge gate. The PR stays Draft while that qualification is active. Exact commands, findings and limitations are recorded in the [current integration review](widgets_review.md#main-integration-on-october-5-2026).
