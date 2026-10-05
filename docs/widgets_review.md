@@ -5,15 +5,28 @@ This review applies [CODE_REVIEW.md](../CODE_REVIEW.md) to PR #493 on
 `0f890150735c0b575dff0ca12cf0226c674f10a5`, based on the NativeUI inventory snapshot
 `e10077ff39b8cb977669a7d5604562f66d07cb4c`.
 
-**Qualification status:** corrected source is locally qualified: 384/384 Release tests,
-20/20 ASan/UBSan tests, strict headless compilation and native gallery lifecycle pass.
-Blocking findings: **0**. Important findings: **0**. The PR remains Draft for upstream
-integration; this record does not qualify a merge with current main.
+**Crash correction:** executable source `615a8b83d542c6f9170b7ed5c92914622c24ad83` fixes the
+RichText freed-node invalidation reproduced on Linux and under macOS ASan.
+The five RichText suites pass under ASan/UBSan; those five suites and the public
+example pass in Release. The gallery is relinked with the fix and passes its
+eight-screen headless self-test and native first-render/deferred-close check.
+Both serial builds use the default empty warning allowance and report zero
+warnings. Independent review finds **0 Blocking / 0 Important issues in this
+bounded crash correction**.
 
-The corrected source/test diff from the starting head, produced by
-`git diff --no-ext-diff --no-color --binary 0f890150735c0b575dff0ca12cf0226c674f10a5 -- include src tests`, has SHA-256
-`ebc1d20a01b8f4267ff406ba89e05842b57b680fa236594b020f1f85a84a080b`.
-Documentation-only completion does not change this fingerprint.
+At the user's request, this last batch addresses the crash. The earlier broad
+Mac checks (384 Release, 66 focused and 27 sanitizer suites) describe `cb601757`;
+they are not reruns of the latest correction. That source passed the strict Linux
+Core build but failed RichText recovery (202/203 units). Complete Linux and
+broader integrated-head qualification remain merge gates. The PR stays Draft
+because current main conflicts are unresolved; this record does not qualify
+that merge.
+
+The source/test/example diff from the starting head, produced by
+`git diff --no-ext-diff --no-color --binary 0f890150735c0b575dff0ca12cf0226c674f10a5 -- include src tests examples`, has SHA-256
+`3b492580336af16ee9481eb731055e15bb108e39ba646a8d9a33f23bda85209d`.
+This fingerprint identifies executable source `615a8b83`;
+documentation-only completion does not change it.
 
 ## Findings and corrections
 
@@ -37,6 +50,13 @@ Existing assertions remain enabled. Severity refers to the confirmed behavior be
 | `ComboBox` presentation/gestures | Blocking | Equal resolved states invalidated; changed row metrics missed layout invalidation. A failed pressed-style transition could leave the panel or anchor armed. | Classify resolved style changes, retain failed presentation work and clean up only the failing interaction epoch. Tests cover panel/anchor press/release failures, a newer nested gesture, terminal focus/deactivation faults and the next normal click. |
 | `ComboBox` nested opening | Blocking | Provider invocation, callable copying, selection equality or invalidation could recursively open a newer popup, then an older attempt replaced its session or command. | Track an opening epoch through every exposure; prepare the Show command before publication and retain acquisition state through its acknowledgement. Tests verify exactly one newer popup and selection of its value, including provider-copy and equality reentry. |
 | `StyleScope` allocation recovery | Blocking | A long inherited Theme copy could terminate at a string helper supplied by the pinned static Skia archive before recovery ran. | Reconstruct owned text/fallbacks from bytes at the internal copy boundary; preserve public signatures and dependency pins. Real allocation faults cover the family, fallback vector and both long fallback strings, followed by checkpoint recovery and another source update. |
+| GCC guard formatting | Blocking | Seven guards in the virtual-list retained header triggered `-Werror=misleading-indentation`; the same pattern occurred in Dialog action rows. | Separate each guard from its unconditional successor. Independent review confirms the non-whitespace source sequence is unchanged; no warning policy changes. |
+| Calendar format capacity | Blocking | GCC could not infer the valid-date guard when diagnosing `snprintf` into eleven bytes. | Use sixteen bytes: the full inferred chrono fields require at most fifteen including NUL. The valid-date guard, format, public output and allocation behavior are unchanged. |
+| Sidebar style initialization | Blocking | GCC reported optional hover-style payload fields as possibly uninitialized in the optimized Release comparison. | Use fully initialized owned style values with the same old/new row guards. Resolver calls, hover commit, short-circuit comparisons and invalidation ordering are preserved; absent values are never compared. |
+| Partial aggregate defaults | Blocking | GCC rejected omitted optional/string/callback fields in designated style/spec initializers under `-Werror=missing-field-initializers`. | Give 27 members explicit empty defaults across CollapsibleStyle, AccordionStyle, PopoverStyle, RichTextSpan and ToastSpec. Member types/order and aggregate APIs remain unchanged; all existing partial initializer fixtures remain intact. An independent review and baseline/corrected ABI-traits probe confirm equivalent defaults, sizes, alignments and C++20 aggregate support. |
+| Converting range-loop values | Blocking | GCC rejected a const string reference bound to a temporary converted from each character-pointer element in the NumberInput fixture. The same pattern appeared in the Toolbar example. | Use an explicitly owned const string value for both loops. The same string is constructed once per element, and all input values, assertions, callbacks and ownership remain unchanged. |
+| `RichText` borrowed input lifetime | Blocking | Copying an action callback can remove its node; activation then invokes the borrowed InputContext invalidator referencing that freed node. Linux recovery segfaults and macOS ASan confirms heap-use-after-free. | Recheck owned generations, mounted state and permissions before borrowed invalidation after callback copy/release, and after pointer capture/focus. Preserve contact-specific cleanup for newer nested gestures. The two original paths reproduce ASan UAF before correction; expanded keyboard/pointer/semantic retirement tests verify suppressed stale actions, later successful activation and balanced capture. Five RichText sanitizer suites pass. |
+| English example policy | Important | 33 component examples still exposed French labels; a legacy window-control title and ten regression fixture files also contained French prose. | Translate 34 example files and ten regression fixture files, including matching literal-based and semantic-name expectations. Keep stable IDs, callbacks, code paths and intentional multilingual test data. Static comparison confirms all non-literal source tokens are unchanged. |
 
 The provisional collection hit-index finding was rejected: Tree refuses obsolete
 geometry after a structural epoch change. Its regression checks the layout retry
@@ -50,11 +70,11 @@ allocation are not counted as four independent failure stages.
 
 | Required field | Assessment |
 | --- | --- |
-| **CODE_REVIEW.md** | Completed for the corrected source; applicable executable qualification passes below. |
+| **CODE_REVIEW.md** | Applicable source review is recorded below; the latest bounded RichText crash correction passes independent review and local qualification. Complete qualification of an integrated main head remains pending. |
 | **Instance isolation** | Corrected state, fit plans, recipes, gestures, permissions and retry flags are owned per component/UI compilation. Existing two-instance tests and gallery coverage remain enabled. |
 | **Globals/statics** | No new mutable production global, singleton or thread-local state. Allocation counters are intentionally isolated test/benchmark executable seams. |
 | **Threading/RT** | State and retained mutation remain UI-thread confined. No audio callback, plug-in adapter or shared cross-thread transport changes. |
-| **Lifetime/reentrancy** | Detached publication state retains no raw component pointer; long-lived permissions/invalidators use Tree lifetime/identity guards. Source retirement and subtree removal suppress stale work. New nested gestures survive older-stack cleanup. Top-level UI/window destruction during its own callback remains deferred under the existing contract. |
+| **Lifetime/reentrancy** | Detached publication state retains no raw component pointer; long-lived permissions/invalidators use Tree lifetime/identity guards. Source retirement and subtree removal suppress stale work. RichText also checks lifetime before reusing borrowed event invalidators after callback-copy, focus/capture and release exposure. New nested gestures survive older-stack cleanup. Top-level UI/window destruction during its own callback remains deferred under the existing contract. |
 | **Transactional state** | State read preparation pins storage and queues nested writes. Conditional edit commits verify revision/generation/permission. Breadcrumb fit and splitter geometry publish only after successful layout. Breadcrumb accepted effects have a durable unstarted suffix. |
 | **Scheduling/queue failure** | No new Dispatcher queue or synchronous teardown fallback. Existing overlay command, descendant-action and timer rejection/throw recovery suites remain applicable; retained recovery never restarts callbacks that began. |
 | **Exception/unwind** | Ordinary C++ exceptions propagate after guard/depth and current-gesture recovery. Geometry commit/availability hooks remain no-throw; cleanup contains release failures. Changed unmount/control cleanup remains no-throw and ordinary destructor-driven teardown starts no application callback. No foreign ABI thunk changes. |
@@ -63,19 +83,71 @@ allocation are not counted as four independent failure stages.
 | **Platform integration** | Widgets remain independent of Pugl/AppKit/Win32/Xlib and plug-in SDKs. Logical coordinate contracts and pinned Pugl/Skia dependencies remain unchanged. Native gallery verification passes below; Windows/Linux execution has not run locally. |
 | **Performance/allocation** | Fixed Release benchmarks plus active routing/lazy layout measurements below. The added successful dirty-layout checkpoint has a measured bounded cost; clean pointer routing adds no allocations. |
 | **Privacy** | No personal data, credentials or user files introduced in production code, tests, gallery or generated project metadata. |
-| **Tests** | Pass: exact focused, fault, full Release, multi-instance, headless, native window and ASan/UBSan checks below. Other platforms/package consumers remain explicit limits. |
-| **Remaining findings** | None in corrected source: Blocking = 0, Important = 0. Upstream conflict integration and qualification of that integrated head remain merge gates. |
+| **Tests** | Latest RichText ASan/UBSan 5/5, Release 6/6 and relinked headless/native gallery pass. Earlier broad Mac 384/384, 66/66 and 27/27 describe cb601757; its Linux build passes but RichText recovery fails (202/203 units). Latest complete Linux and integrated-head qualification are not inferred from these targeted reruns. |
+| **Remaining findings** | All confirmed findings have source corrections; bounded RichText independent review reports 0 Blocking / 0 Important. Complete Linux and broader integrated-head qualification remain merge gates. The non-blocking coverage follow-up below is explicit. |
 
 ## Executable evidence
+
+### RichText crash correction (`615a8b83`)
+
+The existing callback-copy retirement case reproduced ASan heap-use-after-free
+at the borrowed paint invalidator, called from `activate_action`. The added
+`focus_removal` selector separately reproduced the same error after the retained
+focus request removed the paragraph during PointerDown. Both RED runs used
+unchanged production code; the test executable returned SIGABRT with an ASan
+freed-node backtrace. No assertion or test was disabled.
+
+The correction checks lifetime before the next borrowed context operation.
+Generation and originating-contact checks after capture/focus preserve a newer
+nested gesture; post-invalidation checks still suppress activation if invalidation
+itself removes the action. Related release/blur paths use the same lifetime rule.
+The regression covers keyboard, pointer and direct component semantic activation,
+then remounts and successfully activates the replacement. Direct semantic delivery
+does not qualify an OS accessibility bridge. Platform fixtures outlive their UIs.
+
+Using the existing build configurations described below:
+
+```bash
+export TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp
+export CMAKE_BUILD_PARALLEL_LEVEL=1 CTEST_PARALLEL_LEVEL=1
+cmake --build build-review-sanitize --target \
+  nativeui_widget_rich_text_tests nativeui_widget_rich_text_layout_tests \
+  nativeui_widget_rich_text_recovery_tests nativeui_widget_rich_text_paint_tests \
+  nativeui_widget_rich_text_contact_generation_tests
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  ctest --test-dir build-review-sanitize --output-on-failure \
+  -R '^nativeui_widget_rich_text(_(layout|recovery|paint|contact_generation))?_tests$'
+cmake --build build-widgets --target \
+  nativeui_widget_rich_text_tests nativeui_widget_rich_text_layout_tests \
+  nativeui_widget_rich_text_recovery_tests nativeui_widget_rich_text_paint_tests \
+  nativeui_widget_rich_text_contact_generation_tests nativeui_example_rich_text
+ctest --test-dir build-widgets --output-on-failure \
+  -R '^(nativeui_widget_rich_text(_(layout|recovery|paint|contact_generation))?_tests|nativeui_example_rich_text_self_test)$'
+cmake --build build-widgets --target nativeui_example_widgets_gallery
+ctest --test-dir build-widgets --output-on-failure \
+  -R '^nativeui_example_widgets_gallery_self_test$'
+build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --window-self-test
+```
+
+**Result:** sanitizer build passes with zero warnings (25.82 seconds), then
+**5/5 suites pass** (7.29 CTest seconds), without sanitizer diagnostics. Release
+build passes with zero warnings (12.93 seconds), then **6/6 checks pass**
+(3.99 CTest seconds). Gallery relink passes (1.54 seconds), its eight-screen
+self-test passes (3.21 CTest seconds) and its native window renders and closes
+(0.56 seconds). The original contact-generation success/failure cases remain
+enabled. Independent read-only review reports no Blocking or Important finding
+in this bounded correction. The existing Skia vptr exclusion, uninstrumented
+third-party archives and disabled macOS leak detection remain explicit limits.
 
 All local builds are serial with `CMAKE_BUILD_PARALLEL_LEVEL=1`. Temporary files use
 `TMPDIR`, `TMP` and `TEMP` under `/Volumes/T7/tmp/`. Final sources are in the NativeUI
 repository; temporary probes and logs are diagnostic artifacts only.
 
 The five previously reported failures were reproduced before this correction batch.
-The final qualification runs below use the corrected Core and final regression sources.
+The earlier broad qualification runs below use Core and regression sources at
+`cb601757`, before the bounded RichText crash correction above.
 
-### Release and platform
+### Earlier Release and platform (`cb601757`)
 
 ```sh
 export TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp
@@ -87,7 +159,7 @@ cmake -S . -B build-widgets -DCMAKE_BUILD_TYPE=Release \
   -DNATIVEUI_PUGL_SOURCE=/Volumes/T7/Code/nativeui/build/_deps/pugl_src-src \
   -DNATIVEUI_SKIA_ROOT=/Volumes/T7/Code/nativeui/build/_deps/skia_prebuilt-src
 CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build-widgets
-CTEST_PARALLEL_LEVEL=1 ctest --test-dir build-widgets -R '^(nativeui_t035_combo_popup_tests|nativeui_text_area_tests|nativeui_widget_token_field_tests|nativeui_widget_color_picker_tests|nativeui_widget_split_callback_faults_tests|nativeui_widget_breadcrumbs_tests|nativeui_widget_dynamic_extraction_tests|nativeui_widget_state_owned_transactions_tests|nativeui_widget_style_scope_binding_recovery_tests|nativeui_widget_collection_transactions_tests|nativeui_example_t035_combo_popup_self_test|nativeui_example_t038_closure_invalidation_self_test|nativeui_example_t038_menu_item_invalidation_self_test|nativeui_example_widgets_gallery_self_test)$' --output-on-failure
+CTEST_PARALLEL_LEVEL=1 ctest --test-dir build-widgets -R '^(nativeui_t035_combo_popup_tests|nativeui_text_area_tests|nativeui_widget_token_field_tests|nativeui_widget_color_picker_tests|nativeui_widget_split_callback_faults_tests|nativeui_widget_breadcrumbs_tests|nativeui_widget_dynamic_extraction_tests|nativeui_widget_state_owned_transactions_tests|nativeui_widget_style_scope_binding_recovery_tests|nativeui_widget_collection_transactions_tests|nativeui_example_t035_combo_popup_self_test|nativeui_example_t038_closure_invalidation_self_test|nativeui_example_t038_menu_item_invalidation_self_test|nativeui_example_widgets_gallery_self_test|nativeui_widget_calendar_tests|nativeui_widget_date_input_tests|nativeui_widget_sidebar_tests|nativeui_widget_sidebar_publication_tests|nativeui_widget_dialog_extensions_tests|nativeui_example_autocomplete_self_test|nativeui_example_breadcrumbs_self_test|nativeui_example_calendar_self_test|nativeui_example_checkbox_group_self_test|nativeui_example_color_picker_self_test|nativeui_example_color_well_self_test|nativeui_example_combo_box_self_test|nativeui_example_context_menu_self_test|nativeui_example_date_input_self_test|nativeui_example_dialog_self_test|nativeui_example_editable_combo_box_self_test|nativeui_example_editable_text_self_test|nativeui_example_field_self_test|nativeui_example_fieldset_self_test|nativeui_example_form_self_test|nativeui_example_history_button_self_test|nativeui_example_list_view_self_test|nativeui_example_outline_table_view_self_test|nativeui_example_outline_view_self_test|nativeui_example_popover_self_test|nativeui_example_popup_menu_self_test|nativeui_example_rating_self_test|nativeui_example_rich_text_self_test|nativeui_example_search_field_self_test|nativeui_example_segmented_control_self_test|nativeui_example_t066_window_controls_self_test|nativeui_example_table_view_self_test|nativeui_example_time_input_self_test|nativeui_example_toast_self_test|nativeui_example_toggle_group_self_test|nativeui_example_token_field_self_test|nativeui_example_toolbar_self_test|nativeui_example_tooltip_self_test|nativeui_example_tree_view_self_test|nativeui_widget_collapsible_tests|nativeui_widget_disclosure_faults_tests|nativeui_widget_popover_tests|nativeui_widget_rich_text_tests|nativeui_widget_toast_tests|nativeui_widget_number_input_tests|nativeui_widget_input_transactions_tests|nativeui_widget_editable_text_tests|nativeui_widget_header_linkage_tests|nativeui_widget_search_field_tests|nativeui_widget_rating_tests|nativeui_widget_value_publication_tests|nativeui_widget_reactivation_tests)$' --output-on-failure
 CTEST_PARALLEL_LEVEL=1 ctest --test-dir build-widgets --output-on-failure
 build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --window-self-test
 c++ -std=c++20 -DNATIVEUI_EXAMPLE_SELF_TEST_ONLY -Iinclude -Iexamples/features \
@@ -95,18 +167,19 @@ c++ -std=c++20 -DNATIVEUI_EXAMPLE_SELF_TEST_ONLY -Iinclude -Iexamples/features \
   -Wall -Wextra -Wpedantic -Werror -fsyntax-only examples/features/widgets_gallery.cpp
 ```
 
-**Result:** full serial Release build passes with **zero warning diagnostics**:
-Core, macOS platform, all examples/test executables and 83 public-header probes.
-**14/14 focused CTest checks pass** (9.35 seconds).
-After the Debug raster-accessor correction described below, the all-target build
-and complete suite were rerun: **384/384 pass** (58.14 seconds).
-No test is disabled or weakened. Installed-package contracts, inspector and
-optional platform-smoke configuration remain disabled.
+**Result at `cb601757`:** the complete serial Release build passes with
+**zero warning diagnostics**: Core, macOS platform, all examples/test executables
+and 83 component public-header probes. The header-dependent rebuild is followed
+by a full incremental build at the frozen final source; that final step passes in
+50.38 seconds. **66/66 focused CTest checks pass** (34.76 seconds): 38 public examples
+and 28 unit suites. The complete suite then passes **384/384** (188.79 seconds),
+including 204 unit checks. No test is disabled or weakened. Installed-package
+contracts, inspector and optional platform-smoke configuration remain disabled.
 
 The gallery self-test renders all eight pages, compact/HiDPI layouts, overlays,
 collection transitions and two independent instances. Its separate real macOS
-window test reports first render and deferred closure success. The strict
-Core-only syntax check above also passes.
+window test reports first render and deferred closure success (0.52 seconds). The
+strict Core-only syntax check above also passes (2.83 seconds).
 
 The focused suites execute these specific recovery oracles, in addition to their
 existing cases:
@@ -131,9 +204,10 @@ existing cases:
 - `widget_collection_transactions_tests`: rejected stale geometry followed by
   successful mapping/selection recovery.
 
-### Sanitizers
+### Earlier sanitizer selection (`cb601757`)
 
 ```sh
+export TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp
 cmake -S . -B build-review-sanitize -DCMAKE_BUILD_TYPE=Debug \
   -DNATIVEUI_BUILD_PLATFORM=OFF -DNATIVEUI_BUILD_EXAMPLES=OFF \
   -DNATIVEUI_BUILD_TESTS=ON -DNATIVEUI_ENABLE_SANITIZERS=ON \
@@ -160,23 +234,95 @@ CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build-review-sanitize --target \
   nativeui_widget_virtual_list_row_faults_tests \
   nativeui_lifecycle_tests \
   nativeui_t061_overlay_acceptance_tests \
-  nativeui_widget_overlay_ancestor_commands_tests
+  nativeui_widget_overlay_ancestor_commands_tests \
+  nativeui_widget_calendar_tests \
+  nativeui_widget_date_input_tests \
+  nativeui_widget_sidebar_tests \
+  nativeui_widget_sidebar_publication_tests \
+  nativeui_widget_dialog_extensions_tests \
+  nativeui_widget_collapsible_tests \
+  nativeui_widget_disclosure_faults_tests
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   CTEST_PARALLEL_LEVEL=1 ctest --test-dir build-review-sanitize \
-  -R '^(nativeui_t035_combo_popup_tests|nativeui_text_area_tests|nativeui_widget_token_field_tests|nativeui_widget_color_picker_tests|nativeui_widget_split_callback_faults_tests|nativeui_widget_breadcrumbs_tests|nativeui_widget_dynamic_extraction_tests|nativeui_widget_state_owned_transactions_tests|nativeui_widget_style_scope_binding_recovery_tests|nativeui_widget_collection_transactions_tests|nativeui_state_tests|nativeui_widget_retained_checkpoint_tests|nativeui_widget_state_snapshot_copy_retirement_tests|nativeui_widget_state_key_retirement_tests|nativeui_widget_layout_structural_publication_tests|nativeui_widget_virtual_list_isolation_tests|nativeui_widget_virtual_list_row_faults_tests|nativeui_lifecycle_tests|nativeui_t061_overlay_acceptance_tests|nativeui_widget_overlay_ancestor_commands_tests)$' --output-on-failure
+  -R '^(nativeui_t035_combo_popup_tests|nativeui_text_area_tests|nativeui_widget_token_field_tests|nativeui_widget_color_picker_tests|nativeui_widget_split_callback_faults_tests|nativeui_widget_breadcrumbs_tests|nativeui_widget_dynamic_extraction_tests|nativeui_widget_state_owned_transactions_tests|nativeui_widget_style_scope_binding_recovery_tests|nativeui_widget_collection_transactions_tests|nativeui_state_tests|nativeui_widget_retained_checkpoint_tests|nativeui_widget_state_snapshot_copy_retirement_tests|nativeui_widget_state_key_retirement_tests|nativeui_widget_layout_structural_publication_tests|nativeui_widget_virtual_list_isolation_tests|nativeui_widget_virtual_list_row_faults_tests|nativeui_lifecycle_tests|nativeui_t061_overlay_acceptance_tests|nativeui_widget_overlay_ancestor_commands_tests|nativeui_widget_calendar_tests|nativeui_widget_date_input_tests|nativeui_widget_sidebar_tests|nativeui_widget_sidebar_publication_tests|nativeui_widget_dialog_extensions_tests|nativeui_widget_collapsible_tests|nativeui_widget_disclosure_faults_tests)$' --output-on-failure
 ```
 
-**Result:** **20/20 pass** (3.46 seconds), with zero build warnings and no ASan/UBSan
-diagnostic. The first run passed nineteen suites and exposed an incorrect `addr8()`
-use in the new RGBA raster fixture. It now reads bytes through `SkPixmap::addr()`;
-the complete pixel comparison remains unchanged. The whole twenty-suite selection
-was rerun after rebuilding that test.
+**Result at `cb601757`:** the serial Debug Core/27-target build passes with zero
+warnings (140.16 seconds). **27/27 suites pass** (32.97 seconds), with no ASan/UBSan
+diagnostic. This covers the original twenty fault/retained/lifecycle suites,
+Calendar/DateInput/Sidebar publication and Dialog extension checks, plus the
+Collapsible/disclosure fault suites affected by the aggregate defaults.
+
+The original correction run exposed an incorrect `addr8()` use in the new RGBA
+raster fixture. It was corrected to read bytes through `SkPixmap::addr()` while
+preserving the complete pixel comparison. The final Release and sanitizer runs
+above include the corrected fixture.
 
 ASan and UBSan cover NativeUI-owned Core/tests. The existing configuration excludes
 only the vptr check because pinned Skia binaries lack the required RTTI; prebuilt
 third-party code is not instrumented. Leak detection is disabled on this macOS
 executor, so no LSan qualification is claimed. No TSan claim is made: this batch
 introduces no shared cross-thread state.
+
+### GCC portability and initial complete Linux run
+
+The manually dispatched [Linux Core run on `1da893dc`](https://github.com/hemduf/nativeui/actions/runs/37297986851)
+failed on the virtual-list guard formatting before unit tests could start.
+The [run on `a81c841f`](https://github.com/hemduf/nativeui/actions/runs/37299079804)
+compiled those guards and Dialog successfully, then reported Calendar's
+`-Werror=format-truncation`. The [run on `b1f6e127`](https://github.com/hemduf/nativeui/actions/runs/37299677064)
+compiled Calendar successfully, then reported Sidebar style snapshot
+`-Werror=maybe-uninitialized` diagnostics. These are confirmed Blocking build findings under
+CODE_REVIEW.md §1, rather than warnings to suppress.
+
+The first correction changes whitespace only in two files. Calendar's buffer then
+increases from eleven to sixteen bytes; GCC's inferred year/month/day ranges need
+at most fifteen bytes including the terminator. Its valid-domain guard and output
+format remain unchanged. Independent read-only review checked the guards, bounds
+and compatibility and scanned 267 other changed source/header fragments for the
+same indentation issue. Sidebar snapshots now use fully initialized plain style values, guarded by the same
+old/new optional row identities. Independent review found no allocation, lifetime,
+callback-order or exception-contract changes. No NativeUI warning allowance was added.
+
+The [Linux Core run on `b6fd7af7`](https://github.com/hemduf/nativeui/actions/runs/37300773132)
+compiled and archived all production Core sources, then failed on partial
+CollapsibleStyle initializers in the disclosure tests. Public empty defaults also
+cover the analogous Accordion/Popover fields and 93 RichTextSpan/ToastSpec partial
+initializers found across fixtures and examples. The baseline/corrected strict
+C++20 probe confirms all five types remain aggregates with identical sizes,
+alignments, standard-layout traits and noexcept default/move construction.
+No fixture assertion or initializer coverage is removed.
+
+The [run on `90ea56ba`](https://github.com/hemduf/nativeui/actions/runs/37305359051)
+compiled past those aggregate fixtures, then rejected the converting string
+reference in NumberInput's draft loop under `-Werror=range-loop-construct`.
+NumberInput and the analogous Toolbar example now construct their const string
+value explicitly in `5225410e`; all values, bodies and assertions are unchanged.
+Independent read-only review scanned 285 changed test/example/support files and
+found no additional high-confidence warning candidates. The English audit covers
+212 changed test source/configuration files and preserves intentional Unicode
+initials, composition, shaping, grapheme and typeahead data.
+
+The [initial complete Linux Core run](https://github.com/hemduf/nativeui/actions/runs/37307538738)
+completed at `cb601757`: the complete Release Core build passes with strict
+default warnings, but only **202/203 unit suites pass**.
+`nativeui_widget_rich_text_recovery_tests` segfaults. A serial Debug ASan/UBSan
+build and direct run of that same suite reproduce heap-use-after-free in
+`Tree::invalidate_node_paint`, reached through `activate_action` after a callback
+copy removes its node. The original 27-suite sanitizer selection did not include
+this recovery suite. The correction and its targeted GREEN evidence are recorded
+above at `615a8b83`. That RED run superseded the
+loop-only `5225410e` run because the ten English fixture corrections also change
+executable source. The earlier broad Mac runs above qualify that same frozen source;
+older `1da893dc` and `b6fd7af7` results are not substituted for these reruns.
+
+Non-blocking coverage follow-up: Calendar/DateInput tests exercise navigation,
+leap days, overlays, ranges and later successful operations, but do not assert
+exact ISO semantic strings at years 1 and 9999, absence and adjacent out-of-domain
+dates. The capacity correction does not claim new endpoint-format coverage. Sidebar tests
+cover pointer contacts and publication faults, but lack an explicit hover
+entry/row-transition/exit and equal-versus-changed appearance oracle. This is an
+advisory coverage gap; the snapshot correction is statically equivalent.
 
 ### Performance
 

@@ -79,7 +79,10 @@ Local validation on October 5, 2026: **6/6 CTest tests passed**, a Release build
 
 The gallery adds no backend, mutable global state or audio semantics. The application owns the model, which outlives its UI. Dialog and Toast belong to the same window; their callbacks neither delete their owners nor retain event contexts. The window dispatcher drives timed presentations. IME and native accessibility bridge limitations remain those of the framework: this application does not provide additional qualification of these bridges.
 
-The subsequent [mandatory widget review](widgets_review.md) qualifies the corrected
-Core with a complete 384/384 Release suite and 20/20 focused ASan/UBSan suite.
-The eight-page gallery self-test, strict Core-only compilation and real macOS
-first-render/deferred-close test also pass on those corrected production sources.
+The subsequent [mandatory widget review](widgets_review.md) records the earlier
+384/384 Release, 66/66 focused and 27/27 sanitizer checks at `cb601757`. Linux then
+exposed a RichText retirement crash. Its correction at `615a8b83` passes all five
+RichText suites under ASan/UBSan and six Release checks. The gallery is relinked
+with that fix; its eight-page headless self-test and real macOS first-render/
+deferred-close test pass. Complete Linux and integrated-head qualification remain
+explicit merge gates in the review record.
