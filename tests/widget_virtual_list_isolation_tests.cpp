@@ -54,7 +54,7 @@ void hover_and_pressed_state_remain_local_to_each_compilation() {
     NUI_CHECK(controller.replace(dataset()));
     ui::ListViewStyle style;
     style.base.row_fill=ui::Color{1,0,0,1}; style.hovered.row_fill=ui::Color{0,1,0,1}; style.pressed.row_fill=ui::Color{0,0,1,1};
-    style.base.row_horizontal_inset=0; style.base.row_vertical_inset=0; style.base.row_corner_radius=0;
+    style.base.row_horizontal_inset=0.0f; style.base.row_vertical_inset=0.0f; style.base.row_corner_radius=0.0f;
     auto recipe=ui::make_spec(ui::ListView{controller}.style(style));
     ui::UI first{ui::Spec{recipe}},second{ui::Spec{recipe}};
     test::MockPlatform first_platform,second_platform;

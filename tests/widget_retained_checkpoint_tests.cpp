@@ -15,7 +15,7 @@ public:
   bool focusable() const noexcept override { return p_->focusable; }
   bool uses_retained_checkpoint() const noexcept override { return true; }
   ui::Size measure(const std::vector<ui::ChildMetrics>&) const override { return {40, height_}; }
-  std::optional<float> first_baseline(ui::Size) const override { return 8; }
+  std::optional<float> first_baseline(ui::Size) const override { return 8.0f; }
   void mount(ui::MountContext& c) override { invalidate_ = c.layout_invalidator(); }
   void paint(ui::PaintContext& c) const override {
     p_->bounds = c.bounds();

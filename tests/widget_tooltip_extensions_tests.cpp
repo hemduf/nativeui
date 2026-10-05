@@ -10,8 +10,8 @@ public:
  std::string description;
 };
 void suite(){
- ui::TooltipStyle narrow;narrow.max_width=100;narrow.padding=5;narrow.background=ui::Color{.9f,.1f,.1f,1};
- ui::TooltipStyle broad=narrow;broad.max_width=300;
+ ui::TooltipStyle narrow;narrow.max_width=100.0f;narrow.padding=5.0f;narrow.background=ui::Color{.9f,.1f,.1f,1};
+ ui::TooltipStyle broad=narrow;broad.max_width=300.0f;
  ui::detail::TooltipSurfaceComponent a{"A long message which must wrap into several lines",narrow},b{"A long message which must wrap into several lines",broad};
  const auto small=a.measure({}),large=b.measure({});NUI_CHECK(small.w<=100 && small.h>large.h);
  auto anchor=ui::Spec{[]{return std::make_unique<Anchor>();},{}};

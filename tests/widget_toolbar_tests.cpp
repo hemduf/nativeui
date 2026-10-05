@@ -8,10 +8,10 @@
 namespace {
 ui::ButtonStyle button_style() {
   ui::ButtonStyle s;
-  s.base.minimum_width = 60;
-  s.base.control_height = 32;
-  s.base.horizontal_padding = 0;
-  s.base.text_size = 1;
+  s.base.minimum_width = 60.0f;
+  s.base.control_height = 32.0f;
+  s.base.horizontal_padding = 0.0f;
+  s.base.text_size = 1.0f;
   return s;
 }
 ui::ToolbarStyle bar_style() {
@@ -19,9 +19,9 @@ ui::ToolbarStyle bar_style() {
   s.padding = 0;
   s.gap = 0;
   s.minimum_height = 32;
-  s.overflow_button.base.minimum_width = 48;
-  s.overflow_button.base.horizontal_padding = 0;
-  s.overflow_button.base.text_size = 1;
+  s.overflow_button.base.minimum_width = 48.0f;
+  s.overflow_button.base.horizontal_padding = 0.0f;
+  s.overflow_button.base.text_size = 1.0f;
   return s;
 }
 std::vector<ui::ToolbarItem>

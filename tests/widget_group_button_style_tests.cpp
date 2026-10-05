@@ -51,8 +51,8 @@ private:
 ui::Spec scope(float width, ui::Spec child, float selected_width = 0) {
   auto style = std::make_shared<ui::detail::GroupButtonStyle>();
   style->buttons.base.minimum_width = width;
-  style->buttons.base.horizontal_padding = 0;
-  style->buttons.base.text_size = 1;
+  style->buttons.base.horizontal_padding = 0.0f;
+  style->buttons.base.text_size = 1.0f;
   if (selected_width > 0)
     style->selected.minimum_width = selected_width;
   return {[style] { return std::make_unique<Scope>(style); },
@@ -68,12 +68,12 @@ void nearest_scope_and_own_patch_have_priority() {
   ui::UI nested{scope(203, scope(117, ui::Button{"x", {}}.spec()))};
   NUI_CHECK_NEAR(nested.measure().preferred.w, 117, 0.01f);
   ui::ButtonStyle own;
-  own.base.minimum_width = 71;
+  own.base.minimum_width = 71.0f;
   ui::UI explicit_style{scope(203, ui::Button{"x", {}}.style(own).spec())};
   NUI_CHECK_NEAR(explicit_style.measure().preferred.w, 71, 0.01f);
   ui::State<bool> value{true};
   ui::ToggleButtonStyle own_toggle;
-  own_toggle.selected.minimum_width = 79;
+  own_toggle.selected.minimum_width = 79.0f;
   ui::UI toggle{
       scope(203, ui::ToggleButton{"x", value}.style(own_toggle).spec(), 229)};
   NUI_CHECK_NEAR(toggle.measure().preferred.w, 79, 0.01f);

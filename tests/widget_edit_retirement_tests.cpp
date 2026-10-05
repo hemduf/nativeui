@@ -263,7 +263,7 @@ void toggle_layout_invalidation_can_retire_before_paint_invalidation() {
   test::MockPlatform platform;
   ui::Component *component{};
   ui::ToggleStyle style{};
-  style.pressed.control_width = 220;
+  style.pressed.control_width = 220.0f;
   auto spec = ui::Toggle{"Switch", checked}.style(style).spec();
   auto factory = spec.factory;
   spec.factory = [&] {

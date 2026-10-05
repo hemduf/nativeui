@@ -9,7 +9,7 @@ static_assert(std::is_constructible_v<
               ui::Binding<UserMode>, std::vector<ui::SegmentOption<UserMode>>>);
 ui::Spec segmented_header_probe(ui::State<UserMode> &value) {
   ui::SegmentedControlStyle style;
-  style.segment.base.control_height = 36;
+  style.segment.base.control_height = 36.0f;
   return ui::SegmentedControl{"View", value,
                               std::vector<ui::SegmentOption<UserMode>>{
                                   {{1}, "List", true}, {{2}, "Grid", true}}}

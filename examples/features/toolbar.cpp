@@ -4,15 +4,15 @@
 namespace {
 ui::Spec bar(int &calls) {
   ui::ButtonStyle button;
-  button.base.minimum_width = 60;
-  button.base.horizontal_padding = 0;
-  button.base.text_size = 1;
+  button.base.minimum_width = 60.0f;
+  button.base.horizontal_padding = 0.0f;
+  button.base.text_size = 1.0f;
   ui::ToolbarStyle style;
   style.padding = 0;
   style.gap = 0;
-  style.overflow_button.base.minimum_width = 48;
-  style.overflow_button.base.horizontal_padding = 0;
-  style.overflow_button.base.text_size = 1;
+  style.overflow_button.base.minimum_width = 48.0f;
+  style.overflow_button.base.horizontal_padding = 0.0f;
+  style.overflow_button.base.text_size = 1.0f;
   std::vector<ui::ToolbarItem> items;
   for (const std::string label : {"Save", "Undo", "Redo"}) {
     auto action = [&calls] { ++calls; };

@@ -188,11 +188,11 @@ void empty_and_throwing_action_recover() {
 void real_group_scopes_are_local_and_nearest() {
   ui::ToggleGroupStyle outer, inner;
   outer.padding = inner.padding = 0;
-  outer.segment.base.minimum_width = 203;
-  inner.segment.base.minimum_width = 117;
-  outer.segment.base.text_size = inner.segment.base.text_size = 1;
+  outer.segment.base.minimum_width = 203.0f;
+  inner.segment.base.minimum_width = 117.0f;
+  outer.segment.base.text_size = inner.segment.base.text_size = 1.0f;
   outer.segment.base.horizontal_padding =
-      inner.segment.base.horizontal_padding = 0;
+      inner.segment.base.horizontal_padding = 0.0f;
   std::vector<ui::Spec> nested_children;
   nested_children.push_back(ui::Button{"x", {}}.spec());
   auto nested =
@@ -204,7 +204,7 @@ void real_group_scopes_are_local_and_nearest() {
   ui::UI ordinary{ui::Button{"x", {}}};
   NUI_CHECK(ordinary.measure().preferred.w < 203);
   ui::ButtonStyle own;
-  own.base.minimum_width = 71;
+  own.base.minimum_width = 71.0f;
   std::vector<ui::Spec> explicit_children;
   explicit_children.push_back(ui::Button{"x", {}}.style(own).spec());
   ui::UI explicit_style{

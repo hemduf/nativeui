@@ -10,7 +10,7 @@ void suite() {
   NUI_CHECK(dialog.show_alert(std::move(alert),[&](ui::DialogResult r){++completions;result=std::move(r);})==ui::DialogShowResult::Shown);
   ui::HeadlessRenderer renderer{{300,210},1};NUI_CHECK(renderer.render(tree));
   tree.dispatch(test::key(ui::Key::Escape),platform);NUI_CHECK(!dialog.active() && completions==1 && result.action_id=="cancel");
-  ui::DialogSpec request;request.body=ui::Label{"Body"}.spec();request.style=ui::DialogStyle{};request.style->width=240;request.style->padding=12;request.description="Owned description";
+  ui::DialogSpec request;request.body=ui::Label{"Body"}.spec();request.style=ui::DialogStyle{};request.style->width=240.0f;request.style->padding=12.0f;request.description="Owned description";
   request.actions={{"a","First very long action",true},{"b","Second very long action",true},{"c","Third very long action",true}};
   NUI_CHECK(dialog.show(std::move(request),[&](ui::DialogResult){++completions;})==ui::DialogShowResult::Shown);NUI_CHECK(renderer.render(tree));
   // The shared panel layout must wrap and bound every action independently.

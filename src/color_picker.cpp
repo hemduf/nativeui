@@ -834,7 +834,7 @@ public:
       auto style = style_.swatch;
       style.base.fill = normalized(swatch.value);
       style.base.minimum_width = logical(style_.swatch_size);
-      style.base.horizontal_padding = 0;
+      style.base.horizontal_padding = 0.0f;
       children.push_back(Spec{[action, name = swatch.name, style] {
                                 return std::make_unique<detail::InputAction>(
                                     name, "", style, action, true, false);

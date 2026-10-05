@@ -454,8 +454,8 @@ private:
     visual.pressed = (contact_->pointer_armed && contact_->pointer_inside) ||
                      contact_->space_armed;
     auto base = default_button_style(current_theme());
-    base.base.corner_radius = 0;
-    base.base.border_width = 0;
+    base.base.corner_radius = 0.0f;
+    base.base.border_width = 0.0f;
     auto style =
         resolve_button_style(base, state_->recipe->style.segment, visual);
     if (state_->selected_at(index_)) {

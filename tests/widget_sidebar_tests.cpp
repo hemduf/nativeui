@@ -332,7 +332,7 @@ void row_text_is_centered_and_not_clipped() {
   style.text = ui::Color{1, 1, 1, 1};
   style.surface = ui::Color{0, 0, 0, 1};
   style.rows.base.row_fill = ui::Color{0, 0, 0, 1};
-  style.text_size = 14;
+  style.text_size = 14.0f;
   ui::UI tree{ui::Sidebar<int>{selected}.item(1, "NativeUI").style(style)};
   tree.resize({200, 32});
   for (float scale : {1.0f, 2.0f}) {

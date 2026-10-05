@@ -73,9 +73,9 @@ ControlGroupTrack::ControlGroupTrack(std::string label, ToggleGroupStyle style)
   style_.gap = group_extent(style_.gap);
   style_.border_width = group_extent(style_.border_width);
   if (!style_.segment.base.corner_radius)
-    style_.segment.base.corner_radius = 0;
+    style_.segment.base.corner_radius = 0.0f;
   if (!style_.segment.base.border_width)
-    style_.segment.base.border_width = 0;
+    style_.segment.base.border_width = 0.0f;
   presentation_ = make_control_group_style(style_.segment, style_.selected);
 }
 bool ControlGroupTrack::focusable() const noexcept { return false; }
