@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,8 @@ template <class T>
 concept StateValue = requires(const T& lhs, const T& rhs) {
     { lhs == rhs } -> std::convertible_to<bool>;
 };
+
+struct StateReadAccess;
 
 } // namespace detail
 
@@ -317,13 +320,16 @@ private:
         if (control->cleanup_needed) control->compact_inactive();
     }
 
-    static T snapshot_control(std::shared_ptr<Control> control)
-        requires std::copy_constructible<T> {
+    template <class Reader>
+    static auto read_control(std::shared_ptr<Control> control, Reader&& reader) {
+        using Result = std::invoke_result_t<Reader&, const T&>;
+        static_assert(!std::is_void_v<Result> && !std::is_reference_v<Result>,
+                      "A guarded State read must return an owned result");
         ReadCopyFrame frame;
         frame.previous = control->read_copy;
         control->read_copy = &frame;
         try {
-            T result{control->value};
+            Result result = std::invoke(reader, std::as_const(control->value));
             control->read_copy = frame.previous;
             if (control->owner_alive && frame.intent) {
                 if (frame.previous) {
@@ -349,6 +355,11 @@ private:
         }
     }
 
+    static T snapshot_control(std::shared_ptr<Control> control)
+        requires std::copy_constructible<T> {
+        return read_control(std::move(control), [](const T& value) { return T{value}; });
+    }
+
     static Subscription observe_control(std::shared_ptr<Control> control,
                                         Callback callback) {
         if (!control->owner_alive) return {};
@@ -362,6 +373,7 @@ private:
     std::shared_ptr<Control> control_;
 
     friend class Binding<T>;
+    friend struct detail::StateReadAccess;
 };
 
 // Binding<T> is a reference-like handle to one State<T> source. It retains the
@@ -425,7 +437,21 @@ private:
     std::shared_ptr<typename State<T>::Control> control_;
 
     friend class State<T>;
+    friend struct detail::StateReadAccess;
 };
+
+namespace detail {
+// Framework adapters may prepare owned keys/recipes without copying T. The
+// callback borrow lasts only for this call; its result must own everything it
+// uses later. The existing read frame pins storage and defers reentrant writes
+// until preparation finishes, with the same nesting/failure policy as snapshot.
+struct StateReadAccess {
+    template <StateValue T, class Reader>
+    static auto read(const Binding<T>& source, Reader&& reader) {
+        return State<T>::read_control(source.control_, std::forward<Reader>(reader));
+    }
+};
+} // namespace detail
 
 template <detail::StateValue T>
 Binding<T> State<T>::binding() noexcept {

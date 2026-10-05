@@ -98,6 +98,128 @@ struct Item {
     std::string data;
     bool operator==(const Item&) const = default;
 };
+struct CopyLifetime {
+    bool armed{};
+    bool copying{};
+    bool input_retired{};
+    std::function<void()> replace;
+};
+struct CopyChoice {
+    int value;
+    std::shared_ptr<CopyLifetime> lifetime;
+    bool source_value{};
+    CopyChoice(int value,std::shared_ptr<CopyLifetime> lifetime,bool source_value=false)
+        : value(value),lifetime(std::move(lifetime)),source_value(source_value) {}
+    CopyChoice(const CopyChoice& other)
+        : value(other.value),lifetime(other.lifetime) {
+        const auto owned=lifetime;
+        if (!other.source_value || !owned || !std::exchange(owned->armed,false)) return;
+        const auto replace=owned->replace;
+        owned->copying=true;
+        try {
+            if (replace) replace();
+            owned->copying=false;
+            // Stop the source traversal immediately if the framework retired
+            // its input. This oracle never reads the retired element again.
+            if (owned->input_retired) throw std::runtime_error("dynamic copy input retired");
+        } catch (...) {
+            owned->copying=false;
+            throw;
+        }
+    }
+    CopyChoice(CopyChoice&&) noexcept = default;
+    CopyChoice& operator=(const CopyChoice&) = default;
+    CopyChoice& operator=(CopyChoice&& other) noexcept {
+        if (source_value && lifetime && lifetime->copying) lifetime->input_retired=true;
+        value=other.value;
+        lifetime=std::move(other.lifetime);
+        source_value=other.source_value;
+        return *this;
+    }
+    ~CopyChoice() {
+        if (source_value && lifetime && lifetime->copying) lifetime->input_retired=true;
+    }
+    friend bool operator==(const CopyChoice& first,const CopyChoice& second) {
+        return first.value==second.value;
+    }
+};
+void switch_copy_keeps_its_input_alive_until_the_snapshot_is_owned() {
+    const auto lifetime=std::make_shared<CopyLifetime>();
+    const auto log=std::make_shared<Observation>();
+    ui::State<CopyChoice> source{CopyChoice{1,lifetime,true}};
+    auto recipe=ui::make_spec(ui::Switch{source}.when(CopyChoice{1,lifetime},Probe{"first",log})
+        .when(CopyChoice{2,lifetime},Probe{"second",log}));
+    lifetime->replace=[&] { source.set(CopyChoice{2,lifetime,true}); };
+    lifetime->armed=true;
+    bool retired{};
+    try {
+        ui::UI tree{std::move(recipe)};
+        tree.resize({120.0f,80.0f});
+        NUI_CHECK(source.get().value==2 && log->identities["second"].size()==1);
+        source.set(CopyChoice{1,lifetime,true});
+        tree.resize({120.0f,80.0f});
+        NUI_CHECK(log->identities["first"].size()==2);
+    } catch (const std::runtime_error&) { retired=true; }
+    NUI_CHECK(!retired && !lifetime->input_retired);
+}
+void foreach_copy_cannot_retire_the_source_iteration() {
+    const auto lifetime=std::make_shared<CopyLifetime>();
+    const auto log=std::make_shared<Observation>();
+    std::vector<CopyChoice> initial;
+    initial.emplace_back(1,lifetime,true);
+    initial.emplace_back(2,lifetime,true);
+    ui::State<std::vector<CopyChoice>> source{std::move(initial)};
+    lifetime->replace=[&] {
+        std::vector<CopyChoice> replacement;
+        replacement.emplace_back(3,lifetime,true);
+        source.set(std::move(replacement));
+    };
+    lifetime->armed=true;
+    bool retired{};
+    try {
+        ui::UI tree{ui::ForEach{source,[](const CopyChoice& value) { return value.value; },
+            [log](const CopyChoice& value) { return Probe{std::to_string(value.value),log}; }}};
+        tree.resize({120.0f,80.0f});
+        std::vector<CopyChoice> replacement;
+        replacement.emplace_back(4,lifetime,true);
+        source.set(std::move(replacement));
+        tree.resize({120.0f,80.0f});
+        NUI_CHECK(log->identities["4"].size()==1);
+    } catch (const std::runtime_error&) { retired=true; }
+    NUI_CHECK(!retired && !lifetime->input_retired);
+}
+struct MoveOnlyItem {
+    int key;
+    std::unique_ptr<int> payload;
+    explicit MoveOnlyItem(int value):key(value),payload(std::make_unique<int>(value)) {}
+    MoveOnlyItem(MoveOnlyItem&&) noexcept=default;
+    MoveOnlyItem& operator=(MoveOnlyItem&&) noexcept=default;
+    bool operator==(const MoveOnlyItem& other) const { return key==other.key; }
+};
+void foreach_move_only_factory_reads_stable_items_during_replacement() {
+    const auto log=std::make_shared<Observation>();
+    std::vector<MoveOnlyItem> initial;
+    initial.emplace_back(1); initial.emplace_back(2);
+    ui::State<std::vector<MoveOnlyItem>> source{std::move(initial)};
+    bool replace=true;
+    ui::UI tree{ui::ForEach{source,[](const MoveOnlyItem& item) { return item.key; },
+        [&](const MoveOnlyItem& item) {
+            const auto key=item.key;
+            log->built.push_back(std::to_string(key));
+            if (std::exchange(replace,false)) {
+                std::vector<MoveOnlyItem> replacement;
+                replacement.emplace_back(3); replacement.emplace_back(4);
+                source.set(std::move(replacement));
+                NUI_CHECK(source.get().size()==2 && source.get()[0].key==1);
+            }
+            NUI_CHECK(item.key==key && *item.payload==key);
+            return Probe{std::to_string(key),log};
+        }}};
+    tree.resize({120.0f,80.0f});
+    NUI_CHECK(log->built.size()>=2 && log->built[0]=="1" && log->built[1]=="2");
+    NUI_CHECK(source.get().size()==2 && source.get()[0].key==3);
+    NUI_CHECK(log->identities["3"].size()==1 && log->identities["4"].size()==1);
+}
 void foreach_snapshot_survives_reentrant_factory_and_preserves_equal_keys() {
     auto log = std::make_shared<Observation>();
     ui::State<std::vector<Item>> items{{{"a","A"},{"b","B"}}};
@@ -138,9 +260,18 @@ void enum_integral_and_string_keys_remain_distinct_encodings() {
 void suite() {
     constructors_ctad_lvalue_branches_first_match_and_last_fallback_are_preserved();
     throwing_equality_preserves_structure_and_later_generation_recovers();
+    switch_copy_keeps_its_input_alive_until_the_snapshot_is_owned();
+    foreach_copy_cannot_retire_the_source_iteration();
+    foreach_move_only_factory_reads_stable_items_during_replacement();
     delayed_and_copied_specs_use_live_sources_and_new_instance_identities();
     foreach_snapshot_survives_reentrant_factory_and_preserves_equal_keys();
     enum_integral_and_string_keys_remain_distinct_encodings();
 }
 }
-int main() { return test::run("widget_dynamic_extraction",&suite); }
+int main(int argc,char** argv) {
+    if (argc>1 && std::string_view{argv[1]}=="switch_copy")
+        return test::run("dynamic_switch_copy",&switch_copy_keeps_its_input_alive_until_the_snapshot_is_owned);
+    if (argc>1 && std::string_view{argv[1]}=="foreach_copy")
+        return test::run("dynamic_foreach_copy",&foreach_copy_cannot_retire_the_source_iteration);
+    return test::run("widget_dynamic_extraction",&suite);
+}

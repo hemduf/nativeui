@@ -646,12 +646,23 @@ public:
       }
     };
     state->policy->before_input =
-        [weak](const InputEvent &event, InputContext &,
+        [weak](const InputEvent &event, InputContext &context,
                const detail::TextInputSnapshot &snapshot)
         -> std::optional<EventResult> {
       const auto current = weak.lock();
       if (!current)
         return EventResult::Handled;
+      if (snapshot.composition_active && event.type == InputType::KeyDown &&
+          (event.key == Key::Enter || event.key == Key::Escape)) {
+        if (event.key == Key::Escape) {
+          if (const auto session = current->editor.lock()) {
+            session->cancel_capture();
+            session->cancel_composition();
+          }
+          context.invalidate();
+        }
+        return EventResult::Handled;
+      }
       if (event.type == InputType::KeyDown && event.key == Key::Enter) {
         current->commit_hex(snapshot);
         return EventResult::Handled;

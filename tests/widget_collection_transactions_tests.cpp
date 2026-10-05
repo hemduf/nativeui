@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <nativeui/grid_view.hpp>
+#include <nativeui/outline_view.hpp>
 #include <nativeui/table_view.hpp>
 #include <nativeui/tree_view.hpp>
 
@@ -251,7 +252,54 @@ void tiny_grid_height_materializes_every_visible_item() {
   // this functional oracle can therefore pass before the fix. UBSan-enabled
   // Core qualification is required to prove the cast itself is defined.
 }
+void collection_failed_insert_rejects_stale_input_geometry() {
+  std::vector<ui::TreeNode<int>> initial;
+  for (int key = 0; key < 100; ++key) initial.push_back({key, {}, "row"});
+  ui::State<std::vector<ui::TreeNode<int>>> rows{initial};
+  ui::State<ui::SelectionSnapshot<int>> chosen{{{0}, 0, 0}};
+  ui::Selection<int> selection{chosen};
+  ui::State<std::vector<int>> expanded{{}};
+  ui::OutlineState<int> state;
+  auto fault = std::make_shared<CellFault>();
+  ui::UI tree{ui::OutlineView<int>{rows, selection, expanded}.state(state)
+                  .row_heights({24, false})
+                  .row([fault](const auto&) { return fault_cell(fault); })};
+  test::MockPlatform platform;
+  tree.resize({160, 120}); tree.activate(platform);
+  ui::HeadlessRenderer renderer{{160, 120}, 1};
+  settle(tree, renderer);
+  NUI_CHECK(state.scroll_to_key(40, ui::ScrollAlignment::Start));
+  settle(tree, renderer);
+  const auto old_frame = state.semantic_children();
+  NUI_CHECK(old_frame.item_at(40)->logical_bounds.y == 0);
+  initial.insert(initial.begin(), {-1, {}, "inserted"});
+  rows.set(initial);
+  fault->armed = true;
+  bool caught = false;
+  try { tree.resize({160, 120}); }
+  catch (const std::runtime_error& error) {
+    caught = std::string_view{error.what()} == "table cell layout fault";
+  }
+  NUI_CHECK(caught);
+  const auto attempts = fault->layout_faults;
+  bool input_rejected = false;
+  try { click(tree, platform, 60, 12); }
+  catch (const std::runtime_error& error) {
+    input_rejected = std::string_view{error.what()} == "table cell layout fault";
+  }
+  NUI_CHECK(input_rejected && fault->layout_faults > attempts);
+  NUI_CHECK(chosen.get().selected == std::vector<int>{0});
+  fault->armed = false;
+  tree.resize({160, 120}); settle(tree, renderer);
+  click(tree, platform, 60, 12);
+  NUI_CHECK(chosen.get().selected == std::vector<int>{40});
+  click(tree, platform, 60, 36);
+  NUI_CHECK(chosen.get().selected == std::vector<int>{41});
+  tree.deactivate(platform);
+  NUI_CHECK(platform.pointer_capture_begin_count == platform.pointer_capture_end_count);
+}
 void suite() {
+  collection_failed_insert_rejects_stale_input_geometry();
   selection_rejects_rows_replaced_at_exposure();
   toggle_preserves_expansion_replaced_at_exposure();
   autofit_preserves_provider_external_layout();
@@ -262,6 +310,7 @@ void suite() {
 
 int main(int argc, char** argv) {
   const std::string_view mode = argc > 1 ? argv[1] : "all";
+  if (mode == "published_rows") return test::run("collection_published_rows", &collection_failed_insert_rejects_stale_input_geometry);
   if (mode == "rows_replaced") return test::run("collection_rows_replaced", &selection_rejects_rows_replaced_at_exposure);
   if (mode == "expanded_replaced") return test::run("collection_expanded_replaced", &toggle_preserves_expansion_replaced_at_exposure);
   if (mode == "autofit_external") return test::run("collection_autofit_external", &autofit_preserves_provider_external_layout);

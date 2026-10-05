@@ -3,6 +3,8 @@
 #include <nativeui/detail/dynamic_host.hpp>
 #include <nativeui/detail/dynamic_key.hpp>
 
+#include <algorithm>
+
 namespace ui {
 namespace detail {
 template <class T>
@@ -15,6 +17,30 @@ struct ForEachModel {
     Binding<Items> source;
     KeyFunction key_function;
     ChildFunction child_function;
+    std::optional<DynamicSnapshot> cached_snapshot;
+    [[nodiscard]] DynamicSnapshot snapshot() {
+        return StateReadAccess::read(source,[this](const Items& items) {
+            DynamicSnapshot candidate;
+            candidate.keys.reserve(items.size());
+            for (const auto& item : items) candidate.keys.push_back(key_function(item));
+            // Equal keys preserve the existing recipes and must not replay
+            // child factories just because the source's data changed.
+            if (cached_snapshot && cached_snapshot->keys == candidate.keys) return *cached_snapshot;
+            bool duplicate{};
+            for (std::size_t i=0; i<candidate.keys.size() && !duplicate; ++i)
+                duplicate = std::find(candidate.keys.begin()+static_cast<std::ptrdiff_t>(i+1),
+                    candidate.keys.end(),candidate.keys[i]) != candidate.keys.end();
+            auto children=std::make_shared<std::vector<Spec>>();
+            if (!duplicate) {
+                children->reserve(items.size());
+                for (const auto& item : items) children->push_back(child_function(item));
+            }
+            const std::shared_ptr<const std::vector<Spec>> owned=std::move(children);
+            candidate.build_children=[owned] { return *owned; };
+            cached_snapshot=std::move(candidate);
+            return *cached_snapshot;
+        });
+    }
 };
 template <class T>
 class ForEachComponent final : public ForEachHostComponent {
@@ -27,17 +53,7 @@ public:
 private:
     explicit ForEachComponent(std::shared_ptr<ForEachModel<T>> model)
         : ForEachHostComponent([model] {
-            const auto items = std::make_shared<const Items>(model->source.get());
-            DynamicSnapshot snapshot;
-            snapshot.keys.reserve(items->size());
-            for (const auto& item : *items) snapshot.keys.push_back(model->key_function(item));
-            snapshot.build_children = [model,items] {
-                std::vector<Spec> children;
-                children.reserve(items->size());
-                for (const auto& item : *items) children.push_back(model->child_function(item));
-                return children;
-            };
-            return snapshot;
+            return model->snapshot();
         },dynamic_observe(model->source)) {}
 };
 } // namespace detail

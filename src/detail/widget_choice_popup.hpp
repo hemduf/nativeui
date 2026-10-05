@@ -16,6 +16,7 @@ struct ChoicePopupSession {
   Key suppressed{Key::None};
   std::function<bool()> allowed;
   std::function<void(std::size_t, Key)> choose;
+  std::function<void(Key)> opening_key_released;
   std::function<void()> invalidator, structure_invalidator;
   std::function<std::optional<OverlayComponentCommand>()> take_command;
 };

@@ -1,6 +1,40 @@
 #include <nativeui/style_scope.hpp>
 
 namespace ui {
+namespace {
+// Reconstruct text from bytes at this allocation boundary. The pinned Skia
+// archive can contribute an older libc++ copy helper without unwind metadata;
+// relying on that helper prevents a bad_alloc from reaching our recovery path.
+std::string copy_scope_text(const std::string& value) {
+    return std::string{value.data(), value.size()};
+}
+std::vector<std::string> copy_scope_fallbacks(const std::vector<std::string>& values) {
+    std::vector<std::string> result;
+    result.reserve(values.size());
+    for (const auto& value : values) result.push_back(copy_scope_text(value));
+    return result;
+}
+Theme copy_scope_theme(const Theme& value) {
+    ThemeTypography typography{
+        copy_scope_text(value.typography.family),
+        copy_scope_fallbacks(value.typography.fallback_families),
+        value.typography.base_size, value.typography.control_size, value.typography.label_size,
+        value.typography.base_weight, value.typography.control_weight, value.typography.label_weight,
+        value.typography.slant};
+    return {value.palette, std::move(typography), value.spacing, value.radii, value.controls};
+}
+StyleScopeOverrides copy_scope_overrides(const StyleScopeOverrides& value) {
+    const auto& source = value.typography;
+    StyleScopeTypographyOverrides typography{
+        source.family ? std::optional<std::string>{copy_scope_text(*source.family)} : std::nullopt,
+        source.fallback_families
+            ? std::optional<std::vector<std::string>>{copy_scope_fallbacks(*source.fallback_families)}
+            : std::nullopt,
+        source.base_size, source.control_size, source.label_size,
+        source.base_weight, source.control_weight, source.label_weight, source.slant};
+    return {value.palette, std::move(typography), value.spacing, value.radii, value.controls};
+}
+} // namespace
 
 bool StyleScopePaletteOverrides::operator==(const StyleScopePaletteOverrides& other) const noexcept {
     return detail::style_scope_optional_color_equal(background, other.background) &&
@@ -24,13 +58,13 @@ detail::StyleScopeComponent::StyleScopeComponent(StyleScopeOverrides overrides)
 
 detail::StyleScopeComponent::StyleScopeComponent(Binding<StyleScopeOverrides> state)
     : source_revision_(state.revision()), state_(std::move(state)),
-      overrides_(state_->get()), resolved_(default_theme()) {}
+      overrides_(copy_scope_overrides(state_->get())), resolved_(default_theme()) {}
 
 void detail::StyleScopeComponent::bind_theme(const Theme& theme) noexcept {
     ThemeBinding::bind_theme(theme);
     inherited_theme_ = &theme;
     try {
-        auto next = apply_style_scope_overrides(theme, overrides_);
+        auto next = apply_style_scope_overrides(copy_scope_theme(theme), overrides_);
         resolved_ = std::move(next);
         theme_retry_pending_ = false;
     } catch (...) {
@@ -111,7 +145,7 @@ void detail::StyleScopeComponent::retained_checkpoint() {
         replace_overrides(state_->get());
     }
     if (!theme_retry_pending_ || !inherited_theme_) return;
-    auto next = apply_style_scope_overrides(*inherited_theme_, overrides_);
+    auto next = apply_style_scope_overrides(copy_scope_theme(*inherited_theme_), overrides_);
     const auto invalidation = classify_theme_change(resolved_, next);
     auto notify = change_invalidator_;
     resolved_ = std::move(next);
@@ -121,13 +155,13 @@ void detail::StyleScopeComponent::retained_checkpoint() {
 
 void detail::StyleScopeComponent::replace_overrides(const StyleScopeOverrides& value) {
     const auto revision = state_ ? state_->revision() : 0;
-    auto owned = value;
+    auto owned = copy_scope_overrides(value);
     if (!inherited_theme_) {
         overrides_ = std::move(owned);
         source_revision_ = revision;
         return;
     }
-    auto next = apply_style_scope_overrides(*inherited_theme_, owned);
+    auto next = apply_style_scope_overrides(copy_scope_theme(*inherited_theme_), owned);
     const auto invalidation = classify_theme_change(resolved_, next);
     auto notify = change_invalidator_;
     if (state_ && state_->revision() != revision) {
@@ -151,7 +185,7 @@ Spec StyleScope::spec() && {
     auto overrides = std::move(overrides_);
     return Spec{
         [overrides = std::move(overrides)] {
-            return std::make_unique<detail::StyleScopeComponent>(overrides);
+            return std::make_unique<detail::StyleScopeComponent>(copy_scope_overrides(overrides));
         },
         std::move(children_)};
 }
@@ -184,9 +218,10 @@ Theme apply_style_scope_overrides(
         inherited.palette.active_highlight, overrides.palette.active_highlight);
     detail::apply_scope_value(inherited.palette.track, overrides.palette.track);
 
-    detail::apply_scope_value(inherited.typography.family, overrides.typography.family);
-    detail::apply_scope_value(
-        inherited.typography.fallback_families, overrides.typography.fallback_families);
+    if (overrides.typography.family)
+        inherited.typography.family = copy_scope_text(*overrides.typography.family);
+    if (overrides.typography.fallback_families)
+        inherited.typography.fallback_families = copy_scope_fallbacks(*overrides.typography.fallback_families);
     detail::apply_scope_value(inherited.typography.base_size, overrides.typography.base_size);
     detail::apply_scope_value(
         inherited.typography.control_size, overrides.typography.control_size);
@@ -231,8 +266,8 @@ ThemeInvalidation classify_style_scope_change(
     const StyleScopeOverrides& before,
     const StyleScopeOverrides& after) {
     return classify_theme_change(
-        apply_style_scope_overrides(inherited, before),
-        apply_style_scope_overrides(inherited, after));
+        apply_style_scope_overrides(copy_scope_theme(inherited), before),
+        apply_style_scope_overrides(copy_scope_theme(inherited), after));
 }
 
 } // namespace ui

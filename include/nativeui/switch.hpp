@@ -19,7 +19,7 @@ struct SwitchModel {
     std::shared_ptr<const Spec> fallback;
     [[nodiscard]] std::optional<DynamicChildSpec> selected() const {
         // Copy the source so equality callbacks cannot invalidate a borrowed T.
-        const auto selected = source.get();
+        const auto selected = source.snapshot();
         for (const auto& branch : branches)
             if (branch.value == selected) return DynamicChildSpec{branch.key,*branch.spec};
         if (fallback) return DynamicChildSpec{"switch:fallback",*fallback};

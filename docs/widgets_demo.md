@@ -78,3 +78,8 @@ Local validation on October 5, 2026: **6/6 CTest tests passed**, a Release build
 - **ColorPicker / ColorWell:** swatches are available from the first render; selecting them preserves mutation guards and respects disabled/read-only states and binding expiration. The hexadecimal field uses compact geometry and no longer overlaps the swatches. Explicit field styles are preserved.
 
 The gallery adds no backend, mutable global state or audio semantics. The application owns the model, which outlives its UI. Dialog and Toast belong to the same window; their callbacks neither delete their owners nor retain event contexts. The window dispatcher drives timed presentations. IME and native accessibility bridge limitations remain those of the framework: this application does not provide additional qualification of these bridges.
+
+The subsequent [mandatory widget review](widgets_review.md) qualifies the corrected
+Core with a complete 384/384 Release suite and 20/20 focused ASan/UBSan suite.
+The eight-page gallery self-test, strict Core-only compilation and real macOS
+first-render/deferred-close test also pass on those corrected production sources.

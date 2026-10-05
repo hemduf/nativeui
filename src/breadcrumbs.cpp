@@ -43,6 +43,14 @@ std::string ellipsis(std::string label, float width, const TextStyle &style) {
   }
   return dots;
 }
+struct CrumbFit {
+  std::shared_ptr<const Path> path;
+  Rect bounds;
+  std::vector<bool> visible;
+  std::vector<Rect> rectangles;
+  std::vector<float> separators;
+  bool overflow{};
+};
 struct CrumbRuntime : std::enable_shared_from_this<CrumbRuntime> {
   CrumbRuntime(Binding<Path> value, BreadcrumbsStyle style,
                std::function<void(const std::string &)> navigate)
@@ -71,7 +79,11 @@ struct CrumbRuntime : std::enable_shared_from_this<CrumbRuntime> {
   std::function<bool()> guard;
   std::string diagnostic;
   std::uint64_t generation{}, revision{}, menu_epoch{};
-  bool mounted{}, mutable_value{true}, overflow{}, live{};
+  enum Effect : unsigned {
+    Close = 1, Structure = 2, Layout = 4, Availability = 8, Paint = 16
+  };
+  unsigned effects{};
+  bool mounted{}, mutable_value{true}, overflow{}, live{}, exposing{}, retired{};
   bool allowed() const {
     return mounted && mutable_value && source.valid() && diagnostic.empty() &&
            bool(navigate) && (!guard || guard());
@@ -121,11 +133,42 @@ struct CrumbRuntime : std::enable_shared_from_this<CrumbRuntime> {
     if (invalidate)
       invalidate();
   }
+  void flush_effects() {
+    if (!mounted || exposing)
+      return;
+    const auto keep = shared_from_this();
+    const auto serial = generation;
+    struct ExposureGuard {
+      bool &flag;
+      ~ExposureGuard() { flag = false; }
+    } exposure{exposing};
+    exposing = true;
+    const auto run = [&](unsigned bit, const std::function<void()> &handle) {
+      if (!mounted || generation != serial || !(effects & bit))
+        return;
+      const auto callback = handle;
+      effects &= ~bit;
+      if (callback)
+        callback();
+    };
+    if (effects & Close) {
+      effects &= ~Close;
+      close();
+    }
+    run(Structure, structure);
+    run(Layout, layout);
+    run(Availability, availability);
+    run(Paint, invalidate);
+  }
   void sync() {
     if (!mounted)
       return;
     if (!source.valid()) {
-      close();
+      if (!retired) {
+        retired = true;
+        effects |= Close | Availability | Paint;
+      }
+      flush_effects();
       return;
     }
     if (source.revision() != revision) {
@@ -139,23 +182,18 @@ struct CrumbRuntime : std::enable_shared_from_this<CrumbRuntime> {
       } else
         diagnostic = "Invalid breadcrumb keys";
       revision = current_revision;
-      close();
-      if (structure)
-        structure();
-      if (layout)
-        layout();
-      if (availability)
-        availability();
-      if (invalidate)
-        invalidate();
+      // Retain every unstarted publication effect before closing an exposed
+      // menu can invoke an application invalidation observer.
+      effects |= Close | Structure | Layout | Availability | Paint;
     }
     if (live && !menu_anchor->handle.valid() && !pending &&
         (!menu || !menu->completion_queued)) {
       live = false;
       ++menu_epoch;
     }
+    flush_effects();
   }
-  void fit(Rect bounds) {
+  std::shared_ptr<CrumbFit> fit(Rect bounds) const {
     const auto count = path->size();
     std::vector<bool> shown(count, false);
     std::vector<Rect> boxes(count + 1);
@@ -225,16 +263,18 @@ struct CrumbRuntime : std::enable_shared_from_this<CrumbRuntime> {
         x += interval;
       }
     }
-    const bool changed = visible != shown || overflow != collapsed;
-    visible = std::move(shown);
-    rectangles = std::move(boxes);
-    separators = std::move(dividers);
-    overflow = collapsed;
-    if (changed) {
-      close();
-      if (availability)
-        availability();
-    }
+    return std::make_shared<CrumbFit>(CrumbFit{
+        path, bounds, std::move(shown), std::move(boxes),
+        std::move(dividers), collapsed});
+  }
+  void publish_fit(CrumbFit &fit) noexcept {
+    const bool changed = visible != fit.visible || overflow != fit.overflow;
+    visible.swap(fit.visible);
+    rectangles.swap(fit.rectangles);
+    separators.swap(fit.separators);
+    overflow = fit.overflow;
+    if (changed)
+      effects |= Close | Availability;
   }
   void invoke(std::string key, std::optional<std::uint64_t> epoch,
               const std::function<bool()> &permission = {}) {
@@ -570,11 +610,21 @@ public:
   }
   void layout_children(Rect bounds, const std::vector<ChildMetrics> &,
                        std::vector<ChildPlacement> &children) const override {
-    state_->fit(bounds);
+    auto prepared = state_->fit(bounds);
     for (std::size_t i = 0;
-         i < children.size() && i < state_->rectangles.size(); ++i)
-      children[i].bounds = state_->rectangles[i];
+         i < children.size() && i < prepared->rectangles.size(); ++i)
+      children[i].bounds = prepared->rectangles[i];
+    candidate_fit_ = std::move(prepared);
   }
+  void layout_committed(Rect, Rect bounds) noexcept override {
+    const auto fit = std::exchange(candidate_fit_, {});
+    if (!fit || fit->path != state_->path ||
+        fit->bounds.x != bounds.x || fit->bounds.y != bounds.y ||
+        fit->bounds.w != bounds.w || fit->bounds.h != bounds.h)
+      return;
+    state_->publish_fit(*fit);
+  }
+  void activate(LifecycleContext &) override { state_->sync(); }
   void mount(MountContext &context) override {
     state_->mounted = true;
     state_->menu_anchor->mounted = true;
@@ -596,6 +646,8 @@ public:
     ++state_->menu_epoch;
     state_->live = false;
     state_->pending.reset();
+    state_->effects = 0;
+    candidate_fit_.reset();
     state_->menu_anchor->handle = {};
     state_->invalidate = {};
     state_->layout = {};
@@ -632,11 +684,14 @@ private:
   void effective_availability_changed(
       const ComponentAvailability &,
       const ComponentAvailability &after) noexcept override {
+    if (after.visibility == VisibilityMode::Collapsed)
+      candidate_fit_.reset();
     state_->mutable_value = after.interactive() && !after.read_only;
     if (!state_->mutable_value)
       state_->live = false;
   }
   std::shared_ptr<CrumbRuntime> state_;
+  mutable std::shared_ptr<CrumbFit> candidate_fit_;
   std::string label_;
   Binding<Path>::Subscription subscription_;
 };

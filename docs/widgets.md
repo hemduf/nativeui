@@ -11,6 +11,8 @@ and file pairs.
 
 [Demo gallery](widgets_demo.md): an interactive application using all 83 components, launch instructions and self-tests.
 
+[Widget review](widgets_review.md): confirmed defects, corrections and the mandatory review/validation record.
+
 ## 1. Scope and reading guide
 
 These documents preserve the initial documentation snapshot and specify the development target.

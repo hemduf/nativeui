@@ -15,29 +15,23 @@ TextAreaComponent::TextAreaComponent(std::string label,
 
 bool TextAreaComponent::focusable() const noexcept { return true; }
 
+bool TextAreaComponent::uses_retained_checkpoint() const noexcept { return true; }
+
 Size TextAreaComponent::measure(const std::vector<ChildMetrics> &) const {
   const auto resolved = resolved_style(focused_);
   return Size{resolved.control_width, resolved.control_height};
 }
 
 void TextAreaComponent::mount(MountContext &ctx) {
-  auto invalidate = ctx.invalidator();
+  source_invalidator_ = ctx.invalidator();
   subscription_ = state_.observe(
-      [this, invalidate = std::move(invalidate)](const std::string &value) {
-        if (value == model_.text())
-          return;
-        pending_ime_commit_.clear();
-        model_.set_text(value, true, true);
-        rebuild_lines();
-        scroll_x_ = 0.0f;
-        scroll_y_ = 0.0f;
-        caret_visible_ = true;
-        invalidate();
-      });
+      [this](const std::string &) { refresh_source(true); });
 }
 
 void TextAreaComponent::unmount(LifecycleContext &) {
   subscription_.reset();
+  ++publication_->generation;
+  source_invalidator_ = {};
   pending_ime_commit_.clear();
   model_.cancel_composition();
   drag_select_ = false;
@@ -73,6 +67,7 @@ void TextAreaComponent::deactivate(LifecycleContext &ctx) {
 
 EventResult TextAreaComponent::input(const InputEvent &event,
                                      InputContext &ctx) {
+  refresh_source();
   const bool read_only = effective_read_only() || !state_.valid();
 
   if (event.type == InputType::PointerMove) {
@@ -674,16 +669,48 @@ TextMotion TextAreaComponent::motion_for(const InputEvent &event) noexcept {
 }
 
 void TextAreaComponent::rebuild_lines() {
-  lines_.clear();
+  std::vector<LineRange> lines;
   std::size_t begin = 0;
   for (std::size_t i = 0; i < model_.text().size(); ++i) {
     if (model_.text()[i] != '\n')
       continue;
-    lines_.push_back(LineRange{begin, i});
+    lines.push_back(LineRange{begin, i});
     begin = i + 1;
   }
-  lines_.push_back(LineRange{begin, model_.text().size()});
+  lines.push_back(LineRange{begin, model_.text().size()});
+  lines_.swap(lines);
 }
+
+void TextAreaComponent::refresh_source(bool source_notification) {
+  const auto publication = publication_;
+  // A checkpoint entered by an edit's platform callback must not replace the
+  // in-progress draft. A genuine source notification remains authoritative.
+  if (publication->depth != 0 && !source_notification)
+    return;
+  const bool changed = model_.text() != state_.get();
+  if (!changed &&
+      (!publication->refresh_pending || publication->depth != 0))
+    return;
+  publication->refresh_pending = true;
+  auto invalidate = source_invalidator_;
+  if (changed) {
+    auto value = state_.get();
+    pending_ime_commit_.clear();
+    model_.cancel_composition();
+    model_.set_text(std::move(value), true, true);
+    scroll_x_ = 0.0f;
+    scroll_y_ = 0.0f;
+    caret_visible_ = true;
+  }
+  rebuild_lines();
+  publication->refresh_pending = false;
+  // Recovery never repeats a setter or a callback that already started. Tree
+  // dirtiness is committed before this optional invalidation callback runs.
+  if (changed && invalidate)
+    invalidate();
+}
+
+void TextAreaComponent::retained_checkpoint() { refresh_source(); }
 
 std::size_t
 TextAreaComponent::line_index_for_cursor(std::size_t cursor) const noexcept {
@@ -828,12 +855,34 @@ void TextAreaComponent::copy_selection(InputContext &ctx) const {
 }
 
 void TextAreaComponent::commit(InputContext &ctx) {
-  rebuild_lines();
+  const auto publication = publication_;
+  struct PublicationGuard {
+    std::shared_ptr<PublicationState> publication;
+    std::size_t previous_depth;
+    ~PublicationGuard() noexcept { publication->depth = previous_depth; }
+  } guard{publication, publication->depth};
+  ++publication->depth;
+  publication->refresh_pending = true;
+  const auto generation = ++publication->generation;
   auto state = state_;
+  const auto revision = state.revision();
+  auto permission = detail::InputMutationAccess::guard(ctx);
+  std::function<bool()> condition =
+      [state, revision, publication, generation,
+       permission = std::move(permission)] {
+    if (!state.valid() || state.revision() != revision ||
+        publication->generation != generation || (permission && !permission()))
+      return false;
+    return state.valid() && state.revision() == revision &&
+           publication->generation == generation;
+      };
+  rebuild_lines();
   auto value = model_.text();
   ensure_cursor_visible(ctx);
   ctx.invalidate();
-  state.set(std::move(value));
+  state.set_if(std::move(value), std::move(condition));
+  if (publication->generation == generation && state.revision() != revision)
+    publication->refresh_pending = false;
 }
 
 void TextAreaComponent::paint_composition_line(

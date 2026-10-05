@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -36,6 +37,8 @@ public:
 
   [[nodiscard]] bool focusable() const noexcept override;
 
+  [[nodiscard]] bool uses_retained_checkpoint() const noexcept override;
+
   [[nodiscard]] Size measure(const std::vector<ChildMetrics> &) const override;
 
   void mount(MountContext &ctx) override;
@@ -53,6 +56,12 @@ public:
   void paint(PaintContext &p) const override;
 
 private:
+  struct PublicationState {
+    std::size_t depth{};
+    std::uint64_t generation{};
+    bool refresh_pending{};
+  };
+
   struct LineRange {
     std::size_t begin{};
     std::size_t end{};
@@ -134,6 +143,10 @@ private:
 
   void rebuild_lines();
 
+  void refresh_source(bool source_notification = false);
+
+  void retained_checkpoint() override;
+
   [[nodiscard]] std::size_t
   line_index_for_cursor(std::size_t cursor) const noexcept;
 
@@ -183,6 +196,9 @@ private:
   float scroll_y_{};
   std::string pending_ime_commit_;
   std::string focus_snapshot_;
+  std::shared_ptr<PublicationState> publication_{
+      std::make_shared<PublicationState>()};
+  std::function<void()> source_invalidator_;
   Binding<std::string>::Subscription subscription_;
 };
 

@@ -31,6 +31,7 @@ struct SplitViewState {
     Binding<double>::Subscription subscription;
     std::function<void()> invalidate_layout;
     std::function<void()> release_pointer;
+    std::function<bool()> mount_permission;
     SplitGeometry geometry;
     std::uint64_t generation{};
     double origin_value{};
@@ -101,11 +102,22 @@ void stop_drag_noexcept(const std::shared_ptr<detail::SplitViewState>& state) no
     try { stop_drag(state); } catch (...) {}
 }
 
-bool publish(const std::shared_ptr<detail::SplitViewState>& state, double next, double* published = nullptr) {
+bool permitted(const std::shared_ptr<detail::SplitViewState>& state,
+               const std::function<bool()>& permission,
+               std::uint64_t generation, std::uint64_t revision) {
+    return state->mounted && state->source.valid() && state->generation == generation &&
+        state->source.revision() == revision &&
+        (!state->mount_permission || state->mount_permission()) &&
+        (!permission || permission());
+}
+bool publish(const std::shared_ptr<detail::SplitViewState>& state, double next,
+             const std::function<bool()>& permission, double* published = nullptr) {
     if (!state->mounted || !state->source.valid() || !std::isfinite(next)) return false;
     const auto previous = state->source.get();
     if (previous == next) return false;
-    const auto generation = state->generation;
+    const auto generation = state->generation, revision = state->source.revision();
+    if (!permitted(state,permission,generation,revision)) return false;
+    const auto receipt = std::make_shared<bool>(false);
     struct WritingScope {
         std::shared_ptr<detail::SplitViewState> state;
         bool before;
@@ -115,30 +127,29 @@ bool publish(const std::shared_ptr<detail::SplitViewState>& state, double next, 
     state->writing = true;
     state->expected = next;
     try {
-        // The source may commit and an earlier application observer may throw
-        // before our subscription runs. Keep layout recoverable before writing.
-        if (state->invalidate_layout) state->invalidate_layout();
-        if (!state->mounted || state->generation != generation) return false;
+        // Request recoverable geometry before the write can expose application
+        // observers. Every later boundary rechecks the original model revision.
+        const auto invalidate = state->invalidate_layout;
+        if (invalidate) invalidate();
         if (!state->source.valid()) { stop_drag_noexcept(state); return false; }
-        state->source.set(next);
-        if (!state->source.valid()) {
-            stop_drag_noexcept(state);
-            return false;
-        }
+        if (!permitted(state,permission,generation,revision)) return false;
+        state->source.set_if(next,[state,permission,generation,revision,receipt] {
+            if (!permitted(state,permission,generation,revision)) return false;
+            *receipt = true;
+            return true;
+        });
+        if (!state->source.valid()) { stop_drag_noexcept(state); return false; }
+        const auto accepted_revision = revision + 1;
+        if (!*receipt || !permitted(state,permission,generation,accepted_revision)) return false;
         const auto accepted = state->source.get();
-        const bool changed = accepted != previous;
         if (published) *published = accepted;
-        if (changed && state->generation == generation && state->dragging) state->modified = true;
-        if (changed && state->mounted && state->generation == generation) {
-            auto callback = state->on_change;
-            if (!state->source.valid()) {
-                stop_drag_noexcept(state);
-                return false;
-            }
-            if (callback && state->mounted && state->generation == generation) callback(accepted);
-            if (!state->source.valid()) { stop_drag_noexcept(state); return false; }
-        }
-        return changed;
+        if (state->dragging) state->modified = true;
+        auto callback = state->on_change;
+        if (!state->source.valid()) { stop_drag_noexcept(state); return false; }
+        if (!permitted(state,permission,generation,accepted_revision)) return false;
+        if (callback) callback(accepted);
+        if (!state->source.valid()) { stop_drag_noexcept(state); return false; }
+        return permitted(state,permission,generation,accepted_revision);
     } catch (...) {
         if (state->generation == generation || !state->source.valid()) stop_drag_noexcept(state);
         throw;
@@ -205,13 +216,14 @@ public:
             const bool rollback = event.cancel_reason == PointerCancelReason::Native && editable;
             const auto generation = stop_drag(state);
             if (rollback && state->generation == generation && std::isfinite(origin))
-                (void)publish(state,origin);
+                (void)publish(state,origin,detail::InputMutationAccess::guard(context));
             return EventResult::Handled;
         }
         if (event.type == InputType::KeyDown && event.key == Key::Escape && state->dragging) {
             const auto origin = state->origin_value;
             const auto generation = stop_drag(state);
-            if (editable && state->generation == generation && std::isfinite(origin)) (void)publish(state,origin);
+            if (editable && state->generation == generation && std::isfinite(origin))
+                (void)publish(state,origin,detail::InputMutationAccess::guard(context));
             return EventResult::Handled;
         }
         if (!editable) {
@@ -241,7 +253,8 @@ public:
             if (state->dragging) {
                 const auto next = state->origin_effective + coordinate(event,*state) - state->origin_pointer;
                 if (std::isfinite(next))
-                    (void)publish(state,std::clamp(next,state->geometry.lower,state->geometry.upper));
+                    (void)publish(state,std::clamp(next,state->geometry.lower,state->geometry.upper),
+                                  detail::InputMutationAccess::guard(context));
                 return EventResult::Handled;
             }
             const bool hovered = context.bounds().contains(event.position);
@@ -255,10 +268,12 @@ public:
         if (event.type == InputType::PointerUp && state->dragging) {
             const bool modified = state->modified;
             const auto value = state->source.get();
+            const auto revision = state->source.revision();
             const auto generation = stop_drag(state);
-            if (modified && state->mounted && state->generation == generation && state->source.valid()) {
+            const auto permission = detail::InputMutationAccess::guard(context);
+            if (modified && permitted(state,permission,generation,revision)) {
                 auto callback = state->on_commit;
-                if (callback && state->mounted && state->generation == generation && state->source.valid()) callback(value);
+                if (callback && permitted(state,permission,generation,revision)) callback(value);
             }
             return EventResult::Handled;
         }
@@ -282,12 +297,13 @@ public:
         if (!recognized) return EventResult::Ignored;
         const auto generation = state->generation;
         double accepted = candidate;
-        const bool changed = publish(state,candidate,&accepted);
-        if (changed && state->mounted && state->generation == generation && !state->dragging &&
-            state->source.valid() && state->source.get() == accepted) {
+        const auto permission = detail::InputMutationAccess::guard(context);
+        const bool changed = publish(state,candidate,permission,&accepted);
+        const auto revision = state->source.revision();
+        if (changed && !state->dragging && permitted(state,permission,generation,revision)) {
             auto callback = state->on_commit;
-            if (callback && state->mounted && state->generation == generation && !state->dragging &&
-                state->source.valid() && state->source.get() == accepted) callback(accepted);
+            if (callback && !state->dragging && permitted(state,permission,generation,revision))
+                callback(accepted);
         }
         return EventResult::Handled;
     }
@@ -390,13 +406,21 @@ void SplitViewComponent::layout_children(Rect bounds,const std::vector<ChildMetr
     }
     candidate_geometry_ = std::move(candidate);
 }
-void SplitViewComponent::layout_committed(Rect,Rect) noexcept {
-    if (candidate_geometry_) state_->geometry = *candidate_geometry_;
+void SplitViewComponent::layout_committed(Rect,Rect bounds) noexcept {
+    const auto candidate = std::exchange(candidate_geometry_,{});
+    if (!candidate || candidate->bounds.x != bounds.x || candidate->bounds.y != bounds.y ||
+        candidate->bounds.w != bounds.w || candidate->bounds.h != bounds.h) return;
+    state_->geometry = *candidate;
+}
+void SplitViewComponent::effective_availability_changed(
+    const ComponentAvailability&,const ComponentAvailability& after) noexcept {
+    if (after.visibility == VisibilityMode::Collapsed) candidate_geometry_.reset();
 }
 void SplitViewComponent::paint(PaintContext&) const {}
 void SplitViewComponent::mount(MountContext& context) {
     state_->mounted = true;
     state_->invalidate_layout = context.layout_invalidator();
+    state_->mount_permission = detail::InputMutationAccess::guard(context);
     const std::weak_ptr<detail::SplitViewState> weak = state_;
     state_->subscription = state_->source.observe([weak](const double& value) {
         const auto state = weak.lock();
@@ -407,9 +431,11 @@ void SplitViewComponent::mount(MountContext& context) {
 }
 void SplitViewComponent::unmount(LifecycleContext&) {
     state_->mounted = false;
+    candidate_geometry_.reset();
     state_->subscription.reset();
     stop_drag_noexcept(state_);
     state_->invalidate_layout = {};
+    state_->mount_permission = {};
 }
 SplitView&& SplitView::orientation(SplitOrientation value) && { validate_orientation(value); orientation_=value; return std::move(*this); }
 SplitView&& SplitView::minimum_panes(double first,double second) && {

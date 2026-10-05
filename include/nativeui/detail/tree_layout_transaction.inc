@@ -242,6 +242,11 @@
             throw std::logic_error("reentrant retained layout transaction");
         }
         layout_node(*root_, viewport_rect());
+        // No-throw geometry commit hooks can publish component-local plans and
+        // leave fallible availability/overlay work pending. Drain that suffix
+        // at this safe checkpoint before a lazy first paint/input/semantic read.
+        // A failure here preserves the committed geometry and pending work.
+        refresh_retained_components();
     }
 
     void layout_node_transactional(Node& node, Rect bounds) {

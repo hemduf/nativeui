@@ -15,11 +15,17 @@
 
 namespace style_allocation_fault {
 bool armed{};
+std::size_t skip{};
 int hits{};
 void* allocate(std::size_t size) {
-    if (std::exchange(armed,false)) {
-        ++hits;
-        throw std::bad_alloc{};
+    if (armed) {
+        if (skip != 0) {
+            --skip;
+        } else {
+            armed = false;
+            ++hits;
+            throw std::bad_alloc{};
+        }
     }
     if (void* result = std::malloc(size ? size : 1)) return result;
     throw std::bad_alloc{};
@@ -57,9 +63,10 @@ bool equal(ui::Color first,ui::Color second) {
     return first.r==second.r && first.g==second.g && first.b==second.b && first.a==second.a;
 }
 
-void committed_binding_patch_recovers_without_source_rewrite(bool prior_observer_throws) {
+void committed_binding_patch_recovers_without_source_rewrite(bool prior_observer_throws, std::size_t skip = 0) {
     style_allocation_fault::armed = false;
     style_allocation_fault::hits = 0;
+    style_allocation_fault::skip = skip;
     ui::StyleScopeOverrides initial;
     initial.palette.accent = ui::Color{0.0f,0.0f,0.0f,1.0f};
     ui::State<ui::StyleScopeOverrides> source{initial};
@@ -114,10 +121,21 @@ void committed_binding_patch_recovers_without_source_rewrite(bool prior_observer
     NUI_CHECK(renderer.render(tree));
     NUI_CHECK(equal(observation->accent,*next.palette.accent));
     NUI_CHECK(binding.revision()==1 && earlier_calls==1);
+    auto final_value = next;
+    final_value.palette.accent = ui::Color{0.0f,0.0f,1.0f,1.0f};
+    source.set(final_value);
+    NUI_CHECK(binding.revision()==2 && earlier_calls==2);
+    tree.resize({40.0f,40.0f});
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(equal(observation->accent,*final_value.palette.accent));
     tree.deactivate(platform);
 }
 void previous_observer_suite() { committed_binding_patch_recovers_without_source_rewrite(true); }
-void allocation_suite() { committed_binding_patch_recovers_without_source_rewrite(false); }
+void allocation_suite() {
+    // Family allocation, fallback-vector storage and each long fallback string.
+    for (std::size_t skip = 0; skip != 4; ++skip)
+        committed_binding_patch_recovers_without_source_rewrite(false, skip);
+}
 void suite() { previous_observer_suite();allocation_suite(); }
 }
 int main(int argc,char** argv) {

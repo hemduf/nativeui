@@ -3,6 +3,49 @@
 #include <nativeui/enabled.hpp>
 #include <nativeui/read_only.hpp>
 namespace {
+ui::InputEvent composition(ui::CompositionType type, std::string text = {}) {
+  ui::InputEvent event;
+  event.type = ui::InputType::Composition;
+  event.composition.type = type;
+  event.composition.text = std::move(text);
+  return event;
+}
+void hexadecimal_composition_owns_submit_and_cancel_keys() {
+  const ui::Color original{0, 0, 1, 1};
+  ui::State<ui::Color> color{original};
+  int calls{};
+  ui::UI tree{ui::ColorPicker{"Palette", color}.on_change(
+      [&](ui::Color) { ++calls; })};
+  test::MockPlatform platform;
+  tree.resize({280, 420});
+  tree.activate(platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerDown, 100, 360), platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerUp, 100, 360), platform);
+  ui::InputEvent all;
+  all.type = ui::InputType::Command;
+  all.command = ui::Command::SelectAll;
+  tree.dispatch(all, platform);
+  tree.dispatch(test::text("#00ff00"), platform);
+  tree.dispatch(composition(ui::CompositionType::Start), platform);
+  tree.dispatch(composition(ui::CompositionType::Update, "80"), platform);
+  tree.dispatch(test::key(ui::Key::Enter), platform);
+  NUI_CHECK(color.get() == original && calls == 0);
+  tree.dispatch(composition(ui::CompositionType::Commit, "80"), platform);
+  tree.dispatch(test::text("80"), platform);
+  NUI_CHECK(color.get() == original && calls == 0);
+  tree.dispatch(test::key(ui::Key::Enter), platform);
+  const ui::Color green{0, 1, 0, 128.f / 255};
+  NUI_CHECK(color.get() == green && calls == 1);
+
+  tree.dispatch(all, platform);
+  tree.dispatch(test::text("#ff0000"), platform);
+  tree.dispatch(composition(ui::CompositionType::Start), platform);
+  tree.dispatch(composition(ui::CompositionType::Update, "ff"), platform);
+  tree.dispatch(test::key(ui::Key::Escape), platform);
+  NUI_CHECK(color.get() == green && calls == 1);
+  tree.dispatch(test::key(ui::Key::Enter), platform);
+  NUI_CHECK(color.get() == ui::Color({1, 0, 0, green.a}) && calls == 2);
+}
 void compact_hex_does_not_overlap_swatches() {
   ui::State<ui::Color> color{ui::Color{0, 0, 1, 1}};
   ui::UI tree{ui::ColorPicker{"Palette", color}.swatches(
@@ -88,6 +131,7 @@ void swatches_respect_owner_availability_and_expiration() {
   NUI_CHECK(found);
 }
 void suite() {
+  hexadecimal_composition_owns_submit_and_cancel_keys();
   swatches_respect_owner_availability_and_expiration();
   swatches_show_their_color_and_select_it();
   compact_hex_does_not_overlap_swatches();

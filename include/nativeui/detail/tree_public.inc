@@ -410,6 +410,19 @@ private:
                                            focused->bounds.y + focused->bounds.h * 0.5f};
         }
         const auto& event = keyboard_context ? *normalized_context : source_event;
+        const bool needs_geometry = is_drop || event.type == InputType::PointerDown ||
+            event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
+            event.type == InputType::PointerWheel || event.type == InputType::ContextMenu;
+        if (dispatch_depth_ == 0 && needs_geometry) {
+            // Geometry commit may publish local visibility plans. Drain their
+            // retained suffix before acquiring an input token: refresh cannot
+            // reconcile availability while a component input stack is active.
+            ensure_input_geometry();
+            if (active_) sync_focus_structure(platform);
+            if (is_drop ? !mounted_ : (!active_ || activation_epoch_ != dispatch_activation_epoch)) {
+                return EventResult::Ignored;
+            }
+        }
 
         const auto previous_dispatch_depth = dispatch_depth_;
         const auto previous_input_dispatch_token = active_input_dispatch_token_;
@@ -438,9 +451,8 @@ private:
         };
 
         try {
-            const bool needs_geometry = is_drop || event.type == InputType::PointerDown ||
-                event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
-                event.type == InputType::PointerWheel || event.type == InputType::ContextMenu;
+            // A nested callback may have requested newer geometry since the
+            // outer safe checkpoint. Preserve the existing guarded retry.
             if (needs_geometry) ensure_input_geometry();
             Node& pointer_hit_root =
                 pointer_passthrough_dynamic_root_ && root_->children.size() == 1

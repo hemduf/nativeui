@@ -24,6 +24,24 @@ TextStyle row_text(const ResolvedMenuItemStyle &style) {
   text.fallback_families = style.fallback_families;
   return text;
 }
+bool same_layout(const ResolvedComboBoxStyle &a, const ResolvedComboBoxStyle &b) {
+  return a.minimum_width == b.minimum_width && a.control_height == b.control_height &&
+         a.horizontal_padding == b.horizontal_padding && a.text_size == b.text_size &&
+         a.text_weight == b.text_weight && a.text_slant == b.text_slant &&
+         a.font_family == b.font_family && a.fallback_families == b.fallback_families;
+}
+bool same_layout(const ResolvedMenuItemStyle &a, const ResolvedMenuItemStyle &b) {
+  return a.row_height == b.row_height && a.horizontal_padding == b.horizontal_padding &&
+         a.text_size == b.text_size && a.text_weight == b.text_weight &&
+         a.text_slant == b.text_slant && a.font_family == b.font_family &&
+         a.fallback_families == b.fallback_families;
+}
+template <class Style, class Context>
+void invalidate_transition(const Style &before, const Style &after, Context &context) {
+  if (before == after) return;
+  if (!same_layout(before, after)) context.invalidate_layout();
+  context.invalidate();
+}
 class ChoiceSemanticRow final : public Component {
 public:
   ChoiceSemanticRow(std::shared_ptr<detail::ChoicePopupSession> session,
@@ -81,6 +99,7 @@ public:
   explicit ChoicePanel(std::shared_ptr<detail::ChoicePopupSession> session)
       : session_(std::move(session)) {}
   bool focusable() const noexcept override { return session_->focusable; }
+  bool uses_retained_checkpoint() const noexcept override { return true; }
   bool pointer_targetable() const noexcept override { return true; }
   bool clips_children() const noexcept override { return true; }
   std::vector<std::string> desired_keys() const override {
@@ -141,10 +160,14 @@ public:
   }
   void mount(MountContext &context) override {
     session_->invalidator = context.invalidator();
+    layout_invalidator_ = context.layout_invalidator();
   }
   void unmount(LifecycleContext &) override {
+    ++interaction_epoch_;
+    session_->live = false;
     session_->invalidator = {};
     session_->structure_invalidator = {};
+    layout_invalidator_ = {};
     armed_ = false;
   }
   EventResult input(const InputEvent &event, InputContext &context) override {
@@ -152,8 +175,10 @@ public:
     if (!session->live || (session->allowed && !session->allowed()))
       return EventResult::Handled;
     if (session->suppressed != Key::None && event.key == session->suppressed) {
-      if (event.type == InputType::KeyUp)
+      if (event.type == InputType::KeyUp) {
         session->suppressed = Key::None;
+        if (session->opening_key_released) session->opening_key_released(event.key);
+      }
       if (event.type == InputType::KeyUp || event.type == InputType::KeyDown)
         return EventResult::Handled;
     }
@@ -187,16 +212,51 @@ public:
       return EventResult::Handled;
     }
     if (event.type == InputType::PointerCancel) {
-      armed_ = false;
-      context.release_pointer();
-      context.invalidate();
+      const auto epoch = ++interaction_epoch_;
+      try {
+        set_armed(false, context);
+        if (interaction_epoch_ == epoch)
+          context.release_pointer();
+      } catch (...) {
+        cancel_failed_gesture(epoch, context);
+        throw;
+      }
       return EventResult::Handled;
     }
     if (event.type == InputType::PointerDown) {
-      armed_ = true;
-      armed_generation_ = session->generation;
-      context.capture_pointer();
-      highlight(index_at(event.position, context.bounds()), context);
+      const auto epoch = ++interaction_epoch_;
+      const auto generation = session->generation;
+      try {
+        auto permission = detail::InputMutationAccess::guard(context);
+        armed_generation_ = generation;
+        set_armed(true, context);
+        if (interaction_epoch_ != epoch)
+          return EventResult::Handled;
+        if (!session->live || session->generation != generation ||
+            (session->allowed && !session->allowed()) ||
+            (permission && !permission())) {
+          cancel_failed_gesture(epoch, context);
+          return EventResult::Handled;
+        }
+        context.capture_pointer();
+        if (interaction_epoch_ != epoch)
+          return EventResult::Handled;
+        if (!session->live || session->generation != generation ||
+            (session->allowed && !session->allowed()) ||
+            (permission && !permission())) {
+          cancel_failed_gesture(epoch, context);
+          return EventResult::Handled;
+        }
+        highlight(index_at(event.position, context.bounds()), context);
+        if (interaction_epoch_ == epoch &&
+            (!session->live || session->generation != generation ||
+             (session->allowed && !session->allowed()) ||
+             (permission && !permission())))
+          cancel_failed_gesture(epoch, context);
+      } catch (...) {
+        cancel_failed_gesture(epoch, context);
+        throw;
+      }
       return EventResult::Handled;
     }
     if (event.type == InputType::PointerMove) {
@@ -204,11 +264,22 @@ public:
       return EventResult::Handled;
     }
     if (event.type == InputType::PointerUp) {
-      const bool activate = std::exchange(armed_, false) &&
-                            session->generation == armed_generation_;
-      context.release_pointer();
-      if (activate && session->generation == armed_generation_)
-        choose(index_at(event.position, context.bounds()), Key::None, context);
+      const auto epoch = ++interaction_epoch_;
+      const bool activate = armed_ && session->generation == armed_generation_;
+      const auto generation = session->generation;
+      try {
+        set_armed(false, context);
+        if (interaction_epoch_ != epoch)
+          return EventResult::Handled;
+        context.release_pointer();
+        if (activate && interaction_epoch_ == epoch && session->live &&
+            session->generation == generation &&
+            detail::InputMutationAccess::allowed(context))
+          choose(index_at(event.position, context.bounds()), Key::None, context, epoch);
+      } catch (...) {
+        cancel_failed_gesture(epoch, context);
+        throw;
+      }
       return EventResult::Handled;
     }
     return EventResult::Ignored;
@@ -261,14 +332,17 @@ private:
     return resolve_menu_item_style(default_menu_item_style(current_theme()),
                                    session_->style, {});
   }
-  ResolvedMenuItemStyle resolved(std::size_t index) const {
+  ResolvedMenuItemStyle resolved(std::size_t index, bool armed) const {
     VisualState visual;
     visual.enabled = session_->rows[index].enabled;
     visual.hovered = index == session_->highlighted;
     visual.selected = visual.hovered;
-    visual.pressed = visual.hovered && armed_;
+    visual.pressed = visual.hovered && armed;
     return resolve_menu_item_style(default_menu_item_style(current_theme()),
                                    session_->style, visual);
+  }
+  ResolvedMenuItemStyle resolved(std::size_t index) const {
+    return resolved(index, armed_);
   }
   float total_height() const {
     float height{};
@@ -291,6 +365,14 @@ private:
   void highlight(std::size_t index, InputContext &context) {
     if (session_->highlighted == index)
       return;
+    const auto previous = session_->highlighted;
+    const auto epoch = interaction_epoch_;
+    const auto before_previous = previous < session_->rows.size()
+        ? std::optional<ResolvedMenuItemStyle>{resolved(previous)} : std::nullopt;
+    const auto before_next = index < session_->rows.size()
+        ? std::optional<ResolvedMenuItemStyle>{resolved(index)} : std::nullopt;
+    const float previous_scroll = session_->scroll;
+    presentation_retry_ = true;
     session_->highlighted = index;
     float top{};
     for (std::size_t i = 0; i < index && i < session_->rows.size(); ++i)
@@ -302,9 +384,53 @@ private:
       else if (bottom > session_->scroll + context.bounds().h)
         session_->scroll = bottom - context.bounds().h;
     }
-    context.invalidate();
+    bool paint_changed = previous_scroll != session_->scroll;
+    bool layout_changed = paint_changed;
+    const auto classify = [&](const auto &before, std::size_t row) {
+      if (!before || row >= session_->rows.size()) return;
+      const auto after = resolved(row);
+      paint_changed = paint_changed || !(*before == after);
+      layout_changed = layout_changed || !same_layout(*before, after);
+    };
+    classify(before_previous, previous);
+    classify(before_next, index);
+    if (layout_changed) context.invalidate_layout();
+    if (paint_changed) context.invalidate();
+    if (interaction_epoch_ == epoch)
+      presentation_retry_ = false;
   }
-  void choose(std::size_t index, Key key, InputContext &context) {
+  void set_armed(bool armed, InputContext &context) {
+    if (armed_ == armed) return;
+    const bool previous = armed_;
+    const auto epoch = interaction_epoch_;
+    const auto index = session_->highlighted;
+    presentation_retry_ = true;
+    armed_ = armed;
+    if (index < session_->rows.size())
+      invalidate_transition(resolved(index, previous), resolved(index), context);
+    if (interaction_epoch_ == epoch)
+      presentation_retry_ = false;
+  }
+  void cancel_failed_gesture(std::uint64_t epoch, InputContext &context) noexcept {
+    if (interaction_epoch_ != epoch)
+      return;
+    armed_ = false;
+    presentation_retry_ = true;
+    try {
+      context.release_pointer();
+    } catch (...) {
+    }
+  }
+  void retained_checkpoint() override {
+    if (!presentation_retry_) return;
+    const auto epoch = interaction_epoch_;
+    if (layout_invalidator_) layout_invalidator_();
+    if (session_->invalidator) session_->invalidator();
+    if (interaction_epoch_ == epoch)
+      presentation_retry_ = false;
+  }
+  void choose(std::size_t index, Key key, InputContext &context,
+              std::optional<std::uint64_t> interaction = {}) {
     const auto session = session_;
     const auto generation = session->generation;
     if (index >= session->rows.size() || !session->rows[index].enabled)
@@ -312,11 +438,16 @@ private:
     auto callback = session->choose;
     context.invalidate();
     if (session->live && session->generation == generation &&
-        (!session->allowed || session->allowed()) && callback)
+        (!interaction || interaction_epoch_ == *interaction) &&
+        (!session->allowed || session->allowed()) &&
+        detail::InputMutationAccess::allowed(context) && callback)
       callback(index, key);
   }
   std::shared_ptr<detail::ChoicePopupSession> session_;
   bool armed_{};
+  bool presentation_retry_{};
+  std::function<void()> layout_invalidator_;
+  std::uint64_t interaction_epoch_{};
   std::uint64_t armed_generation_{};
 };
 struct ComboState : std::enable_shared_from_this<ComboState> {
@@ -336,6 +467,8 @@ struct ComboState : std::enable_shared_from_this<ComboState> {
   Key suppressed{Key::None};
   std::uint64_t generation{};
   std::uint64_t source_revision{};
+  std::uint64_t opening_epoch{};
+  bool showing{};
   bool mounted{}, mutable_value{true};
   bool allowed() const {
     return mounted && mutable_value && adapter.valid() &&
@@ -344,6 +477,7 @@ struct ComboState : std::enable_shared_from_this<ComboState> {
   void refresh() {
     if (!mounted)
       return;
+    if (session && !session->live) handle = {};
     if (!adapter.valid()) {
       if (session)
         session->live = false;
@@ -358,14 +492,21 @@ struct ComboState : std::enable_shared_from_this<ComboState> {
         session->generation = generation;
     }
     const auto serial = generation;
-    const auto index = display.selected_index();
-    if (!mounted || generation != serial || adapter.revision() != revision)
+    const auto opening = opening_epoch;
+    auto selected_index = display.selected_index;
+    if (!mounted || generation != serial || opening_epoch != opening ||
+        adapter.revision() != revision)
+      return;
+    const auto index = selected_index();
+    if (!mounted || generation != serial || opening_epoch != opening ||
+        adapter.revision() != revision)
       return;
     if (session && session->live) {
       session->selected = index;
       if (changed && session->invalidator)
         session->invalidator();
-      if (!mounted || generation != serial || adapter.revision() != revision)
+      if (!mounted || generation != serial || opening_epoch != opening ||
+          adapter.revision() != revision)
         return;
     }
     std::string next =
@@ -446,8 +587,14 @@ public:
     });
     state_->refresh();
   }
-  void unmount(LifecycleContext &) override {
+  void unmount(LifecycleContext &context) override {
+    ++interaction_epoch_;
+    interaction_.deactivate(context, false);
+    focused_ = false;
+    state_->suppressed = Key::None;
     state_->mounted = false;
+    ++state_->opening_epoch;
+    state_->showing = false;
     ++state_->generation;
     if (state_->session)
       state_->session->live = false;
@@ -459,14 +606,29 @@ public:
     state_->owner_guard = {};
   }
   void deactivate(LifecycleContext &context) override {
+    const auto before = visual_state();
+    const auto epoch = ++interaction_epoch_;
+    presentation_retry_ = true;
     interaction_.deactivate(context, false);
     focused_ = false;
     state_->suppressed = Key::None;
+    invalidate_transition(resolved(before), resolved(), context);
+    if (interaction_epoch_ == epoch)
+      presentation_retry_ = false;
   }
   void focus_changed(bool focused, FocusContext &context) override {
+    const auto before = visual_state();
+    if (focused_ != focused)
+      ++interaction_epoch_;
+    const auto epoch = interaction_epoch_;
+    presentation_retry_ = true;
     focused_ = focused;
+    if (!focused && (!state_->session || !state_->session->live))
+      state_->suppressed = Key::None;
     interaction_.focus_changed(focused, context, false);
-    context.invalidate();
+    invalidate_transition(resolved(before), resolved(), context);
+    if (interaction_epoch_ == epoch)
+      presentation_retry_ = false;
   }
   EventResult input(const InputEvent &event, InputContext &context) override {
     const auto state = state_;
@@ -477,17 +639,57 @@ public:
         return EventResult::Handled;
     }
     if (!state->allowed()) {
-      interaction_.cancel_pending_mutation(context, false);
-      return EventResult::Handled;
+      const auto before = visual_state();
+      const auto epoch = ++interaction_epoch_;
+      presentation_retry_ = true;
+      try {
+        interaction_.cancel_pending_mutation(context, false);
+        if (interaction_epoch_ != epoch)
+          return EventResult::Handled;
+        invalidate_transition(resolved(before), resolved(), context);
+        if (interaction_epoch_ == epoch)
+          presentation_retry_ = false;
+      } catch (...) {
+        cancel_failed_gesture(epoch, context);
+        throw;
+      }
+      if (event.type == InputType::PointerDown || event.type == InputType::PointerUp ||
+          ((event.type == InputType::KeyDown || event.type == InputType::KeyUp) &&
+           (event.key == Key::Space || event.key == Key::Enter || event.key == Key::Down)))
+        return EventResult::Handled;
+      return EventResult::Ignored;
     }
     if (event.type == InputType::KeyDown && event.key == Key::Down)
       return open(context, Key::Down);
-    const auto result = interaction_.input(event, context, true, false);
-    context.invalidate();
-    if (!result.activate)
-      return result.result;
-    return open(context,
-                event.type == InputType::KeyDown ? event.key : Key::None);
+    const auto before = visual_state();
+    const bool gesture = event.type == InputType::PointerDown ||
+        event.type == InputType::PointerUp || event.type == InputType::PointerCancel ||
+        ((event.type == InputType::KeyDown || event.type == InputType::KeyUp) &&
+         (event.key == Key::Space || event.key == Key::Enter));
+    const auto epoch = gesture ? ++interaction_epoch_ : interaction_epoch_;
+    presentation_retry_ = true;
+    try {
+      auto permission = detail::InputMutationAccess::guard(context);
+      const auto result = interaction_.input(event, context, true, false);
+      if (interaction_epoch_ != epoch)
+        return result.result;
+      invalidate_transition(resolved(before), resolved(), context);
+      if (interaction_epoch_ != epoch)
+        return result.result;
+      presentation_retry_ = false;
+      if (!state->allowed() || (permission && !permission())) {
+        cancel_failed_gesture(epoch, context);
+        return EventResult::Handled;
+      }
+      if (!result.activate)
+        return result.result;
+      return open(context,
+                  event.type == InputType::KeyDown ? event.key : Key::None);
+    } catch (...) {
+      if (gesture)
+        cancel_failed_gesture(epoch, context);
+      throw;
+    }
   }
   std::optional<detail::OverlayComponentCommand>
   take_overlay_command() override {
@@ -524,14 +726,28 @@ public:
 private:
   EventResult open(InputContext &context, Key key) {
     const auto state = state_;
-    if (!state->allowed() || state->handle.valid() || state->pending)
+    if (!state->allowed() || state->handle.valid() || state->pending || state->showing)
       return EventResult::Handled;
+    const auto opening = ++state->opening_epoch;
     const auto serial = state->generation;
+    const auto revision = state->adapter.revision();
+    auto permission = detail::InputMutationAccess::guard(context);
+    const auto current = [&] {
+      return state->opening_epoch == opening && state->generation == serial &&
+             state->adapter.revision() == revision && state->allowed() &&
+             !state->handle.valid() && !state->pending && !state->showing &&
+             (!permission || permission());
+    };
+    if (!current())
+      return EventResult::Handled;
     auto provider = state->adapter.snapshot;
+    if (!current())
+      return EventResult::Handled;
     auto snapshot = provider();
+    if (!current())
+      return EventResult::Handled;
     const auto selected = snapshot.selected_index();
-    if (!state->allowed() || state->generation != serial ||
-        !detail::InputMutationAccess::allowed(context))
+    if (!current())
       return EventResult::Handled;
     auto session = std::make_shared<detail::ChoicePopupSession>();
     session->rows = snapshot.rows;
@@ -552,6 +768,13 @@ private:
       return model && current && model->session == current &&
              model->allowed() && model->generation == current->generation;
     };
+    session->opening_key_released = [weak, weak_session](Key key) noexcept {
+      const auto model = weak.lock();
+      const auto current = weak_session.lock();
+      if (model && current && model->mounted && model->session == current &&
+          model->suppressed == key)
+        model->suppressed = Key::None;
+    };
     session->choose = [weak](std::size_t index, Key trigger) {
       if (const auto model = weak.lock())
         model->commit(index, trigger);
@@ -568,20 +791,19 @@ private:
     overlay.dismiss_on_escape = true;
     overlay.dismiss_on_outside_pointer_down = true;
     overlay.content = detail::choice_popup_spec(session);
-    state->display = std::move(snapshot);
-    state->session = session;
-    state->refresh();
-    context.invalidate_layout();
-    context.invalidate();
-    if (!state->allowed() || state->generation != serial)
-      return EventResult::Handled;
-    state->suppressed = key;
-    state->pending = detail::OverlayComponentCommand::show(
-        std::move(overlay), [weak, session, serial](OverlayHandle handle) {
+    auto command = detail::OverlayComponentCommand::show(
+        std::move(overlay), [weak, session, serial, opening](OverlayHandle handle) {
           if (const auto model = weak.lock()) {
+            // An older acknowledgement must never clear a newer session or
+            // replace its accepted Show. showing closes the take/acknowledge
+            // interval to new attempts while this command acquires its handle.
+            if (model->opening_epoch != opening || model->session != session) {
+              session->live = false;
+              return;
+            }
+            model->showing = false;
             if (!model->mounted || !model->allowed() ||
-                model->generation != serial || model->session != session ||
-                !session->live) {
+                model->generation != serial || !session->live) {
               session->live = false;
               if (handle.valid())
                 model->pending =
@@ -596,19 +818,75 @@ private:
             }
           }
         });
+    if (!current())
+      return EventResult::Handled;
+    // Retain the old callbacks until this operation returns. Their owned
+    // option values cannot be destroyed halfway through cache publication.
+    auto previous = std::move(state->display);
+    (void)previous;
+    state->display = std::move(snapshot);
+    state->session = session;
+    const auto owns_session = [&] {
+      return state->opening_epoch == opening && state->session == session;
+    };
+    const auto ready = [&] { return owns_session() && session->live && current(); };
+    try {
+      state->refresh();
+      if (!ready()) {
+        if (owns_session()) session->live = false;
+        return EventResult::Handled;
+      }
+      context.invalidate_layout();
+      if (!ready()) {
+        if (owns_session()) session->live = false;
+        return EventResult::Handled;
+      }
+      context.invalidate();
+      if (!ready()) {
+        if (owns_session()) session->live = false;
+        return EventResult::Handled;
+      }
+    } catch (...) {
+      if (owns_session()) session->live = false;
+      throw;
+    }
+    state->suppressed = key;
+    state->showing = true;
+    state->pending = std::move(command);
     return EventResult::Handled;
   }
-  ResolvedComboBoxStyle resolved() const {
+  VisualState visual_state() const noexcept {
     VisualState visual;
     visual.enabled = effective_enabled();
     visual.read_only = effective_read_only();
     visual.focused = focused_;
     visual.hovered = interaction_.hovered();
     visual.pressed = interaction_.pressed();
+    return visual;
+  }
+  ResolvedComboBoxStyle resolved(VisualState visual) const {
     return resolve_combo_box_style(default_combo_box_style(current_theme()),
                                    style_, visual);
   }
-  void retained_checkpoint() override { state_->refresh(); }
+  ResolvedComboBoxStyle resolved() const { return resolved(visual_state()); }
+  void cancel_failed_gesture(std::uint64_t epoch, InputContext &context) noexcept {
+    if (interaction_epoch_ != epoch)
+      return;
+    presentation_retry_ = true;
+    try {
+      interaction_.cancel_pending_mutation(context, false);
+    } catch (...) {
+    }
+  }
+  void retained_checkpoint() override {
+    state_->refresh();
+    if (!presentation_retry_) return;
+    const auto epoch = interaction_epoch_;
+    if (state_->layout) state_->layout();
+    if (state_->invalidate) state_->invalidate();
+    if (interaction_epoch_ == epoch)
+      presentation_retry_ = false;
+  }
   void effective_availability_changed(
       const ComponentAvailability &,
       const ComponentAvailability &after) noexcept override {
@@ -620,6 +898,8 @@ private:
   ComboBoxStyle style_;
   detail::PressActivationState interaction_;
   bool focused_{};
+  bool presentation_retry_{};
+  std::uint64_t interaction_epoch_{};
 };
 } // namespace
 namespace detail {

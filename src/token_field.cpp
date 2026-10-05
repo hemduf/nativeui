@@ -205,6 +205,16 @@ struct TokenRuntime : std::enable_shared_from_this<TokenRuntime> {
     sync();
     if (event.type != InputType::KeyDown)
       return {};
+    if (snapshot.composition_active) {
+      if (event.key == Key::Escape) {
+        if (const auto session = editor.lock()) {
+          session->cancel_capture();
+          session->cancel_composition();
+        }
+        context.invalidate();
+      }
+      return EventResult::Handled;
+    }
     if (event.key == Key::Tab) {
       engine->close();
       active = detail::no_choice;

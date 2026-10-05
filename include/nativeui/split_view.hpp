@@ -45,6 +45,8 @@ public:
 
 private:
     void layout_committed(Rect before, Rect after) noexcept override;
+    void effective_availability_changed(const ComponentAvailability& before,
+                                        const ComponentAvailability& after) noexcept override;
     friend class SplitView;
     [[nodiscard]] std::vector<Spec> compile_children() const;
     std::shared_ptr<detail::SplitViewState> state_;

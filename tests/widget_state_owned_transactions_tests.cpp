@@ -224,6 +224,58 @@ void successful_copy_current_intent_cancels_previous_pending() {
   NUI_CHECK(observed == std::vector<int>{1});
 }
 
+void stable_read_prepares_owned_results_without_copying_move_only_values() {
+  std::vector<std::unique_ptr<int>> initial;
+  initial.push_back(std::make_unique<int>(1));
+  initial.push_back(std::make_unique<int>(2));
+  ui::State<std::vector<std::unique_ptr<int>>> owner{std::move(initial)};
+  const auto binding=owner.binding();
+  int notifications{};
+  auto subscription=owner.observe([&](const auto&) { ++notifications; });
+  const auto result=ui::detail::StateReadAccess::read(binding,[&](const auto& values) {
+    std::vector<std::unique_ptr<int>> replacement;
+    replacement.push_back(std::make_unique<int>(3));
+    owner.set(std::move(replacement));
+    NUI_CHECK(binding.revision()==0 && notifications==0);
+    std::vector<int> keys;
+    for (const auto& value:values) keys.push_back(*value);
+    return keys;
+  });
+  NUI_CHECK(result==std::vector<int>({1,2}));
+  NUI_CHECK(binding.get().size()==1 && *binding.get()[0]==3);
+  NUI_CHECK(binding.revision()==1 && notifications==1);
+}
+
+void failed_stable_read_preserves_earlier_pending_writes_and_recovers() {
+  ui::State<int> owner{0};
+  auto binding=owner.binding();
+  std::vector<int> observed;
+  int failures{};
+  auto subscription=owner.observe([&](int value) {
+    observed.push_back(value);
+    if (value!=1) return;
+    binding.set(2);
+    try {
+      (void)ui::detail::StateReadAccess::read(binding,[&](int current) -> int {
+        binding.set(3);
+        const auto nested=ui::detail::StateReadAccess::read(binding,[&](int inner) {
+          binding.set(4);
+          return inner;
+        });
+        NUI_CHECK(current==1 && nested==1 && binding.get()==1);
+        throw CopyFault{};
+      });
+    } catch (const CopyFault&) { ++failures; }
+    NUI_CHECK(binding.get()==1 && binding.revision()==1);
+  });
+  owner.set(1);
+  NUI_CHECK(failures==1 && binding.get()==2 && binding.revision()==2);
+  NUI_CHECK(observed==std::vector<int>({1,2}));
+  owner.set(5);
+  NUI_CHECK(binding.get()==5 && binding.revision()==3);
+  NUI_CHECK(observed==std::vector<int>({1,2,5}));
+}
+
 void suite() {
   failed_copy_preserves_previous_observer_write();
   nested_failure_suite();
@@ -233,6 +285,8 @@ void suite() {
   final_predicate_rejects_after_equality_changes_permission();
   queued_predicate_declines_without_commit_or_replay();
   successful_copy_current_intent_cancels_previous_pending();
+  stable_read_prepares_owned_results_without_copying_move_only_values();
+  failed_stable_read_preserves_earlier_pending_writes_and_recovers();
 }
 } // namespace
 
@@ -246,5 +300,7 @@ int main(int argc,char** argv) {
   if (mode == "final_guard") return test::run("state_owned_final_guard",&final_predicate_rejects_after_equality_changes_permission);
   if (mode == "queued_guard") return test::run("state_owned_queued_guard",&queued_predicate_declines_without_commit_or_replay);
   if (mode == "cancel_pending") return test::run("state_owned_cancel_pending",&successful_copy_current_intent_cancels_previous_pending);
+  if (mode == "stable_read") return test::run("state_stable_read",&stable_read_prepares_owned_results_without_copying_move_only_values);
+  if (mode == "stable_failure") return test::run("state_stable_read_failure",&failed_stable_read_preserves_earlier_pending_writes_and_recovers);
   return test::run("state_owned_transactions",&suite);
 }
