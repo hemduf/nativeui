@@ -80,6 +80,7 @@ private:
 /// thread-local injection state is involved.
 struct DispatcherTestAccess final {
     static void fail_next_post(const Dispatcher& dispatcher) noexcept;
+    static void fail_next_timer(const Dispatcher& dispatcher) noexcept;
 };
 
 } // namespace ui::detail

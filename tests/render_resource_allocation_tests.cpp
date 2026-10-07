@@ -1,6 +1,8 @@
 #include "src/detail/effect_cache_key.hpp"
 #include "src/detail/render_resource_materialization.hpp"
+#include "src/detail/raster_cache_renderer.hpp"
 #include "src/detail/shader_brush_access.hpp"
+#include <nativeui/detail/raster_cache_access.hpp>
 #include "render_resource_allocation_probe.hpp"
 #include "test_support.hpp"
 
@@ -12,6 +14,16 @@
 #include <array>
 #include <cstddef>
 #include <new>
+
+namespace ui {
+struct TreeTestAccess {
+    static NodeId root_id(const Tree& tree) { return tree.root_->id; }
+    static void paint(Tree& tree, SkCanvas& canvas, PlatformServices& platform,
+                      const detail::PainterPrivateHooks* hooks) {
+        tree.paint_with_resources(canvas, platform, hooks);
+    }
+};
+} // namespace ui
 
 namespace {
 
@@ -340,6 +352,67 @@ void raster_warm_hit_allocates_zero() {
     context.end_frame();
 }
 
+struct RasterAllocationState {
+    ui::detail::RenderResourceMaterializationContext resources;
+    std::size_t creates{};
+    std::size_t paints{};
+};
+
+bool allocation_raster_hook(
+    void* raw, const ui::detail::RasterCachePaintRequest& request,
+    SkCanvas& canvas, void* callback_state,
+    ui::detail::RasterCachePaintCallback paint,
+    ui::detail::RasterCacheValidateCallback validate,
+    ui::detail::RasterCacheCommitCallback commit) {
+    auto& state = *static_cast<RasterAllocationState*>(raw);
+    const ui::detail::RasterCacheBackend backend{
+        .state = &state,
+        .create_surface = [](void* opaque, const SkImageInfo& info) {
+            ++static_cast<RasterAllocationState*>(opaque)->creates;
+            return SkSurfaces::Raster(info);
+        }};
+    return ui::detail::paint_raster_cache_boundary(
+        state.resources, backend, request, canvas, callback_state,
+        paint, validate, commit);
+}
+
+void entire_warm_boundary_path_allocates_and_creates_zero() {
+    RasterAllocationState state;
+    ui::Tree tree{ui::compile(ui::make_spec(ui::Canvas{
+        32.0f, 32.0f, [&state](ui::CanvasContext2D& canvas) {
+            ++state.paints;
+            canvas.fill_rect({0.0f, 0.0f, 32.0f, 32.0f},
+                             ui::Color{1.0f, 0.0f, 0.0f, 1.0f});
+        }}))};
+    test::MockPlatform platform;
+    tree.mount();
+    tree.layout({32.0f, 32.0f});
+    NUI_CHECK(ui::detail::RasterCacheAccess::register_boundary(
+        tree, ui::TreeTestAccess::root_id(tree)));
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    NUI_CHECK(surface);
+    const ui::detail::PainterPrivateHooks hooks{
+        &state, nullptr, nullptr, nullptr, nullptr, nullptr,
+        &allocation_raster_hook};
+
+    state.resources.begin_frame();
+    ui::TreeTestAccess::paint(tree, *surface->getCanvas(), platform, &hooks);
+    state.resources.end_frame();
+    NUI_CHECK(state.creates == 1U && state.paints == 1U);
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    std::size_t allocations = 0;
+    {
+        AllocationScope guard;
+        ui::TreeTestAccess::paint(tree, *surface->getCanvas(), platform, &hooks);
+        allocations = guard.allocations();
+    }
+    state.resources.end_frame();
+    NUI_CHECK(allocations == 0U);
+    NUI_CHECK(state.creates == 1U && state.paints == 1U);
+}
+
 } // namespace
 
 
@@ -368,5 +441,6 @@ int main() {
     effect_warm_hit_allocates_zero();
     deep_shader_child_warm_hit_allocates_zero();
     raster_warm_hit_allocates_zero();
+    entire_warm_boundary_path_allocates_and_creates_zero();
     return 0;
 }

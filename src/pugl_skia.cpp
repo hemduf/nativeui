@@ -2,6 +2,7 @@
 
 #include "detail/pugl_button_translation.hpp"
 #include "detail/pugl_pointer_translation.hpp"
+#include "detail/pugl_scroll_translation.hpp"
 #include "detail/scoped_borrow_state.hpp"
 #include "detail/scene_damage.hpp"
 #include "detail/window_control_state.hpp"

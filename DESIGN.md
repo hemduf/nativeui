@@ -185,7 +185,7 @@ NativeUI currently pins:
 
 ```text
 repository: hemduf/pugl
-commit:     195f79b22644010c81a5e0c3231c591856787ec6
+commit:     a4bdafe38f48cf906560e40bd1e9e87986369b06
 license:    ISC
 ```
 
@@ -286,6 +286,34 @@ Every full rebuild resets the offscreen scene to opaque black, restores the fram
 An allocation or paint/submission failure keeps full repaint pending; a failure after a valid scene commit but within the observable copy/submission path keeps presentation pending and can retry without retained painting. The view remains open and waits for a later expose. Invalidation raised during successful paint gets one coalesced redraw request at the next Pugl update checkpoint. No timer or failure retry loop runs at idle. Pugl may swap even after an expose callback reports an error, and an unreported OS swap failure cannot be detected by this renderer.
 
 Scene validation rejects zero, non-finite, unrepresentable or over-budget physical extents before narrowing or allocation. One RGBA8 scene is capped at 128 MiB; a replacement transaction may temporarily hold two scenes (256 MiB total scene storage), excluding Skia's internal cache and Pugl's owned buffers. A live context releases owned GPU resources at `PUGL_UNREALIZE`; a confirmed lost context is abandoned without calling stale GL resources.
+
+T184 adds renderer-private isolated subtree rasters for explicitly registered T183
+boundaries. The Ganesh path and display-less raster fixtures share one private
+transaction: clear a temporary RGBA8888 target to transparent, paint the complete
+visible conservative visual extent, check backend submission, snapshot, validate
+the captured boundary token, retain the complete image, then commit that token.
+The scene damage transaction remains independent. Failure preserves stale work
+for retry and never composites an old-generation image as current; invalidation
+during paint or after snapshot prevents current-generation publication.
+
+Raster keys contain weak boundary lifetime identity, content generation, local
+extent, scene placement and backing scale. Context generation is represented by
+the owning view's cache lifetime: live reset releases cached handles before the
+context, while confirmed loss abandons the context before clearing its handles.
+Rasters compete with shaders and effects in the single T097 LRU
+budget of 512 entries / 128 MiB of accounted retained storage. RGBA8 accounting
+uses checked width × height × 4 arithmetic; oversize or frame-pinned pressure
+produces transient images, while active frame handles preserve evicted resources.
+A warm hit creates no NativeUI resource or heap allocation and skips descendant
+paint callbacks. Conservative eligibility/bounds scans still inspect descendants;
+T186 owns further performance qualification and transform/effect/nesting policy.
+
+Until T186 qualifies those signatures, ambient transforms and nested boundaries
+bypass raster caching; internal transforms and effects rerasterize without
+retention. A cold-only canvas observer detects transforms even when component
+code restores them before returning, without changing the public Painter API.
+T184 exposes no public cache component; T185 owns the public `CachedLayer` API
+and its public headless-renderer integration.
 
 ### 6.2 Headless renderer
 
@@ -652,7 +680,7 @@ PUGL_KEY_PRESS/RELEASE -> KeyDown / KeyUp
 PUGL_TEXT              -> committed TextInput
 PUGL_BUTTON_*          -> PointerDown / PointerUp (left), ContextMenu (right press)
 PUGL_MOTION            -> PointerMove
-PUGL_SCROLL            -> PointerWheel
+PUGL_SCROLL            -> PointerWheel, or Magnify when ctrl/cmd is held
 PUGL_FOCUS_*           -> focus activation/deactivation
 PUGL_CONFIGURE         -> logical resize / scale handling
 PUGL_EXPOSE            -> native frame render
@@ -665,6 +693,24 @@ press and is delivered to the pointer hit target without moving keyboard focus. 
 pointer capture is active, its owner first receives `PointerCancel` and the capture is
 released; context-menu routing cannot establish a replacement capture. Ignored requests
 bubble through ancestors like other targeted input.
+
+`InputType::Magnify` is the normalized zoom gesture: a continuous relative scale
+factor (`magnification`, > 0 zooms in) anchored at the event position, delivered to
+the pointer hit target exactly like `PointerWheel`. On macOS it is the native
+trackpad pinch; on every other backend ctrl/cmd + scroll (the OS-synthesized pinch
+and the browser ctrlKey wheel) is normalized to it at the Pugl boundary, and
+`PointerWheel` never carries ctrl or gui after normalization. Delivery mirrors
+`PointerWheel`: an active capture owner receives it like a wheel event during its
+drag, routing never moves keyboard focus or establishes capture, and ignored events
+bubble through ancestors. The pinned Pugl normalizes positive scroll `dy` to
+scroll-up on every backend, so the same ctrl/cmd+wheel-up gesture yields a
+positive magnification on all platforms.
+
+`Canvas` converts the anchor to Canvas-local coordinates, as it does for wheel
+input. Normal overlays and modal barriers absorb ignored `Magnify` input like
+wheel input. A `Magnify` callback cannot establish or replace its pointer's capture,
+including through an outer borrowed input context during reentrant dispatch.
+A nested new pointer-down frame retains its own normal capture permission.
 
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 
@@ -1076,7 +1122,7 @@ NATIVEUI_ENABLE_SANITIZERS=OFF
 NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
 
 NATIVEUI_PUGL_SOURCE=
-NATIVEUI_PUGL_COMMIT=195f79b22644010c81a5e0c3231c591856787ec6
+NATIVEUI_PUGL_COMMIT=a4bdafe38f48cf906560e40bd1e9e87986369b06
 
 NATIVEUI_SKIA_ROOT=
 NATIVEUI_SKIA_TAG=chrome/m149
@@ -1128,6 +1174,24 @@ Skia is downloaded as a pinned binary archive from `olilarkin/skia-builder` usin
 NativeUI supports both CPM's flattened archive layout and the original manually extracted `build/` archive layout.
 
 NativeUI does not rebuild Skia.
+
+On Windows, the pinned Skia archive includes external ICU data at
+`share/icudtl.dat`. NativeUI packages those exact bytes with its installed SDK and
+exports the source path through `NativeUI::Core`'s `NATIVEUI_SKIA_ICU_DATA` CMake
+property. `nativeui_attach_platform` stages the file beside the final consumer;
+Core-only executable/module consumers call `nativeui_attach_runtime_data(TARGET
+...)` explicitly. This build-time dependency works across CMake directories,
+restores removed data on an otherwise up-to-date build, and serializes copies into
+a shared output directory. Shared directories accept only byte-identical ICU
+data: staging a different pinned Skia payload fails before replacing another
+module's file. Modules requiring different ICU data must use separate output
+directories. No runtime I/O, locks or state are added to NativeUI's
+widget or audio-facing code. Data deployment stays within the Skia/platform
+packaging boundary; Unicode processing continues to use the pinned ICU backend.
+Skia searches the executable directory before the module directory. Module-local
+fallback is qualified with an independent host that has no ICU file; compatibility
+with hosts supplying another ICU data file remains outside that evidence.
+
 
 ---
 
@@ -1355,6 +1419,8 @@ The [value editing contract](docs/value-editing.md) defines generic `EditSession
 notifications, standard control input boundaries, exception/reentrancy policy,
 and optional hidden `EmbeddedView` construction. State and editing remain
 UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The [embedded keyboard contract](docs/embedded-keyboard.md) defines consumed-key
+ownership, host responder fallback and retained focus geometry recovery.
 The pinned macOS Pugl backend owns embedded visibility and focus behavior
 directly. NativeUI consumes that exact source commit without build-time source
 rewriting.

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -122,6 +123,10 @@ struct VirtualSemanticItemMetadata {
     bool read_only{};
     SemanticCheckedState checked{SemanticCheckedState::NotApplicable};
     std::vector<SemanticAction> actions;
+    SemanticRole role{SemanticRole::ListItem};
+    SemanticExpandedState expanded{SemanticExpandedState::NotApplicable};
+    VirtualSemanticItemToken parent_token{kInvalidVirtualSemanticItemToken};
+    std::size_t level{};
 
     bool operator==(const VirtualSemanticItemMetadata&) const = default;
 };
@@ -130,7 +135,20 @@ struct VirtualSemanticItem {
     VirtualSemanticItemToken token{kInvalidVirtualSemanticItemToken};
     SemanticInfo info;
     Rect logical_bounds{};
+    VirtualSemanticItemToken parent_token{kInvalidVirtualSemanticItemToken};
+    std::size_t level{};
 };
+
+namespace detail {
+// The owned geometry snapshot reads only immutable logical coordinates. It
+// never resolves a State, row provider, factory, or retained component.
+class VirtualSemanticGeometry {
+public:
+    virtual ~VirtualSemanticGeometry() noexcept = default;
+    [[nodiscard]] virtual std::size_t size() const noexcept = 0;
+    [[nodiscard]] virtual Rect bounds_at(std::size_t index) const noexcept = 0;
+};
+} // namespace detail
 
 // Immutable, data-only virtual ListView snapshot. The O(N) metadata allocation
 // is shared between semantic generations while selection/scroll geometry can
@@ -140,6 +158,8 @@ class VirtualSemanticChildren {
 public:
     using Metadata = std::vector<VirtualSemanticItemMetadata>;
     using MetadataSnapshot = std::shared_ptr<const Metadata>;
+    using GeometrySnapshot = std::shared_ptr<const detail::VirtualSemanticGeometry>;
+    using SelectedTokensSnapshot = std::shared_ptr<const std::vector<VirtualSemanticItemToken>>;
 
     VirtualSemanticChildren()
         : metadata_(std::make_shared<const Metadata>()) {}
@@ -158,6 +178,25 @@ public:
             dataset_generation, std::move(metadata), selected, list_bounds, row_height, scroll_y};
     }
 
+    [[nodiscard]] static VirtualSemanticChildren from_geometry(
+        std::uint64_t dataset_generation,
+        MetadataSnapshot metadata,
+        SelectedTokensSnapshot selected,
+        GeometrySnapshot geometry) {
+        if (selected) {
+            for (std::size_t index = 0; index < selected->size(); ++index) {
+                if ((*selected)[index] == kInvalidVirtualSemanticItemToken ||
+                    (index > 0 && (*selected)[index - 1] >= (*selected)[index])) {
+                    throw std::invalid_argument("Virtual selection tokens must be sorted, unique and nonzero");
+                }
+            }
+        }
+        auto result = from_metadata(dataset_generation, std::move(metadata), {}, {}, 0, 0);
+        result.selected_tokens_ = std::move(selected);
+        result.geometry_ = std::move(geometry);
+        return result;
+    }
+
     [[nodiscard]] std::uint64_t dataset_generation() const noexcept {
         return dataset_generation_;
     }
@@ -174,13 +213,16 @@ public:
         const auto& metadata = (*metadata_)[index];
         VirtualSemanticItem item;
         item.token = metadata.token;
-        item.info.role = SemanticRole::ListItem;
+        item.info.role = metadata.role;
         item.info.name = metadata.name;
         item.info.description = metadata.description;
         item.info.enabled = metadata.enabled;
         item.info.read_only = metadata.read_only;
         item.info.checked = metadata.checked;
-        item.info.selected = selected_.has_value() && *selected_ == metadata.token;
+        item.info.selected = selected_tokens_
+            ? std::binary_search(selected_tokens_->begin(), selected_tokens_->end(), metadata.token)
+            : selected_.has_value() && *selected_ == metadata.token;
+        item.info.expanded = metadata.expanded;
         item.info.focusable = true;
         item.info.actions = metadata.actions;
         item.logical_bounds = {
@@ -189,10 +231,22 @@ public:
             list_bounds_.w,
             row_height_,
         };
+        if (geometry_) {
+            item.logical_bounds = index < geometry_->size() ? geometry_->bounds_at(index) : Rect{};
+        }
+        item.parent_token = metadata.parent_token;
+        item.level = metadata.level;
         return item;
     }
 
     [[nodiscard]] std::optional<std::size_t> index_of_selected_item() const noexcept {
+        if (selected_tokens_) {
+            for (std::size_t index = 0; index < metadata_->size(); ++index) {
+                if (std::binary_search(selected_tokens_->begin(), selected_tokens_->end(),
+                                       (*metadata_)[index].token)) return index;
+            }
+            return std::nullopt;
+        }
         if (!selected_.has_value()) {
             return std::nullopt;
         }
@@ -225,6 +279,8 @@ private:
     std::uint64_t dataset_generation_{};
     MetadataSnapshot metadata_;
     std::optional<VirtualSemanticItemToken> selected_;
+    SelectedTokensSnapshot selected_tokens_;
+    GeometrySnapshot geometry_;
     Rect list_bounds_{};
     float row_height_{};
     float scroll_y_{};

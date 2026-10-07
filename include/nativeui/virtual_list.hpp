@@ -51,19 +51,19 @@ public:
     VirtualListState& operator=(const VirtualListState&) = delete;
 
     [[nodiscard]] bool replace(std::vector<Item> items) {
-        return runtime_->replace(std::move(items));
+        const auto runtime=runtime_; return runtime->replace(std::move(items));
     }
 
     [[nodiscard]] bool scroll_to_index(
         std::size_t index,
         ScrollAlignment alignment = ScrollAlignment::Nearest) {
-        return runtime_->scroll_to_index(index, alignment);
+        const auto runtime=runtime_; return runtime->scroll_to_index(index, alignment);
     }
 
     [[nodiscard]] bool scroll_to_key(
         const Key& key,
         ScrollAlignment alignment = ScrollAlignment::Nearest) {
-        return runtime_->scroll_to_key(key, alignment);
+        const auto runtime=runtime_; return runtime->scroll_to_key(key, alignment);
     }
 
     [[nodiscard]] Point offset() const noexcept { return runtime_->scroll().offset(); }
@@ -111,6 +111,7 @@ private:
     }
 
     [[nodiscard]] State<std::optional<Key>>& selection() const noexcept { return *selection_; }
+    [[nodiscard]] Binding<std::optional<Key>> selection_binding() const { return *runtime_->selection_binding(); }
     [[nodiscard]] const std::shared_ptr<Runtime>& runtime() const noexcept { return runtime_; }
 
     State<std::optional<Key>>* selection_{};

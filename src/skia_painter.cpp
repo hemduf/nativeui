@@ -19,6 +19,14 @@ bool Tree::try_paint_raster_cache_boundary(
         return false;
     }
 
+    // Until nested raster-space/compositing rules are qualified, bypass every
+    // boundary participating in nesting, including an inner boundary.
+    for (const Node* ancestor = node.parent; ancestor; ancestor = ancestor->parent) {
+        if (raster_cache_epochs_.find(ancestor->id) != raster_cache_epochs_.end()) {
+            return false;
+        }
+    }
+
     const auto subtree = raster_cache_subtree_visual_bounds(node);
     if (!subtree) return false;
     const Rect visible = intersect(*subtree, inherited_clip);

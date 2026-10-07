@@ -80,11 +80,16 @@
         }
         if (!availability_differs(*root_)) return;
         availability_structure_dirty_ = true;
+        if (lifecycle_transition_ == LifecycleTransition::Refresh || semantic_operation_running_ != 0) {
+            invalidate_node_paint(node);
+            return;
+        }
         if (!active_) {
             sync_availability_inactive();
             return;
         }
-        if (active_platform_ && dispatch_depth_ == 0) {
+        if (active_platform_ && dispatch_depth_ == 0 &&
+            lifecycle_transition_ != LifecycleTransition::Refresh && semantic_operation_running_ == 0) {
             sync_availability_structure(*active_platform_);
             return;
         }
@@ -105,6 +110,20 @@
 
     static std::function<void()> retained_paint_invalidator_factory(void* owner, NodeId id) {
         return static_cast<Tree*>(owner)->paint_invalidator(id);
+    }
+    static std::function<void()> retained_focus_requester_factory(void* owner, NodeId id) {
+        auto* tree = static_cast<Tree*>(owner);
+        const auto weak = tree->retained_invalidation_weak();
+        return [weak, id] {
+            const auto lifetime = weak.lock();
+            if (!lifetime || !lifetime->tree) return;
+            auto* live_tree = lifetime->tree;
+            auto* live = live_tree->retained_invalidation_node(id);
+            if (!live) return;
+            live_tree->retained_focus_target_ = id;
+            live_tree->retained_focus_request_ = true;
+            live_tree->invalidate_node_paint(*live);
+        };
     }
 
     static std::function<void()> retained_layout_invalidator_factory(void* owner, NodeId id) {
@@ -136,7 +155,8 @@
             tree->queue_dynamic_mutation(owner);
         });
 
-        auto keys = source->desired_keys();
+        auto keys = node.retained_dynamic_keys ? *node.retained_dynamic_keys
+                                              : source->desired_keys();
         if (has_duplicate_dynamic_keys(keys)) {
             structural_diagnostic_ = "duplicate dynamic key";
             keys.clear();
@@ -150,11 +170,13 @@
             }
         }
 
+        auto retained_keys = keys;
         if (auto* existing = dynamic_record(node.id)) {
             existing->keys = std::move(keys);
         } else {
             dynamic_records_.push_back(DynamicRecord{node.id, std::move(keys)});
         }
+        node.retained_dynamic_keys = std::move(retained_keys);
     }
 
 
@@ -163,4 +185,24 @@
     // earlier data members. External callbacks hold weak_ptr only; after Tree
     // destruction they cannot recover a Tree pointer or keep the Tree alive.
     std::vector<NodeId> retained_invalidation_live_nodes_;
+    std::vector<NodeId> retained_checkpoint_nodes_;
+
+    void refresh_retained_components() {
+        if (lifecycle_transition_active() || dispatch_depth_ != 0 || syncing_availability_) return;
+        if (!retained_checkpoint_nodes_.empty()) {
+            const auto participants = retained_checkpoint_nodes_;
+            LifecycleTransitionScope guard{*this, LifecycleTransition::Refresh, true};
+            for (const auto id : participants) {
+                if (auto* node = retained_invalidation_node(id)) node->component->retained_checkpoint();
+            }
+        }
+        // A failed refresh can leave availability work after its last opted-in
+        // node was removed. Drain this suffix even with an empty participant set.
+        if (active_ && active_platform_) sync_availability_structure(*active_platform_);
+        else if (!active_) sync_availability_inactive();
+        if (active_ && active_platform_) {
+            drain_descendant_actions(*active_platform_);
+            if (active_ && active_platform_) sync_availability_structure(*active_platform_);
+        }
+    }
     std::shared_ptr<RetainedInvalidationLifetime> retained_invalidation_lifetime_;

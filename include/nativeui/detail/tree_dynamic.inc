@@ -246,7 +246,6 @@
             if (!current->component->effective_availability().interactive() ||
                 !current->component->is_focus_scope() ||
                 !current->component->focus_scope_active() ||
-                !current->component->focus_scope_traps() ||
                 !subtree_is_being_removed(current, owner, current_keys, desired_keys)) {
                 continue;
             }
@@ -338,6 +337,7 @@
         bool removed_focus = false;
         NodeId removed_focus_restore_target{kInvalidNodeId};
         NodeId surviving_focus_scope{kInvalidNodeId};
+        NodeId removed_group_neighbor{kInvalidNodeId};
 
         if (active_ && active_platform_) {
             if (pointer_hover_target_ &&
@@ -355,6 +355,7 @@
                        })) {
                 InputEvent cancel{};
                 cancel.pointer.id = *pointer;
+                cancel.cancel_reason = PointerCancelReason::Removed;
                 (void)cancel_pointer_capture(*active_platform_, cancel);
                 if (structural_epoch_ != teardown_epoch) break;
             }
@@ -366,8 +367,29 @@
                         focused, owner, current_keys, desired_keys);
                 surviving_focus_scope = surviving_trapping_scope_for_removal(
                     focused, owner, current_keys, desired_keys);
+                // Retain the nearest surviving member before teardown erases
+                // group membership. A dynamic removal never selects its value.
+                const auto identity = focus_group_identity(focused);
+                const auto position = std::find(focusables_.begin(), focusables_.end(), focused);
+                if (identity && position != focusables_.end()) {
+                    const auto eligible_neighbor = [&](Node* candidate) {
+                        return focus_target_available(candidate) &&
+                            focus_group_identity(candidate) == identity &&
+                            !subtree_is_being_removed(candidate, owner, current_keys, desired_keys);
+                    };
+                    for (auto it = std::next(position); it != focusables_.end(); ++it) {
+                        if (eligible_neighbor(*it)) { removed_group_neighbor = (*it)->id; break; }
+                    }
+                    if (removed_group_neighbor == kInvalidNodeId) {
+                        auto it = position;
+                        while (it != focusables_.begin()) {
+                            --it;
+                            if (eligible_neighbor(*it)) { removed_group_neighbor = (*it)->id; break; }
+                        }
+                    }
+                }
                 removed_focus = true;
-                clear_focus(*active_platform_);
+                clear_focus(*active_platform_, FocusChangeReason::Removed);
             }
 
             // Teardown callbacks may change the desired structure. Do not apply
@@ -416,6 +438,7 @@
             retained_keys.push_back(key);
         }
         auto retained_keys_for_publish = retained_keys;
+        auto retained_keys_for_node = retained_keys;
         std::vector<std::unique_ptr<Node>> retained_children;
         retained_children.reserve(retained_indices.size());
         const bool removed_structure = retained_indices.size() != current_keys.size();
@@ -460,9 +483,14 @@
             }
         }
         owner.children.swap(retained_children);
+        if (removed_structure) {
+            layout_geometry_published_ = false;
+            input_layout_rollback_ = false;
+        }
         if (auto* refreshed = dynamic_record(owner.id)) {
             refreshed->keys.swap(retained_keys_for_publish);
         }
+        owner.retained_dynamic_keys->swap(retained_keys_for_node);
 
         std::exception_ptr removal_focus_error;
         if (removed_structure) {
@@ -559,6 +587,7 @@
         // the fully-owned desired snapshot now; the commit below only swaps.
         maybe_throw_dynamic_reconcile_fault(2);
         auto prepared_desired_keys = desired_keys;
+        auto prepared_desired_keys_for_node = desired_keys;
 
         // Provisional mount mutates the Tree-wide focus registry by appending
         // focusable nodes before the dynamic lifecycle transaction is committed.
@@ -581,9 +610,14 @@
         // Exact insertion structural commit: both operations are no-throw with
         // the default allocators and all owning storage was prepared above.
         owner.children.swap(next_children);
+        // The desired epoch can advance from a layout publication hook before
+        // reconciliation. These children require their own successful layout.
+        layout_geometry_published_ = false;
+        input_layout_rollback_ = false;
         if (auto* refreshed = dynamic_record(owner.id)) {
             refreshed->keys.swap(prepared_desired_keys);
         }
+        owner.retained_dynamic_keys->swap(prepared_desired_keys_for_node);
 
         // Newly created nodes are attached before callbacks can inspect their
         // retained surroundings, but their lifecycle publication is still a
@@ -659,6 +693,7 @@
             if (auto* refreshed = dynamic_record(owner.id)) {
                 refreshed->keys.swap(prepared_desired_keys);
             }
+            owner.retained_dynamic_keys->swap(prepared_desired_keys_for_node);
 
             mark_dynamic_structure_dirty(owner);
             std::rethrow_exception(insertion_error);
@@ -682,7 +717,7 @@
 
         if (active_ && active_platform_) {
             sync_focus_structure(*active_platform_);
-            if (removed_focus && !focus_active_) {
+            if (active_ && active_platform_ && removed_focus && !focus_active_) {
                 Node* fallback = nullptr;
                 if (removed_focus_restore_target != kInvalidNodeId) {
                     if (auto* restore =
@@ -690,6 +725,10 @@
                         focus_target_available(restore)) {
                         fallback = restore;
                     }
+                }
+                if (!fallback && removed_group_neighbor != kInvalidNodeId) {
+                    if (auto* neighbor = find_node_mutable(*root_, removed_group_neighbor);
+                        focus_target_available(neighbor)) fallback = neighbor;
                 }
                 if (!fallback && surviving_focus_scope != kInvalidNodeId) {
                     if (auto* scope = find_node_mutable(*root_, surviving_focus_scope)) {
@@ -712,7 +751,8 @@
     }
 
     void flush_dynamic_mutations() {
-        if (reconciling_dynamic_ || !root_ ||
+        if (lifecycle_transition_ == LifecycleTransition::Refresh ||
+            reconciling_dynamic_ || !root_ ||
             (dirty_dynamic_nodes_.empty() && !dynamic_reconcile_retry_all_)) {
             return;
         }
@@ -722,7 +762,7 @@
         // finish only the unstarted suffix before consuming structural work.
         if (pointer_hover_transition_running_ != 0 ||
             focus_transition_running_ != 0 ||
-            focus_semantic_running_ != 0) {
+            focus_semantic_running_ != 0 || semantic_operation_running_ != 0) {
             return;
         }
         if (active_platform_) {

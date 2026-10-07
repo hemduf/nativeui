@@ -22,6 +22,7 @@
 
 #include "painter_private_hooks.hpp"
 #include "render_resource_materialization.hpp"
+#include "raster_cache_renderer.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
 #endif
@@ -159,188 +160,71 @@ private:
     detail::RasterCacheValidateCallback validate_callback,
     detail::RasterCacheCommitCallback commit_callback) {
     auto* hook_state = static_cast<PainterHookState*>(state);
-    if (!hook_state || !hook_state->resources || !hook_state->context ||
-        !paint_callback || !validate_callback || !commit_callback) {
-        return false;
-    }
-
-    const auto requested_local = request.local_extent;
-    const auto requested_scene = request.scene_extent;
-    const double scale = static_cast<double>(hook_state->device_scale);
-    const double requested_right =
-        static_cast<double>(requested_scene.x) + requested_scene.w;
-    const double requested_bottom =
-        static_cast<double>(requested_scene.y) + requested_scene.h;
-    if (!std::isfinite(requested_local.x) ||
-        !std::isfinite(requested_local.y) ||
-        !std::isfinite(requested_local.w) ||
-        !std::isfinite(requested_local.h) ||
-        !std::isfinite(requested_scene.x) ||
-        !std::isfinite(requested_scene.y) ||
-        !std::isfinite(requested_scene.w) ||
-        !std::isfinite(requested_scene.h) ||
-        !(requested_local.w > 0.0f) ||
-        !(requested_local.h > 0.0f) ||
-        requested_scene.w != requested_local.w ||
-        requested_scene.h != requested_local.h ||
-        !std::isfinite(requested_right) ||
-        !std::isfinite(requested_bottom) ||
-        !std::isfinite(scale) ||
-        !(scale > 0.0)) {
-        return false;
-    }
-
-    const double device_left =
-        std::floor(static_cast<double>(requested_scene.x) * scale);
-    const double device_top =
-        std::floor(static_cast<double>(requested_scene.y) * scale);
-    const double device_right = std::ceil(requested_right * scale);
-    const double device_bottom = std::ceil(requested_bottom * scale);
-    const double device_width = device_right - device_left;
-    const double device_height = device_bottom - device_top;
-    const double max_int =
-        static_cast<double>((std::numeric_limits<int>::max)());
-    constexpr double kMaxExactFloatInteger = 16777216.0; // 2^24
-    if (!std::isfinite(device_left) || !std::isfinite(device_top) ||
-        !std::isfinite(device_right) || !std::isfinite(device_bottom) ||
-        !(device_width > 0.0) || !(device_height > 0.0) ||
-        device_width > max_int || device_height > max_int ||
-        device_left < -kMaxExactFloatInteger ||
-        device_top < -kMaxExactFloatInteger ||
-        device_right > kMaxExactFloatInteger ||
-        device_bottom > kMaxExactFloatInteger ||
-        device_width > hook_state->context->maxRenderTargetSize() ||
-        device_height > hook_state->context->maxRenderTargetSize()) {
-        return false;
-    }
-
-    const SkMatrix destination_matrix = destination.getLocalToDeviceAs3x3();
-    if (!destination_matrix.isFinite() || destination_matrix.hasPerspective() ||
-        destination_matrix.getScaleX() != hook_state->device_scale ||
-        destination_matrix.getScaleY() != hook_state->device_scale ||
-        destination_matrix.getSkewX() != 0.0f ||
-        destination_matrix.getSkewY() != 0.0f ||
-        destination_matrix.getTranslateX() != 0.0f ||
-        destination_matrix.getTranslateY() != 0.0f) {
-        return false;
-    }
-
-    const int width = static_cast<int>(device_width);
-    const int height = static_cast<int>(device_height);
-    const detail::RenderResourceMaterializationContext::RasterCacheKey key{
-        request.node_id,
-        request.token,
-        requested_local,
-        requested_scene,
-        hook_state->device_scale};
-
-    auto draw = [&](const sk_sp<SkImage>& image) {
-        if (!image) return false;
-        const SkAutoCanvasRestore restore_destination{&destination, true};
-        destination.resetMatrix();
-        destination.drawImageRect(
-            image,
-            SkRect::MakeXYWH(
-                static_cast<float>(device_left),
-                static_cast<float>(device_top),
-                static_cast<float>(width),
-                static_cast<float>(height)),
-            SkSamplingOptions{SkFilterMode::kNearest},
-            nullptr);
-        return true;
-    };
-
-    if (request.allow_reuse) {
-        if (auto cached = hook_state->resources->find_raster(key)) {
+    if (!hook_state || !hook_state->resources || !hook_state->context) return false;
+    const detail::PainterPrivateHooks nested_hooks{
+        hook_state,
+        &materialize_cached_image_texture,
+        &materialize_cached_runtime_shader,
+        &materialize_cached_effect,
+        &materialize_cached_linear_gradient,
+        &materialize_cached_radial_gradient,
+        &paint_cached_raster_boundary};
+    const detail::RasterCacheBackend backend{
+        .state = hook_state,
+        .device_scale = hook_state->device_scale,
+        .max_surface_size = hook_state->context->maxRenderTargetSize(),
+        .painter_hooks = &nested_hooks,
+        .create_surface = [](void* raw, const SkImageInfo& info) -> sk_sp<SkSurface> {
+            auto& hook = *static_cast<PainterHookState*>(raw);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-            if (hook_state->raster_cache_hits) ++*hook_state->raster_cache_hits;
+            if (hook.fault_stage &&
+                *hook.fault_stage == detail::SceneFaultStage::RasterSurfaceAllocation) {
+                *hook.fault_stage = detail::SceneFaultStage::None;
+                throw std::bad_alloc{};
+            }
 #endif
-            return draw(cached);
-        }
-    }
-
+            return SkSurfaces::RenderTarget(
+                hook.context, skgpu::Budgeted::kYes, info, 0,
+                kBottomLeft_GrSurfaceOrigin, nullptr);
+        },
+        .submit_surface = [](void* raw, SkSurface& surface) {
+            auto& hook = *static_cast<PainterHookState*>(raw);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    if (hook_state->fault_stage &&
-        *hook_state->fault_stage == detail::SceneFaultStage::RasterSurfaceAllocation) {
-        *hook_state->fault_stage = detail::SceneFaultStage::None;
-        throw std::bad_alloc{};
-    }
+            if (hook.fault_stage &&
+                *hook.fault_stage == detail::SceneFaultStage::RasterSubmission) {
+                *hook.fault_stage = detail::SceneFaultStage::None;
+                throw std::runtime_error("injected subtree raster submission failure");
+            }
 #endif
-
-    const SkImageInfo info = SkImageInfo::Make(
-        width,
-        height,
-        kRGBA_8888_SkColorType,
-        kPremul_SkAlphaType,
-        SkColorSpace::MakeSRGB());
-    auto surface = SkSurfaces::RenderTarget(
-        hook_state->context, skgpu::Budgeted::kYes, info, 0,
-        kBottomLeft_GrSurfaceOrigin, nullptr);
-    if (!surface) {
-        throw std::bad_alloc{};
-    }
-
-    auto* canvas = surface->getCanvas();
-    canvas->clear(SK_ColorTRANSPARENT);
-    {
-        const SkAutoCanvasRestore restore{canvas, true};
-        canvas->setMatrix(SkMatrix::MakeAll(
-            hook_state->device_scale, 0.0f, -static_cast<float>(device_left),
-            0.0f, hook_state->device_scale, -static_cast<float>(device_top),
-            0.0f, 0.0f, 1.0f));
-        const detail::PainterPrivateHooks nested_hooks{
-            hook_state,
-            &materialize_cached_image_texture,
-            &materialize_cached_runtime_shader,
-            &materialize_cached_effect,
-            &materialize_cached_linear_gradient,
-            &materialize_cached_radial_gradient,
-            &paint_cached_raster_boundary};
-        if (!paint_callback(callback_state, *canvas, &nested_hooks)) return false;
-    }
-
+            if (!hook.context->flushAndSubmit(&surface).fSuccess) {
+                throw std::runtime_error("subtree raster cache submission failed");
+            }
+        },
+        .snapshot_surface = [](void* raw, SkSurface& surface) -> sk_sp<SkImage> {
+            [[maybe_unused]] auto& hook = *static_cast<PainterHookState*>(raw);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    if (hook_state->fault_stage &&
-        *hook_state->fault_stage == detail::SceneFaultStage::RasterSubmission) {
-        *hook_state->fault_stage = detail::SceneFaultStage::None;
-        throw std::runtime_error("injected subtree raster submission failure");
-    }
+            if (hook.fault_stage &&
+                *hook.fault_stage == detail::SceneFaultStage::RasterSnapshot) {
+                *hook.fault_stage = detail::SceneFaultStage::None;
+                throw std::runtime_error("injected subtree raster snapshot failure");
+            }
 #endif
-    const auto submission = hook_state->context->flushAndSubmit(surface.get());
-    if (!submission.fSuccess) {
-        throw std::runtime_error("subtree raster cache submission failed");
-    }
+            auto image = surface.makeImageSnapshot();
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    if (hook_state->fault_stage &&
-        *hook_state->fault_stage == detail::SceneFaultStage::RasterSnapshot) {
-        *hook_state->fault_stage = detail::SceneFaultStage::None;
-        throw std::runtime_error("injected subtree raster snapshot failure");
-    }
+            if (image && hook.raster_cache_updates) ++*hook.raster_cache_updates;
 #endif
-    auto image = surface->makeImageSnapshot();
-    if (!image) {
-        throw std::runtime_error("subtree raster cache snapshot failed");
-    }
+            return image;
+        },
+        .before_retention = nullptr,
+        .did_hit = [](void* raw) noexcept {
+            [[maybe_unused]] auto& hook = *static_cast<PainterHookState*>(raw);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    if (hook_state->raster_cache_updates) ++*hook_state->raster_cache_updates;
+            if (hook.raster_cache_hits) ++*hook.raster_cache_hits;
 #endif
-
-    if (!validate_callback(callback_state)) {
-        return draw(image);
-    }
-
-    auto acquisition = hook_state->resources->retain_raster(
-        key,
-        detail::raster_retained_storage_bytes(width, height),
-        image);
-    if (!acquisition) {
-        return draw(image);
-    }
-
-    if (!commit_callback(callback_state)) {
-        return draw(image);
-    }
-    return draw(acquisition.image);
+        }};
+    return detail::paint_raster_cache_boundary(
+        *hook_state->resources, backend, request, destination, callback_state,
+        paint_callback, validate_callback, commit_callback);
 }
 
 PuglSpan to_pugl_span(float physical) {
@@ -1193,6 +1077,12 @@ Key translate_key(uint32_t key, PuglMods mods) {
     case PUGL_KEY_RIGHT: return Key::Right;
     case PUGL_KEY_UP: return Key::Up;
     case PUGL_KEY_DOWN: return Key::Down;
+    case PUGL_KEY_F2: return Key::F2;
+    case PUGL_KEY_PAGE_UP: return Key::PageUp;
+    case PUGL_KEY_PAGE_DOWN: return Key::PageDown;
+    case PUGL_KEY_F3: return Key::F3;
+    case PUGL_KEY_MENU: return Key::Menu;
+    case PUGL_KEY_F10: return Key::F10;
     case PUGL_KEY_HOME: return Key::Home;
     case PUGL_KEY_END: return Key::End;
     case PUGL_KEY_BACKSPACE: return Key::Backspace;

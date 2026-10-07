@@ -133,6 +133,7 @@ public:
         if (!ime_bridge_) {
             throw_pugl(PUGL_FAILURE, "native IME bridge initialization failed");
         }
+        nativeuiImeSetMagnifyCallback(ime_bridge_, &ViewCore::magnify_thunk, this);
         construction_cleanup.ime_acquired = true;
         if (fault_result) ++fault_result->ime_acquired;
         maybe_inject(NativeViewConstructionFaultStage::AfterImeCreate);
@@ -750,6 +751,28 @@ private:
         }
     }
 
+    static void magnify_thunk(void* user_data, float magnification,
+                              double x, double y, PuglMods mods) noexcept {
+        auto* self = static_cast<ViewCore*>(user_data);
+        if (!self) return;
+        try {
+            InputEvent input{};
+            input.type = InputType::Magnify;
+            input.magnification = magnification;
+            // Same pointer payload as every other Mouse-delivered position
+            // event so consumers see one stable event shape per symbolic type.
+            input.pointer.type = PointerType::Mouse;
+            apply_modifiers(input, mods);
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(x), static_cast<float>(y)},
+                self->geometry_.last_valid_scale());
+            (void)self->ui_.dispatch(input, self->services_);
+        } catch (...) {
+            // Never unwind through Cocoa callbacks.
+            self->should_close_ = true;
+        }
+    }
+
     static void ime_event_thunk(void* user_data,
                                 NativeUIImeEventType type,
                                 const char* utf8,
@@ -777,6 +800,20 @@ private:
         }
     }
 
+    void consume_failed_native_key(const PuglEvent* event) noexcept {
+#if defined(__APPLE__)
+        // A component may mutate local state before throwing. Treat failed
+        // keyboard/text dispatch as consumed, rather than invoking a DAW
+        // shortcut for the same partially executed local operation.
+        if (event && (event->type == PUGL_KEY_PRESS || event->type == PUGL_KEY_RELEASE ||
+                      event->type == PUGL_TEXT)) {
+            nativeuiImeReportKeyHandled(ime_bridge_, true);
+        }
+#else
+        (void)event;
+#endif
+    }
+
     static PuglStatus event_thunk(PuglView* view, const PuglEvent* event) noexcept {
         auto* self = static_cast<ViewCore*>(puglGetHandle(view));
         if (!self) return PUGL_BAD_PARAMETER;
@@ -784,10 +821,12 @@ private:
             return self->on_event(event);
         } catch (const std::exception& e) {
             self->remember_teardown_error(e.what());
+            self->consume_failed_native_key(event);
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         } catch (...) {
             self->remember_teardown_error("Unknown NativeUI event error");
+            self->consume_failed_native_key(event);
             self->should_close_ = true;
             return PUGL_UNKNOWN_ERROR;
         }

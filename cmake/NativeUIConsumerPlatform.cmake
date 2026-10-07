@@ -1,5 +1,6 @@
 include_guard(GLOBAL)
 include(CMakeParseArguments)
+include("${CMAKE_CURRENT_LIST_DIR}/NativeUIRuntimeData.cmake")
 
 # Derive the only supported NativeUI consumer-specific Objective-C runtime
 # prefix from the exact original UTF-8 identity bytes. Keep this algorithm in
@@ -450,6 +451,7 @@ function(_nativeui_attach_consumer_platform)
     endif()
   endif()
 
+  nativeui_attach_runtime_data(TARGET "${NUI_TARGET}")
   target_link_libraries("${NUI_TARGET}" PRIVATE "${_nativeui_platform_target}")
   if(_nativeui_bridge)
     target_link_libraries("${NUI_TARGET}" PRIVATE "${_nativeui_bridge}")

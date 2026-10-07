@@ -1,3 +1,12 @@
+    std::vector<NodeId>* context_overlay_route_{};
+    [[nodiscard]] static detail::OverlayCommandSource* overlay_commands_for(Node& node) noexcept {
+        if (node.overlay_source_owner != node.component.get()) {
+            node.overlay_source_owner = node.component.get();
+            node.overlay_source_cache = dynamic_cast<detail::OverlayCommandSource*>(node.component.get());
+        }
+        return node.overlay_source_cache;
+    }
+
     [[nodiscard]] ChildMetrics measure_overlay_content(
         const Constraints& constraints) const {
         const_cast<Tree*>(this)->flush_dynamic_mutations();
@@ -5,12 +14,14 @@
         return measure_node(*root_->children.front(), constraints);
     }
 
-    void layout_overlay_viewport(Size viewport) {
-        flush_dynamic_mutations();
+    void layout_overlay_viewport(Size viewport, bool checkpoint_prepared = false) {
+        if (lifecycle_transition_active()) return;
         if (!root_ || root_->children.empty()) {
             layout(viewport);
             return;
         }
+        if (!checkpoint_prepared) refresh_retained_components();
+        flush_dynamic_mutations();
 
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;

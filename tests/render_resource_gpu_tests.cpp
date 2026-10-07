@@ -223,25 +223,27 @@ int main() {
         return fail("live recreation in one view mutated another view cache");
     }
 
+    const auto first_before_loss = PlatformTestAccess::scene_diagnostics(*first);
+    const auto second_before_loss = PlatformTestAccess::scene_diagnostics(second);
     if (!PlatformTestAccess::inject_scene_fault(
             *first, SceneFaultStage::ConfirmedContextLoss) ||
         !PlatformTestAccess::request_gpu_readback(*first, {8.0f, 8.0f}) ||
-        !wait_for_failure(application, *first, first_before.failed_exposes)) {
+        !wait_for_failure(application, *first, first_before_loss.failed_exposes)) {
         return fail("confirmed context loss did not execute");
     }
 
     const auto first_after_loss = PlatformTestAccess::scene_diagnostics(*first);
     const auto second_after_loss = PlatformTestAccess::scene_diagnostics(second);
     if (first_after_loss.render_resource_cache_clears <=
-            first_before.render_resource_cache_clears) {
+            first_before_loss.render_resource_cache_clears) {
         return fail("context loss did not clear owning renderer cache");
     }
     if (second_after_loss.render_resource_cache_clears !=
-            second_before.render_resource_cache_clears ||
+            second_before_loss.render_resource_cache_clears ||
         second_after_loss.raster_cache_updates !=
-            second_before.raster_cache_updates ||
+            second_before_loss.raster_cache_updates ||
         second_after_loss.render_resource_entries !=
-            second_before.render_resource_entries) {
+            second_before_loss.render_resource_entries) {
         return fail("context loss in one view mutated another view cache");
     }
 
@@ -251,7 +253,8 @@ int main() {
     }
     const auto first_recovered = PlatformTestAccess::scene_diagnostics(*first);
     if (!first_recovered.scene_valid ||
-        first_recovered.render_resource_entries == 0) {
+        first_recovered.render_resource_entries < 2 ||
+        first_recovered.raster_cache_updates <= first_before_loss.raster_cache_updates) {
         return fail("recreated renderer did not establish fresh cache state");
     }
 

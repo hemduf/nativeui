@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/constraints.hpp>
+#include <nativeui/dispatcher.hpp>
 #include <nativeui/image.hpp>
 #include <nativeui/input.hpp>
 #include <nativeui/invalidation.hpp>
@@ -12,6 +13,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -19,6 +22,16 @@ namespace ui {
 
 namespace detail {
 class OverlayService;
+class OverlayCommandSource;
+struct ComponentContextAccess;
+struct InputMutationAccess;
+struct DescendantSemanticDecoration {
+    std::string target_key;
+    std::string name;
+    std::string description;
+    bool description_if_empty{};
+    std::optional<bool> expanded{};
+};
 } // namespace detail
 
 class Tree;
@@ -32,6 +45,11 @@ struct ChildMetrics {
     Size minimum{};
     Size preferred{};
     FlexFactors flex{};
+    /// Collapsed nodes are absent from flow allocation. A visible child with
+    /// zero intrinsic size still participates, preserving deliberate spacing.
+    bool participates_in_layout{true};
+    /// First text baseline in local logical coordinates, when provided.
+    std::optional<float> first_baseline{};
 
     ChildMetrics() = default;
     explicit ChildMetrics(Size preferred_size) : preferred(preferred_size) {}
@@ -47,6 +65,33 @@ struct ChildPlacement {
 
 using NodeId = std::uint64_t;
 inline constexpr NodeId kInvalidNodeId = 0;
+
+namespace detail {
+// Stack contexts keep a value capability. Only consumers which retain it
+// materialize a callable; ordinary event delivery adds no heap allocation.
+struct InputCapability {
+    void* immediate_owner{};
+    std::weak_ptr<void> owner;
+    NodeId node{kInvalidNodeId};
+    PointerId pointer{};
+    std::uint64_t contact{};
+    std::uint64_t activation{};
+    std::weak_ptr<void> (*retain_owner)(void*){};
+    bool (*check)(const InputCapability&, bool mutation) noexcept{};
+
+    [[nodiscard]] bool allowed(bool mutation) const noexcept {
+        return !check || check(*this, mutation);
+    }
+    [[nodiscard]] InputCapability retained() const {
+        auto result = *this;
+        if (result.immediate_owner && result.retain_owner) {
+            result.owner = result.retain_owner(result.immediate_owner);
+            result.immediate_owner = nullptr;
+        }
+        return result;
+    }
+};
+} // namespace detail
 
 enum class VisibilityMode {
     Visible,
@@ -302,17 +347,43 @@ public:
         }
     }
     void release_pointer() const {
-        if (release_) release_(pointer_action_);
+        if (release_.apply) release_.apply(release_, pointer_action_);
         else if (legacy_release_) legacy_release_();
+    }
+
+    /// Retain only the release action for this contact. Tree-produced actions
+    /// resolve weak owner lifetime, stable node identity and contact generation;
+    /// they become inert after removal or replacement. The historical public
+    /// constructor uses the caller-supplied release callback and its lifetime.
+    [[nodiscard]] std::function<void()> pointer_releaser() const {
+        if (!release_.apply) return legacy_release_;
+        if (pointer_action_.interaction_token == 0) return {};
+        auto retained = release_;
+        if (retained.immediate_owner && retained.retain_owner) {
+            retained.owner = retained.retain_owner(retained.immediate_owner);
+            retained.immediate_owner = nullptr;
+        }
+        return [release = std::move(retained), action = pointer_action_] {
+            release.apply(release, action);
+        };
     }
 
 private:
     friend class Tree;
+    friend struct detail::InputMutationAccess;
 
     struct PointerAction {
         PointerId id{};
         std::uint64_t interaction_token{};
         bool capture_allowed{};
+    };
+
+    struct PointerRelease {
+        void* immediate_owner{};
+        std::weak_ptr<void> owner;
+        NodeId node{};
+        std::weak_ptr<void> (*retain_owner)(void*){};
+        void (*apply)(const PointerRelease&, const PointerAction&){};
     };
 
     InputContext(
@@ -322,7 +393,7 @@ private:
         std::function<void()> invalidate_layout,
         PointerAction pointer_action,
         std::function<void(const PointerAction&)> capture,
-        std::function<void(const PointerAction&)> release)
+        PointerRelease release)
         : bounds_(bounds),
           platform_(platform),
           invalidate_(std::move(invalidate)),
@@ -331,13 +402,15 @@ private:
           capture_(std::move(capture)),
           release_(std::move(release)) {}
 
+    detail::InputCapability input_capability_;
+    std::function<bool()> semantic_mutation_allowed_;
     Rect bounds_{};
     PlatformServices& platform_;
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
     PointerAction pointer_action_{};
     std::function<void(const PointerAction&)> capture_;
-    std::function<void(const PointerAction&)> release_;
+    PointerRelease release_;
     std::function<void()> legacy_capture_;
     std::function<void()> legacy_release_;
 };
@@ -371,17 +444,34 @@ private:
     InputContext& context_;
 };
 
+/// Cause of a focus transition. Editing controls may commit on an ordinary
+/// navigation blur; removal, unavailable ancestry and teardown only clean up.
+enum class FocusChangeReason { Ordinary, Unavailable, Removed, Teardown };
+
 class FocusContext {
 public:
     FocusContext(Rect bounds,
                  PlatformServices& platform,
                  std::function<void()> invalidate,
                  std::function<void()> invalidate_layout)
+        : FocusContext(bounds, platform, std::move(invalidate),
+                       std::move(invalidate_layout), FocusChangeReason::Ordinary) {}
+
+    FocusContext(Rect bounds,
+                 PlatformServices& platform,
+                 std::function<void()> invalidate,
+                 std::function<void()> invalidate_layout,
+                 FocusChangeReason reason)
         : bounds_(bounds),
           platform_(platform),
           invalidate_(std::move(invalidate)),
-          invalidate_layout_(std::move(invalidate_layout)) {}
+          invalidate_layout_(std::move(invalidate_layout)),
+          reason_(reason) {}
 
+    [[nodiscard]] FocusChangeReason reason() const noexcept { return reason_; }
+    [[nodiscard]] bool allows_edit_commit() const noexcept {
+        return reason_ == FocusChangeReason::Ordinary;
+    }
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
     [[nodiscard]] TextMetrics text_metrics(std::string_view text, const TextStyle& style) const {
         return platform_.text_metrics(text, style);
@@ -400,6 +490,7 @@ private:
     PlatformServices& platform_;
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
+    FocusChangeReason reason_{FocusChangeReason::Ordinary};
 };
 
 class MountContext {
@@ -432,6 +523,19 @@ public:
         return invalidate_focus_ ? invalidate_focus_
                                  : make_invalidator(invalidator_factory_.invalidate_focus);
     }
+    /// Queue focus for this node at the next retained input/paint/focus
+    /// checkpoint. The weak action is inert after unmount or owner destruction;
+    /// invoking it signals painting, never synchronously calls focus callbacks.
+    [[nodiscard]] std::function<void()> focus_requester() const {
+        return make_invalidator(invalidator_factory_.request_focus);
+    }
+    /// Queue focus and an announced label action for one scoped descendant.
+    /// Keys are owned; explicit missing/ambiguous keys never choose a fallback.
+    [[nodiscard]] std::function<void()> descendant_action_requester(std::string key = {}) const {
+        const auto factory = invalidator_factory_.request_descendant_action;
+        return factory ? factory(invalidator_factory_.owner, node_id_, std::move(key))
+                       : std::function<void()>{};
+    }
     /// Long-lived callback for local visibility/enabled/read-only state changes.
     [[nodiscard]] std::function<void()> availability_invalidator() const {
         auto callback = invalidate_availability_
@@ -447,6 +551,7 @@ public:
 
 private:
     friend class Tree;
+    friend struct detail::InputMutationAccess;
 
     using InvalidatorFactoryFn = std::function<void()> (*)(void*, NodeId);
     struct InvalidatorFactory {
@@ -455,6 +560,9 @@ private:
         InvalidatorFactoryFn invalidate_layout{};
         InvalidatorFactoryFn invalidate_focus{};
         InvalidatorFactoryFn invalidate_availability{};
+        InvalidatorFactoryFn request_focus{};
+        std::function<void()> (*request_descendant_action)(void*, NodeId, std::string){};
+        detail::InputCapability (*input_capability)(void*, NodeId){};
     };
 
     MountContext(NodeId node_id,
@@ -482,11 +590,18 @@ public:
     LifecycleContext(NodeId node_id,
                      Rect bounds,
                      std::function<void()> invalidate,
-                     std::function<void()> invalidate_layout)
+                     std::function<void()> invalidate_layout,
+                     Dispatcher dispatcher = {})
         : node_id_(node_id),
           bounds_(bounds),
           invalidate_(std::move(invalidate)),
-          invalidate_layout_(std::move(invalidate_layout)) {}
+          invalidate_layout_(std::move(invalidate_layout)),
+          dispatcher_(std::move(dispatcher)) {}
+
+    /// Weak timing capability for this activation owner. Empty for historical
+    /// fixtures or platforms without DispatcherProvider. Retaining this handle
+    /// never extends the native platform/event-loop lifetime.
+    [[nodiscard]] Dispatcher dispatcher() const noexcept { return dispatcher_; }
 
     [[nodiscard]] NodeId node_id() const noexcept { return node_id_; }
     [[nodiscard]] Rect bounds() const noexcept { return bounds_; }
@@ -498,6 +613,7 @@ private:
     Rect bounds_{};
     std::function<void()> invalidate_;
     std::function<void()> invalidate_layout_;
+    Dispatcher dispatcher_;
 };
 
 class Component {
@@ -505,11 +621,37 @@ public:
     virtual ~Component() = default;
 
     [[nodiscard]] virtual bool focusable() const noexcept { return false; }
+    // Explicit admission to an ancestor's roving group. Editors keep their keys.
+    [[nodiscard]] virtual bool roving_focus_target() const noexcept { return false; }
+
+    /// Opt in at mount to reconciliation before outer input/layout/paint/focus
+    /// checkpoints. Measurement and semantic queries do not run this hook.
+    [[nodiscard]] virtual bool uses_retained_checkpoint() const noexcept { return false; }
+
+    /// Optional first baseline of the accepted measured size, in local logical
+    /// coordinates. Values outside [0,height] or nonfinite are ignored.
+    [[nodiscard]] virtual std::optional<float> first_baseline(Size) const { return std::nullopt; }
 
     /// Whether this component may start a pointer route independently of keyboard focus.
     /// The default preserves the historic retained-tree contract: focusable components are
     /// pointer targets, while non-focusable components must explicitly opt in.
     [[nodiscard]] virtual bool pointer_targetable() const noexcept { return focusable(); }
+
+    /// Value-changing gestures may opt in to cancellation when inherited
+    /// ReadOnly becomes true. Selection gestures retain the historic default.
+    [[nodiscard]] virtual bool cancel_capture_on_read_only() const noexcept { return false; }
+
+    /// One direct child may be painted last and hit tested first while logical
+    /// composition, keyboard traversal and semantic ordering remain unchanged.
+    /// Out-of-range indices are ignored; the default preserves sibling order.
+    [[nodiscard]] virtual std::optional<std::size_t> foreground_child_index() const noexcept {
+        return std::nullopt;
+    }
+
+    /// Decorative content owners can reject interactive descendants during
+    /// compilation, including later dynamic insertions. No child factory is
+    /// invoked twice and rejection happens before retained mount callbacks.
+    [[nodiscard]] virtual bool allows_child_interaction() const noexcept { return true; }
 
     /// Local availability supplied by generic wrappers/custom components. The
     /// retained tree resolves this monotonically through ancestry and stores the
@@ -565,11 +707,24 @@ public:
         return {};
     }
 
+    /// A responsive composite may request a second child measurement pass.
+    /// The Tree clamps this to [1,2]; existing components retain one pass.
+    [[nodiscard]] virtual std::size_t child_measurement_passes() const noexcept { return 1; }
+
     /// Constraints used when recursively measuring one child. The default
     /// removes the parent's minimum while preserving its maximum bounds.
     [[nodiscard]] virtual Constraints child_constraints(
         const Constraints& constraints, std::size_t, std::size_t) const {
         return constraints.loosen();
+    }
+
+    /// Complete immutable participation metadata before any child is measured.
+    /// Only participates_in_layout is significant; sizes are zero. The default
+    /// delegates to the historic virtual hook, preserving custom components.
+    [[nodiscard]] virtual Constraints child_constraints(
+        const Constraints& constraints, std::size_t index,
+        const std::vector<ChildMetrics>& metadata) const {
+        return child_constraints(constraints, index, metadata.size());
     }
 
     /// Constraint-aware measurement. Most components only override `measure`
@@ -622,6 +777,10 @@ public:
         return EventResult::Ignored;
     }
 
+    /// Backend-neutral semantic actions, also used by label associations.
+    /// The Tree handles Focus; an unimplemented action is ignored.
+    virtual EventResult semantic_action(SemanticAction, InputContext&) { return EventResult::Ignored; }
+
     virtual void paint(PaintContext&) const = 0;
 
 private:
@@ -634,6 +793,38 @@ private:
         const ComponentAvailability&) const {
         return false;
     }
+    /// Called only for a committed availability transition, never for temporary
+    /// states used while measuring a style. Internal activities must stop their
+    /// generation before cancelling, contain scheduling failures, and use the
+    /// durable invalidators acquired at mount. Teardown remains callback-silent.
+    virtual void effective_availability_changed(
+        const ComponentAvailability&, const ComponentAvailability&) noexcept {}
+
+    /// Internal committed-geometry notification. It cannot invoke application
+    /// callbacks, mutate retained structure or invalidate layout. Activities may
+    /// arm/cancel weak scheduling here, containing every scheduling failure.
+    /// It is never called for measurement or a rolled-back layout pass.
+    virtual void layout_committed(Rect, Rect) noexcept {}
+
+    friend struct detail::ComponentContextAccess;
+
+    /// Reconcile per-instance source/cache state at a structural safe checkpoint.
+    /// The Tree contains reentrant structural mutation until this returns.
+    virtual void retained_checkpoint() {}
+
+    /// Reset/prepare an owned measurement cache before a bounded child pass.
+    /// The pass is observational: no application callbacks or layout publication.
+    virtual void measure_children_pass_started(const Constraints&, std::size_t) const {}
+
+    /// Lexical construction context, invoked outer-to-inner for each descendant
+    /// before its child factory or mount. Implementations retain owned/weak
+    /// context only, never a pointer to the constructing ancestor component.
+    virtual void bind_descendant_context(Component&) const {}
+
+    /// Owned scoped label/help projection for a resolved control descendant.
+    [[nodiscard]] virtual std::optional<detail::DescendantSemanticDecoration>
+    descendant_semantic_decoration() const { return std::nullopt; }
+
     void set_effective_availability(ComponentAvailability value) noexcept {
         effective_availability_ = value;
     }
@@ -641,10 +832,55 @@ private:
     ComponentAvailability effective_availability_{};
 };
 
+namespace detail {
+struct InputMutationAccess {
+    [[nodiscard]] static std::function<bool()> guard(const InputContext& context) {
+        if (context.semantic_mutation_allowed_) return context.semantic_mutation_allowed_;
+        return retain(context.input_capability_, true);
+    }
+    [[nodiscard]] static std::function<bool()> guard(const MountContext& context) {
+        return retain(capability(context), true);
+    }
+    [[nodiscard]] static std::function<bool()> action_guard(const MountContext& context) {
+        return retain(capability(context), false);
+    }
+    [[nodiscard]] static std::function<bool()> action_guard(const InputContext& context) {
+        return retain(context.input_capability_, false);
+    }
+    [[nodiscard]] static bool allowed(const InputContext& context) noexcept {
+        return context.input_capability_.allowed(true) &&
+            (!context.semantic_mutation_allowed_ || context.semantic_mutation_allowed_());
+    }
+    // Non-mutating commands such as form submission remain valid under ReadOnly.
+    [[nodiscard]] static bool action_allowed(const InputContext& context) noexcept {
+        return context.input_capability_.allowed(false);
+    }
+private:
+    [[nodiscard]] static InputCapability capability(const MountContext& context) {
+        const auto factory = context.invalidator_factory_.input_capability;
+        return factory ? factory(context.invalidator_factory_.owner, context.node_id_)
+                       : InputCapability{};
+    }
+    [[nodiscard]] static std::function<bool()> retain(InputCapability capability, bool mutation) {
+        capability = capability.retained();
+        if (!capability.check) return {};
+        return [capability = std::move(capability), mutation] { return capability.allowed(mutation); };
+    }
+};
+struct ComponentContextAccess {
+    static void bind(const Component& ancestor, Component& descendant) {
+        ancestor.bind_descendant_context(descendant);
+    }
+};
+} // namespace detail
+
 struct Node {
     NodeId id{kInvalidNodeId};
     Node* parent{};
     std::unique_ptr<Component> component;
+    // Cache remains local to the owning Node and is refreshed after replacement.
+    Component* overlay_source_owner{};
+    detail::OverlayCommandSource* overlay_source_cache{};
     std::vector<std::unique_ptr<Node>> children;
     Rect bounds{};
     Rect published_visual_bounds{};
@@ -652,16 +888,38 @@ struct Node {
     bool layout_dirty{true};
     bool focus_scope_active_cached{};
     NodeId focus_restore{kInvalidNodeId};
+    std::string retained_key{};
+    /// Last keys actually installed with these children; survives remount/rollback.
+    std::optional<std::vector<std::string>> retained_dynamic_keys{};
 };
 
 struct Spec {
     std::function<std::unique_ptr<Component>()> factory;
     std::vector<Spec> children;
+    /// Optional per-compilation child source, invoked after the component is
+    /// constructed and before any node is mounted. Replaces static children.
+    /// Reusable closures must create/copy fresh child specifications each time.
+    std::function<std::vector<Spec>(Component&)> children_factory{};
+    /// Application identity local to a descendant owner; independent of dynamic keys.
+    std::string retained_key{};
 };
+
+/// Attach an owned application key while preserving the child runtime identity.
+inline Spec keyed(std::string key, Spec child) {
+    child.retained_key = std::move(key);
+    return child;
+}
+
+inline Spec make_spec(Spec value) { return value; }
 
 template <class T>
 Spec make_spec(T&& value) {
     return std::forward<T>(value).spec();
+}
+
+template <class T>
+Spec keyed(std::string key, T&& child) {
+    return keyed(std::move(key), make_spec(std::forward<T>(child)));
 }
 
 } // namespace ui

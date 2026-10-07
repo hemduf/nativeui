@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 
 #include <nativeui/detail/theme_binding.hpp>
+#include <nativeui/detail/overlay_commands.hpp>
 
 #include <memory>
 #include <utility>
@@ -650,7 +651,307 @@ void independent_views_contract() {
     NUI_CHECK(b_selection.get() == 10);
 }
 
+void cancelled_popup_reopens_without_stale_anchor_or_opener_latch() {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    ui::UI tree{ui::Column{
+        ui::ComboBox<int>{selection, {{1, "One", true}, {2, "Two", true}}},
+        ui::Button{"After", [] {}}}};
+    tree.resize({240, 180});
+    tree.activate(platform);
+    for (int pass = 0; pass != 3; ++pass) {
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+        NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Down), platform)));
+        NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Escape), platform)));
+        NUI_CHECK(selection.get() == 1);
+    }
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Tab), platform)));
+    tree.dispatch(key_up(ui::Key::Down), platform);
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Tab, true), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(key_up(ui::Key::Down), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Down), platform)));
+    NUI_CHECK(ui::handled(tree.dispatch(test::key(ui::Key::Enter), platform)));
+    NUI_CHECK(selection.get() == 2);
+}
+
+void nested_provider_open_preserves_the_newer_popup() {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    ui::UI* owner = nullptr;
+    int calls = 0;
+    ui::UI tree{ui::ComboBox<int>{selection, [&] {
+        const int call = ++calls;
+        if (call == 2) {
+            owner->dispatch(test::key(ui::Key::Down),platform);
+            return std::vector<ui::ComboBoxOption<int>>{{9,"Outer stale",true}};
+        }
+        if (call >= 3)
+            return std::vector<ui::ComboBoxOption<int>>{{7,"Nested accepted",true}};
+        return std::vector<ui::ComboBoxOption<int>>{{1,"One",true}};
+    }}};
+    owner = &tree;
+    tree.resize({240,180});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{240,180},1};
+    NUI_CHECK(renderer.render(tree));
+    NUI_CHECK(calls == 1);
+    tree.dispatch(test::key(ui::Key::Down),platform);
+    NUI_CHECK(calls == 3 && tree.overlay_entries().size() == 1);
+    tree.dispatch(key_up(ui::Key::Down),platform);
+    tree.dispatch(test::key(ui::Key::Enter),platform);
+    NUI_CHECK(selection.get() == 7 && tree.overlay_entries().empty());
+    tree.deactivate(platform);
+}
+
+struct NestedOpenBoundary {
+    bool armed{};
+    std::function<void()> invoke;
+};
+struct CopyOpeningProvider {
+    std::shared_ptr<NestedOpenBoundary> boundary;
+    std::shared_ptr<int> calls;
+    CopyOpeningProvider(std::shared_ptr<NestedOpenBoundary> value,std::shared_ptr<int> count)
+        : boundary(std::move(value)),calls(std::move(count)) {}
+    CopyOpeningProvider(const CopyOpeningProvider& other)
+        : boundary(other.boundary),calls(other.calls) {
+        if (std::exchange(boundary->armed,false)) boundary->invoke();
+    }
+    std::vector<ui::ComboBoxOption<int>> operator()() const {
+        const int call = ++*calls;
+        if (call == 1) return {{1,"One",true}};
+        return call == 2 ? std::vector<ui::ComboBoxOption<int>>{{7,"Nested accepted",true}}
+                         : std::vector<ui::ComboBoxOption<int>>{{9,"Outer stale",true}};
+    }
+};
+void provider_copy_does_not_run_the_superseded_provider() {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    auto boundary = std::make_shared<NestedOpenBoundary>();
+    auto calls = std::make_shared<int>();
+    ui::UI tree{ui::ComboBox<int>{selection,CopyOpeningProvider{boundary,calls}}};
+    tree.resize({240,180});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{240,180},1};
+    NUI_CHECK(renderer.render(tree));
+    boundary->invoke = [&] { tree.dispatch(test::key(ui::Key::Down),platform); };
+    boundary->armed = true;
+    tree.dispatch(test::key(ui::Key::Down),platform);
+    NUI_CHECK(!boundary->armed && *calls == 2 && tree.overlay_entries().size() == 1);
+    boundary->invoke = {};
+    tree.dispatch(key_up(ui::Key::Down),platform);
+    tree.dispatch(test::key(ui::Key::Enter),platform);
+    NUI_CHECK(selection.get() == 7 && tree.overlay_entries().empty());
+}
+
+struct EqualityOpeningChoice {
+    int id{};
+    std::shared_ptr<NestedOpenBoundary> boundary;
+    bool operator==(const EqualityOpeningChoice& other) const {
+        if (boundary && std::exchange(boundary->armed,false)) boundary->invoke();
+        return id == other.id;
+    }
+};
+void selection_equality_preserves_a_newer_open_attempt() {
+    test::MockPlatform platform;
+    auto boundary = std::make_shared<NestedOpenBoundary>();
+    ui::State<EqualityOpeningChoice> selection{{1,boundary}};
+    int calls = 0;
+    ui::UI tree{ui::ComboBox<EqualityOpeningChoice>{selection,[&] {
+        const int call = ++calls;
+        // Arm after retained checkpoint equality has completed, at the outer
+        // opener's provider boundary immediately before selection equality.
+        if (call == 2) boundary->armed = true;
+        const int id = call >= 3 ? 7 : 1;
+        return std::vector<ui::ComboBoxOption<EqualityOpeningChoice>>{
+            {{id,boundary},id == 7 ? "Nested accepted" : "Outer stale",true}};
+    }}};
+    tree.resize({240,180});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{240,180},1};
+    NUI_CHECK(renderer.render(tree));
+    boundary->invoke = [&] { tree.dispatch(test::key(ui::Key::Down),platform); };
+    tree.dispatch(test::key(ui::Key::Down),platform);
+    NUI_CHECK(!boundary->armed && calls == 3 && tree.overlay_entries().size() == 1);
+    boundary->invoke = {};
+    tree.dispatch(key_up(ui::Key::Down),platform);
+    tree.dispatch(test::key(ui::Key::Enter),platform);
+    NUI_CHECK(selection.get().id == 7 && tree.overlay_entries().empty());
+}
+
+void opening_invalidation_preserves_the_newer_popup() {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    int calls = 0;
+    ui::UI tree{ui::ComboBox<int>{selection,[&] {
+        const int call = ++calls;
+        if (call == 1) return std::vector<ui::ComboBoxOption<int>>{{1,"One",true}};
+        if (call == 2) return std::vector<ui::ComboBoxOption<int>>{{1,"Outer stale",true}};
+        return std::vector<ui::ComboBoxOption<int>>{{7,"Nested accepted",true}};
+    }}};
+    tree.resize({240,180});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{240,180},1};
+    NUI_CHECK(renderer.render(tree));
+    bool armed = true;
+    tree.set_invalidation_callback([&] {
+        if (std::exchange(armed,false))
+            tree.dispatch(test::key(ui::Key::Down),platform);
+    });
+    tree.dispatch(test::key(ui::Key::Down),platform);
+    tree.clear_invalidation_callback();
+    NUI_CHECK(!armed && calls == 3 && tree.overlay_entries().size() == 1);
+    tree.dispatch(key_up(ui::Key::Down),platform);
+    tree.dispatch(test::key(ui::Key::Enter),platform);
+    NUI_CHECK(selection.get() == 7 && tree.overlay_entries().empty());
+}
+
+void failed_pressed_invalidation_preserves_only_the_current_gesture(
+    bool panel, bool on_up, bool nested) {
+    test::MockPlatform platform;
+    ui::State<int> selection{1};
+    int writes = 0;
+    auto observer = selection.observe([&](const auto&) { ++writes; });
+    ui::ComboBoxStyle anchor_style;
+    anchor_style.pressed.fill = ui::Color{1,0,0,1};
+    ui::MenuItemStyle row_style;
+    row_style.pressed.text = ui::Color{1,0,0,1};
+    std::vector<ui::Spec> children;
+    children.push_back(ui::make_spec(ui::ComboBox<int>{
+        selection, {{1,"One",true},{2,"Two",true}}}
+        .style(anchor_style).item_style(row_style)));
+    ui::UI tree{FixedRoot{std::move(children)}};
+    tree.resize({240,220});
+    tree.activate(platform);
+    if (panel) {
+        tree.dispatch(test::key(ui::Key::Down),platform);
+        tree.dispatch(key_up(ui::Key::Down),platform);
+        NUI_CHECK(tree.overlay_entries().size() == 1);
+    }
+    const float y = panel ? 120.0f : 30.0f;
+    // Establish hover/highlight before arming the fault, so it is the pressed
+    // transition rather than the preceding pointer-hover callback that fails.
+    tree.dispatch(test::pointer(ui::InputType::PointerMove,30,y),platform);
+    ui::HeadlessRenderer renderer{{240,220},1};
+    NUI_CHECK(renderer.render(tree));
+    if (on_up) {
+        tree.dispatch(test::pointer(ui::InputType::PointerDown,30,y),platform);
+        NUI_CHECK(renderer.render(tree));
+    }
+    bool armed = true;
+    int fault_calls = 0;
+    tree.set_invalidation_callback([&] {
+        if (!std::exchange(armed,false)) return;
+        ++fault_calls;
+        if (nested)
+            tree.dispatch(test::pointer(ui::InputType::PointerDown,30,y),platform);
+        throw std::runtime_error("combo pressed invalidation");
+    });
+    bool caught = false;
+    try {
+        tree.dispatch(test::pointer(on_up ? ui::InputType::PointerUp
+                                        : ui::InputType::PointerDown,30,y),platform);
+    } catch (const std::runtime_error& error) {
+        caught = std::string_view{error.what()} == "combo pressed invalidation";
+    }
+    tree.clear_invalidation_callback();
+    NUI_CHECK(caught && !armed && fault_calls == 1 && selection.get() == 1 && writes == 0);
+    tree.dispatch(test::pointer(ui::InputType::PointerUp,30,y),platform);
+    if (!nested) {
+        NUI_CHECK(selection.get() == 1 && writes == 0);
+        NUI_CHECK(tree.overlay_entries().size() == (panel ? 1U : 0U));
+        tree.dispatch(test::pointer(ui::InputType::PointerDown,30,y),platform);
+        tree.dispatch(test::pointer(ui::InputType::PointerUp,30,y),platform);
+    }
+    NUI_CHECK(selection.get() == (panel ? 2 : 1) && writes == (panel ? 1 : 0));
+    NUI_CHECK(tree.overlay_entries().size() == (panel ? 0U : 1U));
+}
+
+void failed_panel_down_does_not_commit() {
+    failed_pressed_invalidation_preserves_only_the_current_gesture(true,false,false);
+}
+void failed_panel_up_does_not_commit() {
+    failed_pressed_invalidation_preserves_only_the_current_gesture(true,true,false);
+}
+void failed_anchor_down_does_not_open() {
+    failed_pressed_invalidation_preserves_only_the_current_gesture(false,false,false);
+}
+void failed_anchor_up_does_not_open() {
+    failed_pressed_invalidation_preserves_only_the_current_gesture(false,true,false);
+}
+void nested_press_survives_an_older_invalidation_failure() {
+    for (const bool panel : {false,true})
+        for (const bool on_up : {false,true})
+            failed_pressed_invalidation_preserves_only_the_current_gesture(panel,on_up,true);
+}
+
+void terminal_anchor_callback_failure_does_not_restore_old_latches() {
+    for (const bool deactivate : {false,true}) {
+        for (const bool nested : {false,true}) {
+            test::MockPlatform platform;
+            ui::State<int> selection{1};
+            ui::ComboBoxStyle style;
+            style.pressed.fill = ui::Color{1,0,0,1};
+            auto node = ui::compile(ui::make_spec(ui::ComboBox<int>{
+                selection, {{1,"One",true},{2,"Two",true}}}.style(style)));
+            auto& component = *node->component;
+            const auto noop = [] {};
+            ui::MountContext mount{1,noop,noop,noop};
+            component.mount(mount);
+            ui::InputContext input{{20,20,120,40},platform,noop,noop,noop,noop};
+            ui::FocusContext focus{{20,20,120,40},platform,noop,noop};
+            component.focus_changed(true,focus);
+            component.input(test::key(ui::Key::Space),input);
+            bool armed = true;
+            const auto fail = [&] {
+                if (!std::exchange(armed,false)) return;
+                if (nested) {
+                    component.focus_changed(true,focus);
+                    component.input(test::key(ui::Key::Space),input);
+                }
+                throw std::runtime_error("terminal combo callback");
+            };
+            ui::FocusContext failing_focus{{20,20,120,40},platform,fail,noop};
+            ui::LifecycleContext failing_lifecycle{1,{20,20,120,40},fail,noop};
+            bool caught = false;
+            try {
+                if (deactivate) component.deactivate(failing_lifecycle);
+                else component.focus_changed(false,failing_focus);
+            } catch (const std::runtime_error& error) {
+                caught = std::string_view{error.what()} == "terminal combo callback";
+            }
+            NUI_CHECK(caught && !armed);
+            component.focus_changed(true,focus);
+            component.input(key_up(ui::Key::Space),input);
+            auto* commands = dynamic_cast<ui::detail::OverlayCommandSource*>(&component);
+            NUI_CHECK(commands);
+            NUI_CHECK(bool(commands->take_overlay_command()) == nested);
+            NUI_CHECK(!commands->take_overlay_command());
+            if (!nested) {
+                component.input(test::key(ui::Key::Space),input);
+                component.input(key_up(ui::Key::Space),input);
+                NUI_CHECK(commands->take_overlay_command());
+                NUI_CHECK(!commands->take_overlay_command());
+            }
+            ui::LifecycleContext lifecycle{1,{20,20,120,40},noop,noop};
+            component.unmount(lifecycle);
+        }
+    }
+}
+
 void suite() {
+    nested_provider_open_preserves_the_newer_popup();
+    provider_copy_does_not_run_the_superseded_provider();
+    selection_equality_preserves_a_newer_open_attempt();
+    opening_invalidation_preserves_the_newer_popup();
+    failed_panel_down_does_not_commit();
+    failed_panel_up_does_not_commit();
+    failed_anchor_down_does_not_open();
+    failed_anchor_up_does_not_open();
+    nested_press_survives_an_older_invalidation_failure();
+    terminal_anchor_callback_failure_does_not_restore_old_latches();
+    cancelled_popup_reopens_without_stale_anchor_or_opener_latch();
     combo_keyboard_commit_contract();
     no_match_home_end_contract();
     immutable_open_snapshot_contract();
@@ -671,4 +972,17 @@ void suite() {
 
 } // namespace
 
-int main() { return test::run("t035_combo_popup", &suite); }
+int main(int argc,char** argv) {
+    const std::string_view mode = argc > 1 ? argv[1] : "all";
+    if (mode == "nested_provider_open") return test::run(mode.data(),&nested_provider_open_preserves_the_newer_popup);
+    if (mode == "provider_copy_open") return test::run(mode.data(),&provider_copy_does_not_run_the_superseded_provider);
+    if (mode == "equality_open") return test::run(mode.data(),&selection_equality_preserves_a_newer_open_attempt);
+    if (mode == "invalidation_open") return test::run(mode.data(),&opening_invalidation_preserves_the_newer_popup);
+    if (mode == "failed_panel_down") return test::run(mode.data(),&failed_panel_down_does_not_commit);
+    if (mode == "failed_panel_up") return test::run(mode.data(),&failed_panel_up_does_not_commit);
+    if (mode == "failed_anchor_down") return test::run(mode.data(),&failed_anchor_down_does_not_open);
+    if (mode == "failed_anchor_up") return test::run(mode.data(),&failed_anchor_up_does_not_open);
+    if (mode == "nested_press") return test::run(mode.data(),&nested_press_survives_an_older_invalidation_failure);
+    if (mode == "terminal_anchor") return test::run(mode.data(),&terminal_anchor_callback_failure_does_not_restore_old_latches);
+    return test::run("t035_combo_popup", &suite);
+}

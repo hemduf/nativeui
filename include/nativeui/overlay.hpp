@@ -37,9 +37,19 @@ enum class OverlayPlacement {
     AnchorLeft,
     Center,
     Auto,
+    ViewportBottomCenter,
+};
+
+enum class OverlayCloseReason {
+    Explicit,
+    UserOutside,
+    UserEscape,
+    AnchorUnavailable,
+    OwnerTeardown,
 };
 
 namespace detail {
+struct OverlayClosureToken final { std::optional<OverlayCloseReason> reason; };
 struct OverlayOwnerToken final {};
 struct OverlayLifetimeToken final {};
 struct OverlayState;
@@ -55,6 +65,10 @@ public:
 
     explicit operator bool() const noexcept { return valid(); }
 
+    [[nodiscard]] std::optional<OverlayCloseReason> close_reason() const noexcept {
+        return closure_ ? closure_->reason : std::nullopt;
+    }
+
     [[nodiscard]] bool operator==(const OverlayHandle& other) const noexcept {
         return id_ == other.id_ && !owner_.owner_before(other.owner_) &&
                !other.owner_.owner_before(owner_);
@@ -65,12 +79,15 @@ private:
 
     OverlayHandle(std::weak_ptr<const detail::OverlayOwnerToken> owner,
                   std::weak_ptr<const detail::OverlayLifetimeToken> lifetime,
-                  std::uint64_t id) noexcept
-        : owner_(std::move(owner)), lifetime_(std::move(lifetime)), id_(id) {}
+                  std::uint64_t id,
+                  std::shared_ptr<const detail::OverlayClosureToken> closure) noexcept
+        : owner_(std::move(owner)), lifetime_(std::move(lifetime)), id_(id),
+          closure_(std::move(closure)) {}
 
     std::weak_ptr<const detail::OverlayOwnerToken> owner_;
     std::weak_ptr<const detail::OverlayLifetimeToken> lifetime_;
     std::uint64_t id_{};
+    std::shared_ptr<const detail::OverlayClosureToken> closure_;
 };
 
 struct OverlaySpec {
@@ -81,6 +98,7 @@ struct OverlaySpec {
     bool dismiss_on_escape{};
     bool dismiss_on_outside_pointer_down{};
     Spec content;
+    bool match_anchor_width{};
 };
 
 /// Read-only diagnostic view of one T061 overlay entry. It exposes only the
@@ -171,6 +189,7 @@ namespace detail {
             return {anchor.x - content.w, anchor.y, content.w, content.h};
         case OverlayPlacement::Center:
         case OverlayPlacement::Auto:
+        case OverlayPlacement::ViewportBottomCenter:
             break;
     }
     return {anchor.x, anchor.y, content.w, content.h};
@@ -184,6 +203,7 @@ namespace detail {
         case OverlayPlacement::AnchorLeft: return OverlayPlacement::AnchorRight;
         case OverlayPlacement::Center:
         case OverlayPlacement::Auto:
+        case OverlayPlacement::ViewportBottomCenter:
             return placement;
     }
     return placement;
@@ -211,6 +231,12 @@ namespace detail {
                 viewport.y + (viewport.h - content.h) * 0.5f,
                 content.w,
                 content.h});
+    }
+
+    if (placement == OverlayPlacement::ViewportBottomCenter) {
+        return overlay_clamp_origin(viewport, {
+            viewport.x + (viewport.w - content.w) * 0.5f,
+            viewport.y + viewport.h - content.h, content.w, content.h});
     }
 
     if (placement == OverlayPlacement::Auto) {
@@ -262,6 +288,7 @@ struct OverlayEntry {
     Rect resolved_bounds{};
     bool resolved{};
     bool closing{};
+    std::shared_ptr<OverlayClosureToken> closure;
 };
 
 // One OverlayState belongs to one UI. It stores only logical overlay state and
@@ -273,6 +300,16 @@ struct OverlayState {
     std::uint64_t next_id{1};
     std::vector<OverlayEntry> entries;
     std::function<void()> structural_invalidator;
+    bool quiet_structure_refresh{};
+
+    ~OverlayState() noexcept { begin_owner_teardown(); }
+
+    void begin_owner_teardown() noexcept {
+        for (auto& entry : entries) {
+            if (entry.closure && !entry.closure->reason)
+                entry.closure->reason = OverlayCloseReason::OwnerTeardown;
+        }
+    }
 
     void invalidate_structure() const {
         if (structural_invalidator) structural_invalidator();
@@ -292,7 +329,9 @@ struct OverlayState {
         // Prepare all allocation-capable state before publication. IDs remain
         // monotonic even when the subsequent structural notification fails.
         auto lifetime = std::make_shared<const OverlayLifetimeToken>();
-        entries.push_back(OverlayEntry{id, std::move(overlay), lifetime, std::nullopt, {}});
+        auto closure = std::make_shared<OverlayClosureToken>();
+        entries.push_back(OverlayEntry{id, std::move(overlay), lifetime,
+                                      std::nullopt, {}, false, false, closure});
         try {
             invalidate_structure();
         } catch (...) {
@@ -305,7 +344,7 @@ struct OverlayState {
             if (it != entries.end()) erase_entry_noexcept(it);
             throw;
         }
-        return OverlayHandle{owner, lifetime, id};
+        return OverlayHandle{owner, lifetime, id, std::move(closure)};
     }
 
     bool close(OverlayHandle handle) {
@@ -373,7 +412,7 @@ struct OverlayState {
         return true;
     }
 
-    bool close_id(std::uint64_t id) {
+    bool close_id(std::uint64_t id, OverlayCloseReason reason = OverlayCloseReason::Explicit) {
         auto it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
             return entry.id == id;
         });
@@ -384,7 +423,22 @@ struct OverlayState {
             return entry.id == id;
         });
         if (it == entries.end() || it->closing) return false;
+        erase_entry_noexcept(it, reason);
+        return true;
+    }
+
+    // UI service cancellation cannot execute an application invalidator from
+    // a noexcept lifecycle hook. The next UI checkpoint publishes structure.
+    bool close_quiet_noexcept(OverlayHandle handle) noexcept {
+        const auto handle_owner = handle.owner_.lock();
+        const auto lifetime = handle.lifetime_.lock();
+        if (!handle_owner || handle_owner != owner || !lifetime || handle.id_ == 0) return false;
+        auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+            return entry.id == handle.id_ && entry.lifetime == lifetime;
+        });
+        if (it == entries.end()) return false;
         erase_entry_noexcept(it);
+        quiet_structure_refresh = true;
         return true;
     }
 
@@ -428,7 +482,9 @@ struct OverlayState {
 private:
     using EntryIterator = std::vector<OverlayEntry>::iterator;
 
-    void erase_entry_noexcept(EntryIterator it) noexcept {
+    void erase_entry_noexcept(EntryIterator it,
+        OverlayCloseReason reason = OverlayCloseReason::Explicit) noexcept {
+        if (it->closure && !it->closure->reason) it->closure->reason = reason;
         static_assert(std::is_nothrow_move_assignable_v<OverlayEntry>);
         for (auto current = it; std::next(current) != entries.end(); ++current) {
             *current = std::move(*std::next(current));
@@ -494,6 +550,7 @@ public:
                                    event.type == InputType::PointerMove ||
                                    event.type == InputType::PointerUp ||
                                    event.type == InputType::PointerCancel ||
+                                   event.type == InputType::Magnify ||
                                    event.type == InputType::PointerWheel;
         if (pointer_event && pointer_policy_ == OverlayPointerPolicy::Normal) {
             return EventResult::Handled;
@@ -533,6 +590,7 @@ public:
                                    event.type == InputType::PointerMove ||
                                    event.type == InputType::PointerUp ||
                                    event.type == InputType::PointerCancel ||
+                                   event.type == InputType::Magnify ||
                                    event.type == InputType::PointerWheel;
         return pointer_event ? EventResult::Handled : EventResult::Ignored;
     }
@@ -557,7 +615,22 @@ public:
         const Constraints& constraints,
         std::size_t child_index,
         std::size_t) const override {
-        return child_index == 0 ? constraints : constraints.loosen();
+        if (child_index == 0) return constraints;
+        auto result = constraints.loosen();
+        std::size_t index = 1;
+        for (const auto& entry : state_->entries) {
+            if (entry.closing) continue;
+            if (entry.spec.mode == OverlayMode::Modal) {
+                if (index++ == child_index) return result;
+            }
+            if (index++ != child_index) continue;
+            if (entry.spec.match_anchor_width && entry.anchor_bounds) {
+                result.min.w = std::min(overlay_finite_extent(entry.anchor_bounds->w),
+                                       result.max.w);
+            }
+            return result;
+        }
+        return result;
     }
 
     void layout_children(Rect bounds,
@@ -579,9 +652,9 @@ public:
             const auto size = children[child_index].preferred;
             const bool has_anchor = entry.spec.anchor.has_value() && entry.anchor_bounds.has_value();
             const Rect anchor = has_anchor ? *entry.anchor_bounds : bounds;
-            const OverlayPlacement placement = has_anchor
-                ? entry.spec.placement
-                : OverlayPlacement::Center;
+            const OverlayPlacement placement = has_anchor ||
+                    entry.spec.placement == OverlayPlacement::ViewportBottomCenter
+                ? entry.spec.placement : OverlayPlacement::Center;
             entry.resolved_bounds = overlay_placement_bounds(bounds, anchor, size, placement);
             entry.resolved = true;
             placements[child_index].bounds = entry.resolved_bounds;

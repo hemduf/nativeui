@@ -312,7 +312,51 @@ void key_down_override_preserves_text_editing_and_recovers_after_throw() {
     NUI_CHECK(independent.get() == "zother");
 }
 
+
+void dynamic_numeric_text_is_visible_on_its_first_focused_frame() {
+    for (const float scale : {1.0f, 2.0f}) {
+        test::MockPlatform platform;
+        ui::State<bool> present{false};
+        ui::State<bool> active{true};
+        ui::State<std::string> value{"0.000000"};
+        int changes = 0;
+        auto subscription = value.observe([&](const std::string&) { ++changes; });
+        ui::UI tree{ui::Padding{12.0f,
+            ui::If{present, ui::FocusScope{active,
+                ui::TextInput{"Value", value}}.trap()}}};
+        tree.resize({320.0f, 90.0f});
+        tree.activate(platform);
+        ui::HeadlessRenderer renderer{{320.0f, 90.0f}, scale};
+
+        for (int reopening = 0; reopening < 2; ++reopening) {
+            present.set(true);
+            // Native focus/configure can arrive before the next expose. Do not
+            // let HeadlessRenderer's resize prepare geometry before this call.
+            tree.refresh_focus(platform);
+            NUI_CHECK(platform.text_input_active);
+            NUI_CHECK_NEAR(platform.text_input_area.w, 296.0f, 0.001f);
+            NUI_CHECK(platform.text_input_cursor_offset > 13.0f);
+            NUI_CHECK(renderer.render(tree));
+            const auto first_frame = renderer.rgba_pixels();
+            const auto initial_offset = platform.text_input_cursor_offset;
+            tree.dispatch(test::key(ui::Key::End), platform);
+            NUI_CHECK(renderer.render(tree));
+            NUI_CHECK(renderer.rgba_pixels() == first_frame);
+            NUI_CHECK_NEAR(platform.text_input_cursor_offset, initial_offset, 0.001f);
+            NUI_CHECK(changes == reopening);
+            NUI_CHECK(value.get() == (reopening == 0 ? "0.000000" : "-25"));
+            present.set(false);
+            tree.refresh_focus(platform);
+            NUI_CHECK(!platform.text_input_active);
+            NUI_CHECK(renderer.render(tree));
+            if (reopening == 0) value.set("-25");
+        }
+        tree.deactivate(platform);
+    }
+}
+
 void suite() {
+    dynamic_numeric_text_is_visible_on_its_first_focused_frame();
     test::MockPlatform platform;
     ui::State<std::string> value{"Init"};
     int submit_count = 0;
