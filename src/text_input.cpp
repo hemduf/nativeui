@@ -24,6 +24,14 @@ TextInputSnapshot TextInputSession::snapshot() const {
   return mounted() ? TextInputAccess::snapshot(*storage_->editor)
                    : TextInputSnapshot{};
 }
+std::optional<std::pair<float, float>>
+TextInputSession::field_geometry() const {
+  if (!mounted())
+    return {};
+  const auto &editor = *storage_->editor;
+  const auto style = editor.resolved_style(editor.focused_);
+  return std::pair{style.field_top, style.field_height};
+}
 void TextInputSession::replace(
     std::string text,
     std::optional<std::pair<std::size_t, std::size_t>> selection,
@@ -161,7 +169,11 @@ TextInputComponent::TextInputComponent(
     KeyDownCallback on_key_down, TextInputStyle style)
     : label_(std::move(label)), state_(std::move(state)),
       model_(state_.get(), max_length), placeholder_(std::move(placeholder)),
-      on_submit_(std::move(on_submit)), on_key_down_(std::move(on_key_down)),
+      on_submit_(on_submit ? std::make_shared<SubmitCallback>(std::move(on_submit))
+                           : nullptr),
+      on_key_down_(on_key_down
+                       ? std::make_shared<KeyDownCallback>(std::move(on_key_down))
+                       : nullptr),
       style_(std::move(style)) {
   detail::TextInputAccess::initialize(*this);
 }
@@ -493,7 +505,8 @@ EventResult TextInputComponent::input_impl(const InputEvent &event,
   const auto edit_generation = key_session->storage_->edit_generation;
   const auto buffer_generation = key_session->storage_->buffer_generation;
   auto permission = detail::InputMutationAccess::action_guard(ctx);
-  auto key_callback = on_key_down_;
+  const auto key_callback_owner = on_key_down_;
+  auto key_callback = key_callback_owner ? *key_callback_owner : KeyDownCallback{};
   const auto current = [&] {
     return key_session->mounted() && key_session->storage_->editor == this &&
            key_session->storage_->edit_generation == edit_generation &&
@@ -552,7 +565,8 @@ EventResult TextInputComponent::input_impl(const InputEvent &event,
     model_.move_to(model_.cursor());
     // A user's callable copy constructor may reenter and retire this editor.
     // This is the final component member read before any such copy runs.
-    auto callback = on_submit_;
+    const auto callback_owner = on_submit_;
+    auto callback = callback_owner ? *callback_owner : SubmitCallback{};
     if (!session->mounted())
       return EventResult::Handled;
     ctx.invalidate();

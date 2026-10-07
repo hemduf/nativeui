@@ -357,7 +357,7 @@ struct NumberState : std::enable_shared_from_this<NumberState> {
       invalidate();
   }
 };
-class NumberComponent final : public Component {
+class NumberComponent final : public Component, public detail::ThemeBinding {
 public:
   NumberComponent(std::string label, Binding<double> source, double lo,
                   double hi, double step, unsigned precision,
@@ -403,13 +403,30 @@ public:
                        std::vector<ChildPlacement> &placements) const override {
     if (placements.size() != 2)
       return;
+    std::optional<std::pair<float, float>> geometry;
+    if (const auto editor = state_->editor.lock())
+      geometry = editor->field_geometry();
+    if (!geometry) {
+      const auto text_style = resolve_text_input_style(
+          default_text_input_style(current_theme()), style_.text_input,
+          VisualState{});
+      geometry = std::pair{text_style.field_top, text_style.field_height};
+    }
+    float field_top = geometry->first;
+    float field_height = geometry->second;
     const float stepper = std::min(bounds.w, children[1].preferred.w),
                 gap = std::min(static_cast<float>(style_.gap),
                                std::max(0.0f, bounds.w - stepper));
+    field_top = std::clamp(field_top, 0.0f, bounds.h);
+    field_height = std::clamp(field_height, 0.0f, bounds.h - field_top);
+    const float stepper_height = std::min(field_height, children[1].preferred.h);
     placements[0].bounds = {bounds.x, bounds.y,
                             std::max(0.0f, bounds.w - stepper - gap), bounds.h};
-    placements[1].bounds = {bounds.x + bounds.w - stepper, bounds.y, stepper,
-                            bounds.h};
+    placements[1].bounds = {bounds.x + bounds.w - stepper,
+                            bounds.y + field_top +
+                                (field_height - stepper_height) * 0.5f,
+                            stepper,
+                            stepper_height};
   }
   SemanticInfo semantics() const override {
     SemanticInfo info;

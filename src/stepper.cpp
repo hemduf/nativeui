@@ -218,6 +218,9 @@ void StepperAccess::configure(
 bool StepperComponent::focusable() const noexcept {
   return focusable_override_ && repeat_->minimum < repeat_->maximum;
 }
+bool StepperComponent::pointer_targetable() const noexcept {
+  return repeat_->minimum < repeat_->maximum;
+}
 bool StepperComponent::cancel_capture_on_read_only() const noexcept {
   return true;
 }

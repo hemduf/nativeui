@@ -643,8 +643,8 @@ ui::Spec containers(Model &m) {
                         tile("Cell A", {0.2f, 0.25f, 0.4f, 1}),
                         tile("Cell B", {0.35f, 0.23f, 0.4f, 1}),
                         ui::Clip{ui::Stack{
-                            tile("Stacked background", {0.1f, 0.35f, 0.3f, 1}),
-                            ui::Padding{16, ui::Badge{"OVERLAY"}}}},
+                            tile("", {0.1f, 0.35f, 0.3f, 1}),
+                            ui::Padding{16, ui::Badge{"STACK OVERLAY"}}}},
                         tile("Cell D", {0.2f, 0.3f, 0.4f, 1})}
                    .gap(10)),
           card("Scroll · ScrollView",
@@ -1119,9 +1119,19 @@ int self_test(const std::filesystem::path &snapshots = {}) {
     if (!renderer.render(tree) || !tree.structural_diagnostic().empty())
       return example::fail("gallery page failed: " + std::to_string(index) +
                            " / " + tree.structural_diagnostic());
-    if (!snapshots.empty())
+    if (!snapshots.empty()) {
       snapshot(renderer,
                snapshots / ("page_" + std::to_string(index + 1) + ".ppm"));
+      renderer.resize({1280, 1800});
+      tree.resize({1280, 1800});
+      if (!renderer.render(tree))
+        return example::fail("full-height gallery page failed");
+      snapshot(renderer, snapshots /
+                             ("page_" + std::to_string(index + 1) +
+                              "_full.ppm"));
+      renderer.resize({1280, 900});
+      tree.resize({1280, 900});
+    }
     tree.dispatch(example::key(ui::Key::Tab), platform);
     tree.dispatch(example::key(ui::Key::Tab, true), platform);
     renderer.resize({780, 600}, 1.25f);

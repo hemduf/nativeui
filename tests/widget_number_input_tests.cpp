@@ -3,6 +3,15 @@
 
 #include <limits>
 
+namespace ui {
+struct TreeTestAccess {
+  static std::pair<Rect, Rect> input_and_stepper(Tree &tree) {
+    return {tree.root_->children[0]->bounds,
+            tree.root_->children[1]->bounds};
+  }
+};
+} // namespace ui
+
 namespace {
 void replace(ui::UI &tree, test::MockPlatform &platform, std::string text) {
   ui::InputEvent all;
@@ -11,6 +20,50 @@ void replace(ui::UI &tree, test::MockPlatform &platform, std::string text) {
   tree.dispatch(all, platform);
   if (text.empty()) tree.dispatch(test::key(ui::Key::Backspace), platform);
   else tree.dispatch(test::text(std::move(text)), platform);
+}
+void stepper_pointer_controls_publish_the_shared_value() {
+  ui::State<double> value{12.5};
+  ui::UI tree{ui::NumberInput{"Quantity", value}
+                  .range(0, 100)
+                  .step(0.5)
+                  .precision(1)};
+  test::MockPlatform platform;
+  tree.resize({450, 82});
+  tree.activate(platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerDown, 438, 36), platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerUp, 438, 36), platform);
+  NUI_CHECK(value.get() == 13.0);
+  tree.dispatch(test::pointer(ui::InputType::PointerDown, 438, 58), platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerUp, 438, 58), platform);
+  NUI_CHECK(value.get() == 12.5);
+  tree.deactivate(platform);
+}
+void stepper_aligns_with_the_numeric_field() {
+  ui::State<double> value{12.5};
+  ui::Tree tree{ui::compile(ui::make_spec(ui::NumberInput{"Quantity", value}))};
+  tree.mount();
+  tree.layout({450, 82});
+  const auto [input, stepper] = ui::TreeTestAccess::input_and_stepper(tree);
+  NUI_CHECK(stepper.h <= 48);
+  NUI_CHECK_NEAR(stepper.y + stepper.h * 0.5f, input.y + 47.0f,
+                 0.01f);
+}
+void stepper_follows_focused_field_geometry() {
+  ui::State<double> value{12.5};
+  ui::NumberInputStyle style;
+  style.text_input.focused.field_top = 0.0f;
+  style.text_input.focused.field_height = 40.0f;
+  ui::Tree tree{ui::compile(ui::make_spec(
+      ui::NumberInput{"Quantity", value}.style(std::move(style))))};
+  test::MockPlatform platform;
+  tree.mount();
+  tree.layout({450, 82});
+  tree.activate_focus(platform);
+  tree.layout({450, 82});
+  const auto [input, stepper] = ui::TreeTestAccess::input_and_stepper(tree);
+  NUI_CHECK_NEAR(stepper.y + stepper.h * 0.5f, input.y + 20.0f,
+                 0.01f);
+  tree.deactivate_focus(platform);
 }
 void complete_finite_ascii_drafts_publish_without_step_snap() {
   ui::State<double> value{4.0};
@@ -180,6 +233,9 @@ void submit_source_updates_do_not_rearm_the_same_enter_contact() {
   NUI_CHECK(submits == 2 && value.get() == 3);
 }
 void suite() {
+  stepper_aligns_with_the_numeric_field();
+  stepper_follows_focused_field_geometry();
+  stepper_pointer_controls_publish_the_shared_value();
   submit_source_updates_do_not_rearm_the_same_enter_contact();
   passive_rounding_preserves_numeric_submit_and_escape_baseline();
   an_explicit_edit_matching_rounded_display_still_publishes();

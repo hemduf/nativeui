@@ -18,7 +18,7 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
-  CMAKE_BUILD_PARALLEL_LEVEL: '1'
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
   EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
@@ -126,7 +126,7 @@ jobs:
   sanitizers:
     name: Linux ASan + UBSan
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:

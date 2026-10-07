@@ -7,6 +7,7 @@
 #include "modules/skunicode/include/SkUnicode.h"
 #include "modules/skunicode/include/SkUnicode_icu.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -484,7 +485,14 @@ prepare_rich_text_layout(const std::vector<RichTextSpan> &spans,
     }
     if (lines.empty())
       lines.push_back({0, 0, 0});
-    const auto metrics_match = resolve_shaping_font(*fonts, base, {});
+    auto metrics_match = resolve_shaping_font(*fonts, base, {});
+    if (!metrics_match) {
+      // DirectWrite can match a character even when its default-family query
+      // returns no face. Keep the ordinary choice when it exists, including
+      // embedded families whose glyph set does not contain a space.
+      constexpr std::array<char32_t, 1> fallback_coverage{U' '};
+      metrics_match = resolve_shaping_font(*fonts, base, fallback_coverage);
+    }
     if (!metrics_match)
       throw std::runtime_error("RichText metrics font unavailable");
     for (const auto line : lines) {

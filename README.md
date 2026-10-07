@@ -293,6 +293,29 @@ nativeui_attach_platform(TARGET my_app CONSUMER_ID com.example.my-app)
 
 Point the consumer's `CMAKE_PREFIX_PATH` at the install prefix. Core-only consumers can link `NativeUI::Core` without calling `nativeui_attach_platform`.
 
+On Windows, Skia's ICU backend requires the matching `share/icudtl.dat` from the
+pinned archive. Platform attachment stages this file beside the final executable,
+DLL or module. Core-only consumers must attach runtime data explicitly:
+
+```cmake
+find_package(NativeUI CONFIG REQUIRED)
+add_executable(headless_app main.cpp)
+target_link_libraries(headless_app PRIVATE NativeUI::Core)
+nativeui_attach_runtime_data(TARGET headless_app)
+```
+
+The helper accepts executable, shared-library and module targets, including targets
+created in a parent directory. Repeated attachment is harmless. Building the target
+restores missing data without relinking it; shared output directories serialize data
+copies. The helper is a no-op on other platforms. Windows installed packages carry
+the data under their Skia dependency directory and reject missing data at configure
+time. Include `icudtl.dat` beside each final Windows artifact when distributing it.
+A plugin uses its own module directory as Skia's fallback when the host executable
+has no data file; NativeUI does not copy into the host application's directory.
+This preserves Skia's executable-first loader order and does not qualify arbitrary
+hosts that already provide a different ICU data file.
+
+
 ### skia-builder archive layout
 
 `CPMAddPackage(URL ...)` uses CMake/FetchContent extraction semantics. Since the

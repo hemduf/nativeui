@@ -28,6 +28,12 @@ endif()
 
 include(cmake/CPM.cmake)
 include(cmake/Dependencies.cmake)
+if(WIN32)
+  set(NATIVEUI_SKIA_ICU_DATA "${_skia_package_root}/share/icudtl.dat")
+  if(NOT EXISTS "${NATIVEUI_SKIA_ICU_DATA}" OR IS_DIRECTORY "${NATIVEUI_SKIA_ICU_DATA}")
+    message(FATAL_ERROR "Matching pinned Skia ICU runtime data is missing: ${NATIVEUI_SKIA_ICU_DATA}")
+  endif()
+endif()
 include(cmake/NativeUIConsumerPlatform.cmake)
 include(cmake/NativeUIAttachPlatform.cmake)
 include(cmake/NativeUIFeatureExamples.cmake)
@@ -226,6 +232,10 @@ add_library(nativeui_core STATIC
   src/outline_table_view.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
+if(WIN32)
+  set_property(TARGET nativeui_core PROPERTY
+    NATIVEUI_SKIA_ICU_DATA "${NATIVEUI_SKIA_ICU_DATA}")
+endif()
 set_target_properties(nativeui_core PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   EXPORT_NAME Core
@@ -325,6 +335,8 @@ install(FILES
   "${_nativeui_install_package_dir}/NativeUIConfig.cmake"
   "${_nativeui_install_package_dir}/NativeUIConfigVersion.cmake"
   cmake/NativeUIConsumerPlatform.cmake
+  cmake/NativeUIRuntimeData.cmake
+  cmake/NativeUIRuntimeDataCopy.cmake
   cmake/NativeUIAttachPlatform.cmake
   cmake/NativeUIApplication.cmake
   cmake/NativeUIWebShell.html
@@ -346,6 +358,11 @@ install(FILES
   "${NATIVEUI_SKIA_UNICODE_CORE_LIBRARY}"
   DESTINATION "${NATIVEUI_INSTALL_SKIA_DIR}/lib"
 )
+
+if(WIN32)
+  install(FILES "${NATIVEUI_SKIA_ICU_DATA}"
+    DESTINATION "${NATIVEUI_INSTALL_SKIA_DIR}/share")
+endif()
 
 if(NATIVEUI_BUILD_PLATFORM)
   # Pugl is a source dependency by design: the final consumer owns its platform
@@ -386,6 +403,10 @@ write_basic_package_version_file(
   VERSION "${PROJECT_VERSION}"
   COMPATIBILITY SameMajorVersion
 )
+foreach(_nativeui_runtime_module IN ITEMS NativeUIRuntimeData NativeUIRuntimeDataCopy)
+  configure_file("cmake/${_nativeui_runtime_module}.cmake"
+    "${_nativeui_build_package_dir}/${_nativeui_runtime_module}.cmake" COPYONLY)
+endforeach()
 configure_file(cmake/NativeUIConsumerPlatform.cmake
   "${_nativeui_build_package_dir}/NativeUIConsumerPlatform.cmake"
   COPYONLY

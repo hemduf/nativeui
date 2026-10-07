@@ -202,7 +202,7 @@
         else if (!active_) sync_availability_inactive();
         if (active_ && active_platform_) {
             drain_descendant_actions(*active_platform_);
-            sync_availability_structure(*active_platform_);
+            if (active_ && active_platform_) sync_availability_structure(*active_platform_);
         }
     }
     std::shared_ptr<RetainedInvalidationLifetime> retained_invalidation_lifetime_;
