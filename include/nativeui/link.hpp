@@ -49,7 +49,7 @@ private:
   [[nodiscard]] TextStyle text_style() const;
   std::string label_;
   std::string destination_;
-  NavigateCallback navigate_;
+  std::shared_ptr<NavigateCallback> navigate_;
   LinkStyle style_;
   bool wrap_{};
   bool focused_{};

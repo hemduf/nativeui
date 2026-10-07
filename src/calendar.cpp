@@ -291,7 +291,7 @@ public:
       auto action = std::make_shared<detail::InputActionState>();
       action->enabled = [weak] {
         const auto state = weak.lock();
-        return state && state->mounted;
+        return state && state->source.valid();
       };
       action->generation = [weak] {
         const auto state = weak.lock();

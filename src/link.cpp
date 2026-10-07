@@ -113,7 +113,10 @@ LinkComponent::LinkComponent(std::string label, std::string destination,
                              NavigateCallback navigate, LinkStyle style,
                              bool wrap)
     : label_(widget_repair_utf8(label)), destination_(std::move(destination)),
-      navigate_(std::move(navigate)), style_(std::move(style)), wrap_(wrap),
+      navigate_(navigate
+                    ? std::make_shared<NavigateCallback>(std::move(navigate))
+                    : nullptr),
+      style_(std::move(style)), wrap_(wrap),
       interaction_(std::make_shared<LinkInteraction>()) {
   validate_style(style_);
 }
@@ -245,7 +248,8 @@ EventResult LinkComponent::input(const InputEvent &event,
     destination = outcome.activate ? destination_ : std::string{};
     // Callable copying is itself a reentrancy boundary: its target copy
     // constructor may retire this node. No component member is read afterwards.
-    navigate = outcome.activate ? navigate_ : NavigateCallback{};
+    const auto callback_owner = outcome.activate ? navigate_ : nullptr;
+    navigate = callback_owner ? *callback_owner : NavigateCallback{};
     if (!state->mounted || !state->allowed || state->generation != generation)
       return result;
     if (outcome.result == EventResult::Handled)

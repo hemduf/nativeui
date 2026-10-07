@@ -482,14 +482,21 @@ public:
   }
   std::vector<Spec> children() const {
     const auto state = state_;
-    const auto style = style_;
+    auto style = style_;
+    if (label_.empty()) {
+      if (!style.text_input.base.field_top)
+        style.text_input.base.field_top = 0.0f;
+      if (!style.text_input.base.control_height)
+        style.text_input.base.control_height =
+            *style.text_input.base.field_top +
+            style.text_input.base.field_height.value_or(46.0f);
+    }
     const auto label = label_, placeholder = placeholder_;
     auto action = std::make_shared<detail::InputActionState>();
     const std::weak_ptr<EditableChoice> weak = state;
     action->enabled = [weak] {
       const auto owner = weak.lock();
-      return owner && owner->mounted && owner->mutable_value &&
-             owner->source.valid();
+      return owner && owner->mutable_value && owner->source.valid();
     };
     action->context_action = [weak](InputContext &) {
       const auto owner = weak.lock();

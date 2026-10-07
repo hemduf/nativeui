@@ -234,7 +234,16 @@ public:
   void deactivate(LifecycleContext &) override { state_->enter_down = false; }
   std::vector<Spec> children() const {
     const auto state = state_;
-    const auto style = style_;
+    auto style = style_;
+    // The composite paints its own chrome and omits the editor label. Keep the
+    // embedded text field at the visible field height instead of reserving the
+    // standalone TextInput label and bottom margin.
+    if (!style.text_input.base.field_top)
+      style.text_input.base.field_top = 0.0f;
+    if (!style.text_input.base.control_height)
+      style.text_input.base.control_height =
+          *style.text_input.base.field_top +
+          style.text_input.base.field_height.value_or(46.0f);
     Spec icon{[style] { return std::make_unique<Magnifier>(style); }, {}};
     Spec editor{[state, label = label_, placeholder = placeholder_,
                  maximum = maximum_, style] {
@@ -256,8 +265,8 @@ public:
     };
     action->enabled = [weak] {
       const auto value = weak.lock();
-      return value && value->mounted && value->mutable_value &&
-             value->source.valid() && !value->source.get().empty();
+      return value && value->mutable_value && value->source.valid() &&
+             !value->source.get().empty();
     };
     auto visible = [weak] {
       const auto value = weak.lock();

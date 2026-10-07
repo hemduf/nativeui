@@ -305,7 +305,8 @@ public:
     const auto serial = generation_;
     action->enabled = [weak, serial] {
       const auto state = weak.lock();
-      return state && state->allowed() && state->dataset_generation == serial;
+      return state && state->mutable_value && state->source.valid() &&
+             state->dataset_generation == serial;
     };
     action->generation = [weak] {
       const auto state = weak.lock();

@@ -312,7 +312,8 @@ public:
       const std::weak_ptr<TimeRuntime> weak = state_;
       action->enabled = [weak] {
         const auto state = weak.lock();
-        return state && state->allowed() && state->source.get().has_value();
+        return state && state->mutable_value && state->source.valid() &&
+               state->source.get().has_value();
       };
       action->generation = [weak] {
         const auto state = weak.lock();

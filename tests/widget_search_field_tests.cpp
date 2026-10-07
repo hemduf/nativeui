@@ -1,6 +1,18 @@
 #include "test_support.hpp"
 #include <nativeui/search_field.hpp>
 namespace {
+void compact_search_field_clears_by_pointer() {
+  ui::State<std::string> query{"NativeUI"};
+  ui::UI tree{ui::SearchField{"Search", query}};
+  test::MockPlatform platform;
+  NUI_CHECK(tree.measure().preferred.h <= 50.0f);
+  tree.resize({480, 46});
+  tree.activate(platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerDown, 466, 23), platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerUp, 466, 23), platform);
+  NUI_CHECK(query.get().empty());
+  tree.deactivate(platform);
+}
 void escapes_compose_clear_then_bubble_and_submit_once() {
   ui::State<std::string> query{"presets"};
   int submissions{};
@@ -83,6 +95,7 @@ void submit_source_updates_do_not_rearm_the_same_enter_contact() {
   NUI_CHECK(submits == 2);
 }
 void suite() {
+  compact_search_field_clears_by_pointer();
   submit_source_updates_do_not_rearm_the_same_enter_contact();
   escapes_compose_clear_then_bubble_and_submit_once();
   skipped_source_observer_and_invalid_binding_recover_safely();

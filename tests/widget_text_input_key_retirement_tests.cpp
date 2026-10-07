@@ -31,6 +31,19 @@ struct KeyHandler {
     return owned->result;
   }
 };
+struct SubmitHandler {
+  std::shared_ptr<KeyState> state;
+  explicit SubmitHandler(std::shared_ptr<KeyState> value)
+      : state(std::move(value)) {}
+  SubmitHandler(const SubmitHandler &other) : state(other.state) {
+    if (std::exchange(state->armed, false)) {
+      auto retire = state->retire;
+      retire();
+    }
+  }
+  SubmitHandler(SubmitHandler &&) = default;
+  void operator()(const std::string &) const { ++state->calls; }
+};
 void copy_and_invocation_retirement_suppress_old_editor_and_recover() {
   for (const bool copy : {false, true}) {
     for (const auto result :
@@ -90,9 +103,38 @@ void copy_and_invocation_retirement_suppress_old_editor_and_recover() {
     }
   }
 }
+void submit_copy_retirement_suppresses_old_editor_and_recovers() {
+  auto state = std::make_shared<KeyState>();
+  ui::State<std::string> value{"abc"};
+  ui::State<bool> present{true};
+  test::MockPlatform platform;
+  ui::UI tree{ui::If{present, ui::TextInput{"Name", value}.on_submit(
+                                  SubmitHandler{state})}};
+  tree.resize({200, 80});
+  tree.activate(platform);
+  ui::HeadlessRenderer renderer{{200, 80}, 1};
+  NUI_CHECK(renderer.render(tree));
+  state->retire = [&] {
+    present.set(false);
+    tree.resize({201, 80});
+  };
+  state->armed = true;
+  tree.dispatch(test::key(ui::Key::Enter), platform);
+  NUI_CHECK(!state->armed && !present.get() && state->calls == 0);
+  state->retire = {};
+  present.set(true);
+  tree.resize({200, 80});
+  NUI_CHECK(renderer.render(tree));
+  tree.dispatch(test::pointer(ui::InputType::PointerDown, 100, 35), platform);
+  tree.dispatch(test::pointer(ui::InputType::PointerUp, 100, 35), platform);
+  tree.dispatch(test::key(ui::Key::Enter), platform);
+  NUI_CHECK(state->calls == 1);
+  tree.deactivate(platform);
+}
 } // namespace
 int main() {
-  return test::run(
-      "text_input_key_retirement",
-      copy_and_invocation_retirement_suppress_old_editor_and_recover);
+  return test::run("text_input_key_retirement", [] {
+    copy_and_invocation_retirement_suppress_old_editor_and_recover();
+    submit_copy_retirement_suppresses_old_editor_and_recovers();
+  });
 }

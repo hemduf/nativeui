@@ -165,8 +165,8 @@ private:
   Binding<std::string> state_;
   TextEditModel model_;
   std::string placeholder_;
-  SubmitCallback on_submit_;
-  KeyDownCallback on_key_down_{};
+  std::shared_ptr<SubmitCallback> on_submit_;
+  std::shared_ptr<KeyDownCallback> on_key_down_;
   TextInputStyle style_;
 
   bool drag_select_{};

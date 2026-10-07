@@ -34,6 +34,7 @@ public:
   StepperComponent(Binding<double> value, std::string label, double minimum,
                    double maximum, double step, StepperStyle style);
   [[nodiscard]] bool focusable() const noexcept override;
+  [[nodiscard]] bool pointer_targetable() const noexcept override;
   [[nodiscard]] bool cancel_capture_on_read_only() const noexcept override;
   [[nodiscard]] Size measure(const std::vector<ChildMetrics> &) const override;
   [[nodiscard]] SemanticInfo semantics() const override;

@@ -2,6 +2,8 @@
 
 The **NativeUI — The Component Lab** application uses all **83 public components** in the [catalog](widgets.md), across eight interactive screens in English. Its final source is [examples/features/widgets_gallery.cpp](../examples/features/widgets_gallery.cpp). It uses the current public APIs, with `NativeUI::Core` for widgets and the NativeUI platform for its window.
 
+The [interaction and layout audit](widgets_gallery_audit.md) records findings from all eight screens and the direct pointer regressions added during PR completion.
+
 ![NativeUI gallery: Text and drawing screen](assets/widgets_gallery.png)
 
 ## Launch the application
@@ -61,7 +63,7 @@ PPM captures of each screen can be generated without a graphical server:
 TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --self-test --snapshot-dir /Volumes/T7/tmp/nativeui-gallery-snapshots
 ```
 
-The export adds eight files, `page_1.ppm` through `page_8.ppm`, to the chosen directory. It does not run during the ordinary CTest test.
+The export adds eight viewport captures, `page_1.ppm` through `page_8.ppm`, and eight full-height captures, `page_1_full.ppm` through `page_8_full.ppm`, to the chosen directory. It does not run during the ordinary CTest test.
 
 The native test creates a real macOS window, waits for its first render and requests deferred closure:
 

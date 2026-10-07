@@ -12,6 +12,10 @@ void replace(ui::UI &tree, test::MockPlatform &platform, std::string value) {
     tree.dispatch(test::text(std::move(value)), platform);
 }
 void suite() {
+  ui::State<std::string> compact_value{"Inter"};
+  ui::UI compact{ui::EditableComboBox{
+      "", compact_value, std::vector<std::string>{"Inter", "Menlo"}}};
+  NUI_CHECK(compact.measure().preferred.h <= 50.0f);
   ui::State<std::string> selected{"Unknown"};
   int calls{}, writes{};
   auto observation = selected.observe([&](const auto &) { ++writes; });
