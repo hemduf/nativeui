@@ -133,6 +133,7 @@ public:
         if (!ime_bridge_) {
             throw_pugl(PUGL_FAILURE, "native IME bridge initialization failed");
         }
+        nativeuiImeSetMagnifyCallback(ime_bridge_, &ViewCore::magnify_thunk, this);
         construction_cleanup.ime_acquired = true;
         if (fault_result) ++fault_result->ime_acquired;
         maybe_inject(NativeViewConstructionFaultStage::AfterImeCreate);
@@ -747,6 +748,24 @@ private:
             if (cleanup.fault_result) ++cleanup.fault_result->world_released;
         } else if (owns_world_) {
             world_ = nullptr;
+        }
+    }
+
+    static void magnify_thunk(void* user_data, float magnification,
+                              double x, double y) noexcept {
+        auto* self = static_cast<ViewCore*>(user_data);
+        if (!self) return;
+        try {
+            InputEvent input{};
+            input.type = InputType::Magnify;
+            input.magnification = magnification;
+            input.position = detail::physical_to_logical_point(
+                {static_cast<float>(x), static_cast<float>(y)},
+                self->geometry_.last_valid_scale());
+            (void)self->ui_.dispatch(input, self->services_);
+        } catch (...) {
+            // Never unwind through Cocoa callbacks.
+            self->should_close_ = true;
         }
     }
 
