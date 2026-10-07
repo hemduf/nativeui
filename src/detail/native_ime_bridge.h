@@ -26,11 +26,13 @@ typedef void (*NativeUIImeCallback)(void*                user_data,
 
 /// macOS trackpad pinch delivery. `magnification` is the continuous relative
 /// scale factor of the event (e.g. 0.04 = +4% this event); `x`/`y` are
-/// view-local physical pixels (same convention as Pugl pointer events).
-typedef void (*NativeUIImeMagnifyCallback)(void* user_data,
-                                           float magnification,
-                                           double x,
-                                           double y);
+/// view-local physical pixels (same convention as Pugl pointer events), and
+/// `mods` is the PuglMods mask of the event's keyboard modifiers.
+typedef void (*NativeUIImeMagnifyCallback)(void*     user_data,
+                                           float      magnification,
+                                           double     x,
+                                           double     y,
+                                           PuglMods   mods);
 
 typedef struct NativeUIImeBridge NativeUIImeBridge;
 

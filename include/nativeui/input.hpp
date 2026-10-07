@@ -147,9 +147,14 @@ enum class InputType {
     // an existing capture is cancelled before the request is delivered.
     ContextMenu,
     // Appended after ContextMenu so every pre-existing public enumerator keeps
-    // its numeric value. macOS trackpad pinch (`magnifyWithEvent:`): one event
-    // per continuous delta, `magnification` carries the relative factor
-    // (e.g. 0.04 = +4% scale). Other platforms have no such event source.
+    // its numeric value. Normalized zoom gesture: macOS trackpad pinch
+    // (`magnifyWithEvent:`) delivers one event per continuous delta, and other
+    // platforms normalize ctrl/cmd+scroll (the OS-synthesized pinch and the
+    // browser ctrlKey wheel) into the same event. `magnification` carries the
+    // relative factor (e.g. 0.04 = +4% scale) and position anchors zoom at
+    // the pointer. Delivery mirrors PointerWheel: pointer hit target, no
+    // keyboard focus move, no capture establishment, and PointerWheel never
+    // carries ctrl/gui after normalization.
     Magnify
 };
 

@@ -552,3 +552,15 @@ nativeuiImeFlushPendingCancel(NativeUIImeBridge* bridge)
   bridge->awaitingCommit = false;
   resetPreedit(bridge);
 }
+
+void
+nativeuiImeSetMagnifyCallback(NativeUIImeBridge*          bridge,
+                              NativeUIImeMagnifyCallback  callback,
+                              void*                       user_data)
+{
+  (void)bridge;
+  (void)callback;
+  (void)user_data;
+  // No native magnify source on this backend: ctrl/cmd+scroll is normalized
+  // into InputType::Magnify by the view core instead.
+}

@@ -264,16 +264,13 @@
                 // pinch gesture, and explicit ctrl/cmd+scroll means zoom.
                 // Normalized into one continuous relative-scale event so all
                 // consumers share a single code path (PointerWheel never
-                // carries ctrl/gui).
-                // Sign: smooth scroll dy is +down on macOS, +up on every
-                // other backend (see pugl win.c/x11.c/emscripten_events.c).
-#if defined(__APPLE__)
-                input.type = InputType::Magnify;
-                input.magnification = static_cast<float>(-event->scroll.dy * 0.0025);
-#else
-                input.type = InputType::Magnify;
-                input.magnification = static_cast<float>(+event->scroll.dy * 0.0025);
-#endif
+                // carries ctrl/gui). Pugl normalizes "positive dy = scroll
+                // up" on every backend, so one signed factor serves all of
+                // them (see detail/pugl_scroll_translation.hpp).
+                const auto translation = detail::translate_pugl_scroll(
+                    input.ctrl, input.gui, event->scroll.dy);
+                input.type = translation.type;
+                input.magnification = translation.magnification;
                 ui_.dispatch(input, services_);
                 return PUGL_SUCCESS;
             }

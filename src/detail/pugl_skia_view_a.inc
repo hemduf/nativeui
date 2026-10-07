@@ -752,13 +752,17 @@ private:
     }
 
     static void magnify_thunk(void* user_data, float magnification,
-                              double x, double y) noexcept {
+                              double x, double y, PuglMods mods) noexcept {
         auto* self = static_cast<ViewCore*>(user_data);
         if (!self) return;
         try {
             InputEvent input{};
             input.type = InputType::Magnify;
             input.magnification = magnification;
+            // Same pointer payload as every other Mouse-delivered position
+            // event so consumers see one stable event shape per symbolic type.
+            input.pointer.type = PointerType::Mouse;
+            apply_modifiers(input, mods);
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(x), static_cast<float>(y)},
                 self->geometry_.last_valid_scale());

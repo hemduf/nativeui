@@ -383,6 +383,19 @@ nativeuiFlagsChanged(id self, SEL selector, NSEvent* event)
   [retainedView release];
 }
 
+// Same modifier encoding as the pinned Pugl's own getModifiers() so the
+// delivered PuglMods mask matches every other nativeui event source.
+static PuglMods
+magnifyModifiers(NSEvent* event)
+{
+  const NSEventModifierFlags flags = [event modifierFlags];
+  return (
+    (PuglMods)((flags & NSShiftKeyMask) ? PUGL_MOD_SHIFT : 0) |
+    (PuglMods)((flags & NSControlKeyMask) ? PUGL_MOD_CTRL : 0) |
+    (PuglMods)((flags & NSAlternateKeyMask) ? PUGL_MOD_ALT : 0) |
+    (PuglMods)((flags & NSCommandKeyMask) ? PUGL_MOD_SUPER : 0));
+}
+
 static void
 nativeuiMagnifyWithEvent(id self, SEL selector, NSEvent* event)
 {
@@ -401,7 +414,8 @@ nativeuiMagnifyWithEvent(id self, SEL selector, NSEvent* event)
   const double scale = (double)[[view window] backingScaleFactor];
   bridge->magnifyCallback(bridge->magnifyUserData,
                           (float)[event magnification],
-                          local.x * scale, local.y * scale);
+                          local.x * scale, local.y * scale,
+                          magnifyModifiers(event));
 }
 
 static NSTextInputContext*
