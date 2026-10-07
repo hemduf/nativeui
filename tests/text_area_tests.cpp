@@ -306,7 +306,126 @@ void read_only_preserves_selection_copy_navigation_but_blocks_mutations() {
     NUI_CHECK(value.get() == "one\ntwo");
 }
 
+void external_write_during_edit_invalidation_wins() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"old"};
+    ui::UI tree{ui::TextArea{"Notes", value}};
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{320.0f, 180.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    bool armed = true;
+    tree.set_invalidation_callback([&] {
+        if (std::exchange(armed, false)) value.set("external");
+    });
+    tree.dispatch(test::text("!"), platform);
+    tree.clear_invalidation_callback();
+    NUI_CHECK(!armed && value.get() == "external");
+    tree.dispatch(test::key(ui::Key::End, false, true), platform);
+    tree.dispatch(test::text("?"), platform);
+    NUI_CHECK(value.get() == "external?");
+}
+
+void read_only_during_edit_invalidation_blocks_publication() {
+    test::MockPlatform platform;
+    ui::State<bool> read_only{false};
+    ui::State<std::string> value{"old"};
+    ui::UI tree{ui::ReadOnly{read_only, ui::TextArea{"Notes", value}}};
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{320.0f, 180.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    bool armed = true;
+    tree.set_invalidation_callback([&] {
+        if (std::exchange(armed, false)) {
+            read_only.set(true);
+            tree.resize({320.0f, 180.0f});
+        }
+    });
+    tree.dispatch(test::text("!"), platform);
+    tree.clear_invalidation_callback();
+    NUI_CHECK(!armed && value.get() == "old");
+    read_only.set(false);
+    tree.dispatch(test::text("?"), platform);
+    NUI_CHECK(value.get() == "old?");
+}
+
+void skipped_source_observer_recovers_at_the_retained_checkpoint() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"old"};
+    bool fail = true;
+    auto first = value.observe([&](const auto&) {
+        if (std::exchange(fail, false)) throw std::runtime_error("source observer");
+    });
+    ui::UI tree{ui::TextArea{"Notes", value}};
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    bool caught = false;
+    try {
+        value.set("external");
+    } catch (const std::runtime_error&) {
+        caught = true;
+    }
+    NUI_CHECK(caught && value.get() == "external");
+    ui::HeadlessRenderer renderer{{320.0f, 180.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    tree.dispatch(test::key(ui::Key::End, false, true), platform);
+    tree.dispatch(test::text("?"), platform);
+    NUI_CHECK(value.get() == "external?");
+}
+
+void failed_edit_invalidation_recovers_without_replaying_the_edit() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"old"};
+    int publications = 0;
+    auto observer = value.observe([&](const auto&) { ++publications; });
+    ui::UI tree{ui::TextArea{"Notes", value}};
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{320.0f, 180.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    tree.set_invalidation_callback([] { throw std::runtime_error("edit invalidation"); });
+    bool caught = false;
+    try {
+        tree.dispatch(test::text("!"), platform);
+    } catch (const std::runtime_error&) {
+        caught = true;
+    }
+    tree.clear_invalidation_callback();
+    NUI_CHECK(caught && value.get() == "old" && publications == 0);
+    NUI_CHECK(renderer.render(tree));
+    tree.dispatch(test::text("?"), platform);
+    NUI_CHECK(value.get() == "old?" && publications == 1);
+}
+
+void reentrant_cancel_supersedes_the_outer_edit() {
+    test::MockPlatform platform;
+    ui::State<std::string> value{"old"};
+    int publications = 0;
+    auto observer = value.observe([&](const auto&) { ++publications; });
+    ui::UI tree{ui::TextArea{"Notes", value}};
+    tree.resize({320.0f, 180.0f});
+    tree.activate(platform);
+    ui::HeadlessRenderer renderer{{320.0f, 180.0f}, 1.0f};
+    NUI_CHECK(renderer.render(tree));
+    bool armed = true;
+    tree.set_invalidation_callback([&] {
+        if (std::exchange(armed, false))
+            tree.dispatch(test::key(ui::Key::Escape), platform);
+    });
+    tree.dispatch(test::text("!"), platform);
+    tree.clear_invalidation_callback();
+    NUI_CHECK(!armed && value.get() == "old" && publications == 0);
+    tree.dispatch(test::text("?"), platform);
+    NUI_CHECK(value.get() == "old?" && publications == 1);
+}
+
 void suite() {
+    external_write_during_edit_invalidation_wins();
+    read_only_during_edit_invalidation_blocks_publication();
+    skipped_source_observer_recovers_at_the_retained_checkpoint();
+    failed_edit_invalidation_recovers_without_replaying_the_edit();
+    reentrant_cancel_supersedes_the_outer_edit();
     enter_and_committed_text_preserve_newlines();
     vertical_navigation_and_selection_cross_lines();
     viewport_scroll_and_caret_rendering();
@@ -323,4 +442,21 @@ void suite() {
 
 } // namespace
 
-int main() { return test::run("text_area", &suite); }
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "external_invalidation")
+        return test::run("text_area_external_invalidation",
+                         &external_write_during_edit_invalidation_wins);
+    if (argc == 2 && std::string_view{argv[1]} == "read_only_invalidation")
+        return test::run("text_area_read_only_invalidation",
+                         &read_only_during_edit_invalidation_blocks_publication);
+    if (argc == 2 && std::string_view{argv[1]} == "skipped_observer")
+        return test::run("text_area_skipped_observer",
+                         &skipped_source_observer_recovers_at_the_retained_checkpoint);
+    if (argc == 2 && std::string_view{argv[1]} == "throwing_invalidation")
+        return test::run("text_area_throwing_invalidation",
+                         &failed_edit_invalidation_recovers_without_replaying_the_edit);
+    if (argc == 2 && std::string_view{argv[1]} == "reentrant_cancel")
+        return test::run("text_area_reentrant_cancel",
+                         &reentrant_cancel_supersedes_the_outer_edit);
+    return test::run("text_area", &suite);
+}

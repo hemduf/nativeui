@@ -5,6 +5,7 @@
 #include <nativeui/detail/focus_group.hpp>
 #include <nativeui/detail/interaction_observer.hpp>
 #include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/detail/raster_cache_epoch.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/transient_presentation.hpp>
@@ -58,6 +59,7 @@ private:
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
+#include <nativeui/detail/tree_descendant_actions.inc>
 #include <nativeui/detail/tree_layout.inc>
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>

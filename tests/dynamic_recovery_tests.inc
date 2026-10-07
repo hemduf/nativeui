@@ -259,6 +259,7 @@ void quarantine_reuses_desired_key_snapshot() {
 
     ui::State<std::vector<KeyedItem>> items{{KeyedItem{1}}};
     int key_calls = 0;
+    std::vector<int> built_items;
     bool reject_extra_key_call = false;
     test::MockPlatform platform;
 
@@ -271,7 +272,7 @@ void quarantine_reuses_desired_key_snapshot() {
             }
             return item.id;
         },
-        [](const KeyedItem&) { return ui::Spacer{32.0f, 20.0f}; }}))};
+        [&](const KeyedItem& item) { built_items.push_back(item.id); return ui::Spacer{32.0f, 20.0f}; }}))};
     tree.mount();
     tree.layout({120.0f, 48.0f});
     tree.activate_focus(platform);
@@ -287,7 +288,8 @@ void quarantine_reuses_desired_key_snapshot() {
         threw = true;
     }
     NUI_CHECK(!threw);
-    NUI_CHECK(key_calls == 2);
+    NUI_CHECK(key_calls == 1);
+    NUI_CHECK(built_items == std::vector<int>({1,2}));
 
     tree.deactivate_focus(platform);
     tree.unmount();

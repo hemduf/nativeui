@@ -91,7 +91,7 @@ int self_test() {
     }
     trace_stage("initial-size-valid");
 
-    if (!window.set_title("T066 UTF-8 — fenêtre")) {
+    if (!window.set_title("T066 UTF-8 — window")) {
         return example::fail("UTF-8 title update failed");
     }
     trace_stage("utf8-title-ok");

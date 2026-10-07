@@ -24,7 +24,7 @@ struct EditCallbacks {
 /// end/cancel notification, including owner destruction (no-throw cancellation).
 ///
 /// begin/update/set are rejected during callbacks or while this State is
-/// delivering another notification transaction. Reentrant end/cancel is
+/// delivering another notification or guarded-read transaction. Reentrant end/cancel is
 /// deferred until the current notification completes; cancel wins over end.
 /// State observers run before change, which reports the final committed value.
 /// A throwing begin/change/observer cancels once, then rethrows the original
@@ -82,7 +82,7 @@ public:
     /// begin an interaction. An already-active session is never interrupted.
     bool set(T value, EditSource source) {
         const auto control = control_;
-        if (!control->alive || !control->state.valid() || control->state.control_->dispatching || control->active ||
+        if (!control->alive || !control->state.valid() || (control->state.control_->dispatching || control->state.control_->read_copy) || control->active ||
             control->dispatching || value == control->state.get()) return false;
         if (!begin_control(control, source)) return false;
         const bool changed = update_control(control, std::move(value));
@@ -134,7 +134,7 @@ private:
     }
 
     static bool begin_control(Owner control, EditSource source) {
-        if (!control->alive || !control->state.valid() || control->state.control_->dispatching || control->active ||
+        if (!control->alive || !control->state.valid() || (control->state.control_->dispatching || control->state.control_->read_copy) || control->active ||
             control->dispatching) return false;
         control->source = source;
         control->active = true;
@@ -147,7 +147,7 @@ private:
 
     static bool update_control(Owner control, T value) {
         if (!control->alive || !control->active || control->dispatching ||
-            control->state.control_->dispatching) return false;
+            (control->state.control_->dispatching || control->state.control_->read_copy)) return false;
         if (!control->state.valid()) {
             terminate(control, Terminal::Cancel);
             return false;

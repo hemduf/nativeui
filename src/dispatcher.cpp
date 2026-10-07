@@ -85,6 +85,7 @@ struct DispatcherState final {
     bool closing{};
     bool wake_pending{};
     bool fail_next_post_for_testing{};
+    bool fail_next_timer_for_testing{};
 };
 
 namespace {
@@ -143,6 +144,10 @@ void request_dispatcher_wake(const std::shared_ptr<DispatcherState>& state) noex
         std::lock_guard lock{state->mutex};
         if (state->closing || state->timers.size() >= kDispatcherMaxActiveTimers) return {};
         if (state->next_timer_id == 0 || state->next_timer_sequence == 0) return {};
+        if (state->fail_next_timer_for_testing) {
+            state->fail_next_timer_for_testing = false;
+            throw std::bad_alloc{};
+        }
 
         const auto id = state->next_timer_id++;
         const auto sequence = state->next_timer_sequence++;
@@ -371,6 +376,13 @@ void DispatcherTestAccess::fail_next_post(const Dispatcher& dispatcher) noexcept
     if (!state) return;
     std::lock_guard lock{state->mutex};
     if (!state->closing) state->fail_next_post_for_testing = true;
+}
+
+void DispatcherTestAccess::fail_next_timer(const Dispatcher& dispatcher) noexcept {
+    const auto state = dispatcher.state_.lock();
+    if (!state) return;
+    std::lock_guard lock{state->mutex};
+    if (!state->closing) state->fail_next_timer_for_testing = true;
 }
 
 } // namespace ui::detail

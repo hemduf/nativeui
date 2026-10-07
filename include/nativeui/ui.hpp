@@ -4,6 +4,7 @@
 #include <nativeui/detail/dialog_state.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/ui_lifecycle_observer.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
@@ -11,6 +12,7 @@
 #include <nativeui/inspector.hpp>
 #endif
 
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -23,9 +25,8 @@
 namespace ui {
 
 class Dialog;
-namespace detail {
-class SkiaGlRenderer;
-}
+class Toast;
+namespace detail { class SkiaGlRenderer; }
 
 /// One retained NativeUI component tree.
 ///
@@ -58,6 +59,10 @@ public:
         // a weak copy of this token before the callback and never dereferences
         // `this` after the token expires.
         lifetime_.reset();
+        if (overlay_state_) overlay_state_->begin_owner_teardown();
+        auto observers = std::move(lifecycle_observers_);
+        for (const auto& weak : observers)
+            if (const auto observer = weak.lock()) observer->ui_will_teardown();
 
         // T063 distinguishes whole-UI teardown from explicit Dialog controller
         // destruction. Publish the terminal state before Tree/overlay members
@@ -89,15 +94,42 @@ public:
             tree_.invalidate();
             return;
         }
+        pending_viewport_resize_valid_ = false;
+        const std::weak_ptr<void> alive = lifetime_;
+        const auto previous = viewport_;
         viewport_ = viewport;
-        prepare_overlay_layout();
+        try { prepare_overlay_layout(); }
+        catch (...) { if (!alive.expired()) viewport_ = previous; throw; }
     }
     void activate(PlatformServices& platform) {
+        const std::weak_ptr<void> alive = lifetime_;
+        if (!flush_quiet_overlay_refresh()) return;
         tree_.activate_focus(platform);
+        if (alive.expired()) return;
         prepare_overlay_layout();
+        if (alive.expired()) return;
         enforce_new_modal_capture_barrier(platform);
     }
     void deactivate(PlatformServices& platform) {
+        if (toast_deactivating_) return;
+        const auto observers = lifecycle_observers_;
+        const std::weak_ptr<void> alive = lifetime_;
+        toast_deactivating_ = true;
+        for (const auto& weak : observers) {
+            if (const auto observer = weak.lock()) observer->ui_will_deactivate();
+            if (alive.expired()) return;
+        }
+        try {
+            if (!flush_quiet_overlay_refresh()) return;
+            deactivate_retained(platform);
+        } catch (...) {
+            if (!alive.expired()) toast_deactivating_ = false;
+            throw;
+        }
+        if (!alive.expired()) toast_deactivating_ = false;
+    }
+private:
+    void deactivate_retained(PlatformServices& platform) {
         // Transient presentations such as a pending/visible Tooltip are
         // cancelled at the view lifecycle boundary before focus/hover teardown
         // so their T065 timers cannot fire into an inactive UI.
@@ -118,9 +150,11 @@ public:
         close_anchored_overlays();
         tree_.deactivate_focus(platform);
     }
+public:
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return EventResult::Ignored;
+        if (!flush_quiet_overlay_refresh()) return EventResult::Ignored;
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
         // before ordinary retained routing so a focused TextInput/custom body
         // cannot consume Escape ahead of the enabled Cancel action/Dismissed
@@ -133,6 +167,9 @@ public:
                 return EventResult::Handled;
             }
         }
+
+        const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
+        if (is_drop ? tree_.mounted_ : tree_.active_) tree_.refresh_retained_components();
 
         // PointerDown anywhere and Escape are global dismissal gestures for
         // transient presentations such as a pending/visible Tooltip. This is
@@ -147,19 +184,28 @@ public:
             tree_.dismiss_transient_presentations();
         }
 
+        const bool context_request = event.type == InputType::ContextMenu ||
+            (event.type == InputType::KeyDown &&
+             (event.key == Key::Menu || (event.key == Key::F10 && event.shift)));
+        std::optional<std::vector<NodeId>> context_sources;
+        if (context_request) context_sources.emplace();
+
         // Keep the no-overlay path as close as possible to the pre-T061 UI
         // dispatch contract. T035 component requests are drained only after
         // Tree::dispatch reaches its T058 structural safe checkpoint. Capture
         // the source identity before dispatch because application providers may
         // change availability/focus while the source component is still alive.
         if (overlay_state_->entries.empty()) {
-            const auto command_source = overlay_command_source(event);
-            const auto result = dispatch_tree_dialog_safe(event, platform);
+            auto command_source = context_request ? kInvalidNodeId : overlay_command_source(event);
+            const auto result = dispatch_tree_dialog_safe(event, platform, context_request ? &*context_sources : nullptr);
             const bool completing_dialog = has_pending_dialog_completion();
             if (!completing_dialog) {
-                if (!process_component_overlay_command(command_source, platform)) return result;
+                const bool owner_alive = context_request
+                    ? process_context_overlay_command(*context_sources, platform)
+                    : process_component_overlay_command(command_source, platform, true);
+                if (!owner_alive) return result;
                 if (!overlay_state_->entries.empty()) {
-                    prepare_overlay_layout();
+                    prepare_overlay_layout(true);
                     enforce_new_modal_capture_barrier(platform);
                 }
             }
@@ -174,7 +220,7 @@ public:
         // overlay bounds for pointer containment or dismissal. A newly-created
         // modal also terminates any capture established by lower content before
         // this event can be routed through the modal barrier.
-        prepare_overlay_layout();
+        prepare_overlay_layout(true);
         enforce_new_modal_capture_barrier(platform);
 
         // Overlay dismissal is policy that must run before normal retained-tree
@@ -199,8 +245,15 @@ public:
                     const bool resolve_widget_teardown = it->spec.anchor &&
                         anchor_dismisses_on_tab(*it->spec.anchor);
                     const auto id = it->id;
-                    (void)overlay_state_->close_id(id);
-                    if (resolve_widget_teardown) prepare_overlay_layout();
+                    const bool observe_close = it->spec.anchor &&
+                        anchor_observes_user_close(*it->spec.anchor);
+                    const auto alive = std::weak_ptr{lifetime_};
+                    auto state = overlay_state_;
+                    (void)state->close_id(id, OverlayCloseReason::UserOutside);
+                    if (alive.expired()) return EventResult::Handled;
+                    if (observe_close) tree_.refresh_retained_components();
+                    if (alive.expired()) return EventResult::Handled;
+                    if (resolve_widget_teardown || observe_close) prepare_overlay_layout(true);
                     return EventResult::Handled;
                 }
 
@@ -211,12 +264,20 @@ public:
         } else if (event.type == InputType::KeyDown && event.key == Key::Escape) {
             for (auto it = overlay_state_->entries.rbegin();
                  it != overlay_state_->entries.rend(); ++it) {
+                if (it->spec.anchor && anchor_handles_escape(*it->spec.anchor)) break;
                 if (it->spec.dismiss_on_escape) {
                     const bool resolve_widget_teardown = it->spec.anchor &&
                         anchor_dismisses_on_tab(*it->spec.anchor);
                     const auto id = it->id;
-                    (void)overlay_state_->close_id(id);
-                    if (resolve_widget_teardown) prepare_overlay_layout();
+                    const bool observe_close = it->spec.anchor &&
+                        anchor_observes_user_close(*it->spec.anchor);
+                    const auto alive = std::weak_ptr{lifetime_};
+                    auto state = overlay_state_;
+                    (void)state->close_id(id, OverlayCloseReason::UserEscape);
+                    if (alive.expired()) return EventResult::Handled;
+                    if (observe_close) tree_.refresh_retained_components();
+                    if (alive.expired()) return EventResult::Handled;
+                    if (resolve_widget_teardown || observe_close) prepare_overlay_layout(true);
                     return EventResult::Handled;
                 }
 
@@ -236,25 +297,27 @@ public:
                 if (it->spec.anchor && anchor_dismisses_on_tab(*it->spec.anchor)) {
                     const auto id = it->id;
                     (void)overlay_state_->close_id(id);
-                    prepare_overlay_layout();
+                    prepare_overlay_layout(true);
                     break;
                 }
                 if (it->spec.mode == OverlayMode::Modal) break;
             }
         }
 
-        const auto command_source = overlay_command_source(event);
-        const auto result = dispatch_tree_dialog_safe(event, platform);
+        auto command_source = context_request ? kInvalidNodeId : overlay_command_source(event);
+        const auto result = dispatch_tree_dialog_safe(event, platform, context_request ? &*context_sources : nullptr);
         const bool completing_dialog = has_pending_dialog_completion();
-        if (!completing_dialog &&
-            !process_component_overlay_command(command_source, platform)) {
-            return result;
+        if (!completing_dialog) {
+            const bool owner_alive = context_request
+                ? process_context_overlay_command(*context_sources, platform)
+                : process_component_overlay_command(command_source, platform, true);
+            if (!owner_alive) return result;
         }
 
         // Tree::dispatch may have removed/disabled an anchor while a popup was
         // open. Resolve that source transition in the same outer dispatch, not
         // on a later paint/input event.
-        if (!overlay_state_->entries.empty()) prepare_overlay_layout();
+        if (!overlay_state_->entries.empty()) prepare_overlay_layout(true);
 
         // A callback may have captured the pointer and shown a modal in the
         // same dispatch. T058 mounts that modal only after the callback stack
@@ -277,9 +340,9 @@ public:
     void set_key_down_handler(std::function<EventResult(const InputEvent&)> handler) {
         tree_.set_global_key_down_handler(std::move(handler));
     }
-    [[nodiscard]] bool dirty() const noexcept { return tree_.dirty(); }
-    [[nodiscard]] bool layout_dirty() const noexcept { return tree_.layout_dirty(); }
-    [[nodiscard]] bool paint_dirty() const noexcept { return tree_.paint_dirty(); }
+    [[nodiscard]] bool dirty() const noexcept { return overlay_state_->quiet_structure_refresh || tree_.dirty(); }
+    [[nodiscard]] bool layout_dirty() const noexcept { return overlay_state_->quiet_structure_refresh || tree_.layout_dirty(); }
+    [[nodiscard]] bool paint_dirty() const noexcept { return overlay_state_->quiet_structure_refresh || tree_.paint_dirty(); }
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return tree_.dirty_regions();
     }
@@ -360,9 +423,13 @@ private:
         PlatformServices& platform,
         const detail::PainterPrivateHooks* private_hooks) {
         if (tree_.lifecycle_transition_active()) return;
+        const std::weak_ptr<void> alive = lifetime_;
+        if (!flush_quiet_overlay_refresh()) return;
         (void)apply_pending_viewport_resize();
+        if (alive.expired()) return;
         if (!overlay_state_->entries.empty()) {
             prepare_overlay_layout();
+            if (alive.expired()) return;
             enforce_new_modal_capture_barrier(platform);
         }
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
@@ -401,7 +468,10 @@ private:
     [[nodiscard]] bool prepare_scene_paint(PlatformServices& platform,
                                            bool& requires_full_repaint) {
         if (!scene_partial_paint_supported() || scene_paint_blocked()) return false;
+        const std::weak_ptr<void> alive = lifetime_;
+        if (!flush_quiet_overlay_refresh()) return false;
         const bool resized = apply_pending_viewport_resize();
+        if (alive.expired()) return false;
         tree_.prepare_scene_paint(platform, requires_full_repaint);
         requires_full_repaint = requires_full_repaint || resized;
         return true;
@@ -410,6 +480,7 @@ private:
     bool apply_pending_viewport_resize() {
         if (!pending_viewport_resize_valid_) return false;
 
+        const std::weak_ptr<void> alive = lifetime_;
         const Size previous = viewport_;
         const Size requested = pending_viewport_resize_;
         pending_viewport_resize_valid_ = false;
@@ -417,9 +488,15 @@ private:
         try {
             prepare_overlay_layout();
         } catch (...) {
+            if (alive.expired()) throw;
             viewport_ = previous;
-            pending_viewport_resize_ = requested;
-            pending_viewport_resize_valid_ = true;
+            // A callback may have requested a newer viewport before throwing.
+            // Keep that request; restore the attempted one only when no newer
+            // work exists. Geometry remains rolled back until the next frame.
+            if (!pending_viewport_resize_valid_) {
+                pending_viewport_resize_ = requested;
+                pending_viewport_resize_valid_ = true;
+            }
             throw;
         }
         return true;
@@ -483,6 +560,27 @@ private:
     friend debug::InspectorSnapshot debug::inspector_snapshot(UI& ui);
 #endif
 
+    friend class Toast;
+    [[nodiscard]] bool toast_owner_active() const noexcept {
+        return tree_.active_ && !toast_deactivating_;
+    }
+    [[nodiscard]] bool toast_owner_available() const noexcept {
+        return toast_owner_active() && !tree_.lifecycle_transition_active();
+    }
+    void register_lifecycle_observer(std::weak_ptr<detail::UILifecycleObserver> observer) {
+        std::erase_if(lifecycle_observers_, [](const auto& weak) { return weak.expired(); });
+        lifecycle_observers_.push_back(std::move(observer));
+    }
+    [[nodiscard]] bool flush_quiet_overlay_refresh() {
+        const auto state = overlay_state_;
+        if (!state || !state->quiet_structure_refresh) return true;
+        const std::weak_ptr<void> alive = lifetime_;
+        state->quiet_structure_refresh = false;
+        try { state->invalidate_structure(); }
+        catch (...) { state->quiet_structure_refresh = true; throw; }
+        return !alive.expired();
+    }
+
     struct PendingOverlayCommand final {
         NodeId source_id{kInvalidNodeId};
         detail::OverlayComponentCommand command;
@@ -498,6 +596,30 @@ private:
             if (auto* found = find_node(*child, id)) return found;
         }
         return nullptr;
+    }
+
+    [[nodiscard]] bool anchor_session_valid(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return !policy || policy->overlay_session_valid();
+    }
+
+    [[nodiscard]] bool anchor_handles_escape(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->overlay_handles_escape();
+    }
+
+    [[nodiscard]] bool anchor_observes_user_close(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->overlay_observes_user_close();
     }
 
     [[nodiscard]] bool anchor_dismisses_on_tab(NodeId id) const noexcept {
@@ -529,10 +651,14 @@ private:
         // completed pointer press. Keeping the ordinary PointerMove/Right-key
         // path entirely free of component discovery preserves the T051 dispatch
         // budget while command ownership stays per-view and UI-thread confined.
-        if (event.type == InputType::PointerUp) return true;
+        if (event.type == InputType::Tick) return true;
+        if (event.type == InputType::PointerUp || event.type == InputType::TextInput ||
+            event.type == InputType::Composition || event.type == InputType::Command) return true;
         if (event.type == InputType::KeyUp) return event.key == Key::Space;
         if (event.type != InputType::KeyDown) return false;
-        return event.key == Key::Down || event.key == Key::Enter || event.key == Key::Space;
+        return event.key == Key::Left || event.key == Key::Right ||
+            event.key == Key::Down || event.key == Key::Up || event.key == Key::Enter ||
+            event.key == Key::Space || event.key == Key::Escape || event.key == Key::Tab;
     }
 
     [[nodiscard]] Node* focused_node() noexcept {
@@ -545,8 +671,47 @@ private:
 
     [[nodiscard]] NodeId overlay_command_source(const InputEvent& event) noexcept {
         if (!event_may_queue_overlay_command(event)) return kInvalidNodeId;
-        auto* node = focused_node();
-        return node ? node->id : kInvalidNodeId;
+        for (auto* node = focused_node(); node; node = node->parent) {
+            if (Tree::overlay_commands_for(*node)) return node->id;
+        }
+        return kInvalidNodeId;
+    }
+
+    [[nodiscard]] bool process_context_overlay_command(
+        const std::vector<NodeId>& sources, PlatformServices& platform) {
+        if (overlay_command_retry_) {
+            return process_component_overlay_command(kInvalidNodeId, platform, true, true);
+        }
+        const std::weak_ptr<int> owner_lifetime = lifetime_;
+        for (const auto id : sources) {
+            if (!tree_.root_) break;
+            auto* node = find_node(*tree_.root_, id);
+            if (!node) continue;
+            auto* source = Tree::overlay_commands_for(*node);
+            if (!source || !source->has_pending_overlay_command()) continue;
+            auto command = source->take_overlay_command();
+            if (owner_lifetime.expired()) return false;
+            // Legacy sources conservatively report pending. An empty child
+            // must not hide the contextual ancestor that accepted this event.
+            if (!command) continue;
+            return process_component_overlay_command(
+                id, platform, true, true, std::move(command));
+        }
+        return true;
+    }
+    [[nodiscard]] std::optional<Rect> component_overlay_anchor_bounds(NodeId id) const noexcept {
+        if (!tree_.root_) return {};
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return {};
+        if (auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get())) {
+            if (const auto bounds = policy->overlay_anchor_bounds()) {
+                if (!std::isfinite(bounds->x) || !std::isfinite(bounds->y) ||
+                    !std::isfinite(bounds->w) || !std::isfinite(bounds->h) ||
+                    bounds->w < 0 || bounds->h < 0) return {};
+                return bounds;
+            }
+        }
+        return tree_.overlay_anchor_bounds(id);
     }
 
     [[nodiscard]] std::optional<detail::OverlayComponentCommand>
@@ -554,7 +719,7 @@ private:
         if (source_id == kInvalidNodeId || !tree_.root_) return std::nullopt;
         auto* node = find_node(*tree_.root_, source_id);
         if (!node) return std::nullopt;
-        auto* source = dynamic_cast<detail::OverlayCommandSource*>(node->component.get());
+        auto* source = Tree::overlay_commands_for(*node);
         if (!source) return std::nullopt;
         return source->take_overlay_command();
     }
@@ -562,6 +727,13 @@ private:
     [[nodiscard]] bool node_is_focused(NodeId id) noexcept {
         const auto* node = focused_node();
         return node && node->id == id;
+    }
+
+    [[nodiscard]] bool node_contains_focus(NodeId id) noexcept {
+        for (const auto* node = focused_node(); node; node = node->parent) {
+            if (node->id == id) return true;
+        }
+        return false;
     }
 
     [[nodiscard]] bool guarded_anchor_allows_commit(
@@ -576,18 +748,23 @@ private:
     }
 
     [[nodiscard]] bool process_component_overlay_command(
-        NodeId source_id, PlatformServices& platform) {
+        NodeId source_id, PlatformServices& platform, bool checkpoint_prepared = false,
+        bool context_request = false,
+        std::optional<detail::OverlayComponentCommand> captured_command = std::nullopt) {
         // This control block is independent of the UI object's storage. Any
         // callback below may synchronously delete this UI; after expiration the
         // only legal continuation is to return to dispatch using local values.
         std::weak_ptr<int> owner_lifetime = lifetime_;
+        const auto overlay_state = overlay_state_;
 
         std::optional<PendingOverlayCommand> pending;
         if (overlay_command_retry_) {
             pending.emplace(std::move(*overlay_command_retry_));
             overlay_command_retry_.reset();
         } else {
-            auto command = take_overlay_command(source_id);
+            auto command = captured_command
+                ? std::move(captured_command) : take_overlay_command(source_id);
+            if (owner_lifetime.expired()) return false;
             if (!command) return true;
             pending.emplace(PendingOverlayCommand{source_id, std::move(*command)});
         }
@@ -598,7 +775,8 @@ private:
         if (command.kind == detail::OverlayComponentCommandKind::Show) {
             auto on_shown = std::move(command.on_shown);
             const bool suppress_when_read_only = anchor_dismisses_when_read_only(source_id);
-            const bool source_still_valid = node_is_focused(source_id) &&
+            const bool source_still_valid = (context_request || node_contains_focus(source_id)) &&
+                anchor_session_valid(source_id) &&
                 guarded_anchor_allows_commit(source_id, suppress_when_read_only);
             if (!source_still_valid) {
                 // Application-supplied option/item providers may mutate retained
@@ -620,11 +798,12 @@ private:
                 // exception.
                 auto failure = std::current_exception();
                 try {
-                    if (on_shown) on_shown({});
+                    if (!owner_lifetime.expired() && on_shown) on_shown({});
                 } catch (...) {
                 }
                 std::rethrow_exception(failure);
             }
+            if (owner_lifetime.expired()) return false;
 
             // Preserve the T035 publication point before retained focus
             // reconciliation. ComboBox/PopupMenu opener suppression depends on
@@ -636,19 +815,20 @@ private:
                 // Retained preparation is still fallible after publication. On
                 // failure, revoke this exact popup and acknowledge an invalid
                 // handle below so opener/session state returns to retryable.
-                prepare_overlay_layout();
+                prepare_overlay_layout(checkpoint_prepared);
             } catch (...) {
                 auto failure = std::current_exception();
-                (void)overlay_state_->close_noexcept(handle);
+                (void)overlay_state->close_noexcept(handle);
                 try {
-                    if (on_shown) on_shown({});
+                    if (!owner_lifetime.expired() && on_shown) on_shown({});
                 } catch (...) {
                 }
                 std::rethrow_exception(failure);
             }
+            if (owner_lifetime.expired()) return false;
 
             enforce_new_modal_capture_barrier(platform);
-            return true;
+            return !owner_lifetime.expired();
         }
 
         const auto guard_anchor = command.guard_anchor;
@@ -660,12 +840,15 @@ private:
         // step fails, a later outer dispatch retries the same command; the
         // application callback has not begun and therefore cannot run twice.
         try {
-            (void)overlay_state_->close_reconciled(
-                command.handle, [this] { prepare_overlay_layout(); });
+            (void)overlay_state->close_reconciled(
+                command.handle, [this, owner_lifetime, checkpoint_prepared] {
+                    if (!owner_lifetime.expired()) prepare_overlay_layout(checkpoint_prepared);
+                });
         } catch (...) {
-            overlay_command_retry_.emplace(std::move(*pending));
+            if (!owner_lifetime.expired()) overlay_command_retry_.emplace(std::move(*pending));
             throw;
         }
+        if (owner_lifetime.expired()) return false;
 
         const bool allowed = guarded_anchor_allows_commit(
             guard_anchor, suppress_when_read_only);
@@ -678,16 +861,24 @@ private:
         // The application callback may invalidate dynamic composition, remove
         // its anchor or open another T061 overlay directly. Failures from this
         // point must not requeue the callback because it may already have run.
-        prepare_overlay_layout();
+        prepare_overlay_layout(checkpoint_prepared);
+        if (owner_lifetime.expired()) return false;
         enforce_new_modal_capture_barrier(platform);
-        return true;
+        return !owner_lifetime.expired();
     }
 
     EventResult dispatch_tree_dialog_safe(
-        const InputEvent& event, PlatformServices& platform) {
+        const InputEvent& event, PlatformServices& platform, std::vector<NodeId>* context_route = nullptr) {
+        struct RouteScope {
+            Tree& tree;
+            std::vector<NodeId>* previous;
+            bool installed;
+            ~RouteScope() noexcept { if (installed) tree.context_overlay_route_ = previous; }
+        } route_scope{tree_, tree_.context_overlay_route_, context_route != nullptr};
+        if (context_route) tree_.context_overlay_route_ = context_route;
         const auto depth_before = tree_.dispatch_depth_;
         try {
-            return tree_.dispatch(event, platform);
+            return tree_.dispatch_prepared(event, platform, true);
         } catch (...) {
             // T131 must not let a propagated Dialog close failure poison future
             // completion by leaving Tree's dispatch-depth bookkeeping elevated.
@@ -811,8 +1002,8 @@ private:
             if (!entry.spec.anchor) continue;
 
             const auto availability = tree_.component_availability(*entry.spec.anchor);
-            const auto bounds = tree_.overlay_anchor_bounds(*entry.spec.anchor);
-            if (!availability || !bounds ||
+            const auto bounds = component_overlay_anchor_bounds(*entry.spec.anchor);
+            if (!availability || !bounds || !anchor_session_valid(*entry.spec.anchor) ||
                 availability->visibility != VisibilityMode::Visible ||
                 (!availability->enabled &&
                  anchor_dismisses_when_disabled(*entry.spec.anchor)) ||
@@ -829,15 +1020,16 @@ private:
         }
 
         for (const auto id : stale) {
-            changed = overlay_state_->close_id(id) || changed;
+            changed = overlay_state_->close_id(id, OverlayCloseReason::AnchorUnavailable) || changed;
         }
 
         if (changed) tree_.invalidate_layout();
         return changed;
     }
 
-    void prepare_overlay_layout() {
+    void prepare_overlay_layout(bool checkpoint_prepared = false) {
         if (tree_.lifecycle_transition_active()) return;
+        if (!flush_quiet_overlay_refresh()) return;
         // First pass makes root/anchor geometry authoritative for this viewport
         // and flushes pending T058 structural mutations. The overlay-specific
         // layout path deliberately skips a redundant recursive measurement of
@@ -845,8 +1037,9 @@ private:
         // size. A changed/missing anchor then invalidates overlay placement or
         // closes the overlay; the second pass consumes that update before input
         // or paint observes it.
-        tree_.layout_overlay_viewport(viewport_);
-        if (synchronize_overlay_anchors()) tree_.layout_overlay_viewport(viewport_);
+        if (!checkpoint_prepared || !tree_.input_geometry_is_rolled_back())
+            tree_.layout_overlay_viewport(viewport_, checkpoint_prepared);
+        if (synchronize_overlay_anchors()) tree_.layout_overlay_viewport(viewport_, true);
     }
 
     void close_anchored_overlays() {
@@ -887,6 +1080,8 @@ private:
     std::shared_ptr<detail::OverlayState> overlay_state_;
     OverlayPresenter overlay_presenter_;
     Tree tree_;
+    std::vector<std::weak_ptr<detail::UILifecycleObserver>> lifecycle_observers_;
+    bool toast_deactivating_{};
     Size viewport_{};
     Size pending_viewport_resize_{};
     bool pending_viewport_resize_valid_{};

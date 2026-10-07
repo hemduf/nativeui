@@ -36,9 +36,9 @@ accessibility, VoiceOver, or any OS accessibility actions.
   callbacks. Sessions sharing one State remain independent.
 
 Reentrant begin/update/set/finish calls during a callback are rejected. Beginning
-or updating an edit from inside an already-running notification of its State is
+or updating an edit from inside an already-running notification or guarded read of its State is
 also rejected: State defers such writes, so an edit cannot truthfully report a
-synchronous committed value there. Schedule such edits after the notification.
+synchronous committed value there. Schedule such edits after the notification or read completes.
 Reentrant end/cancel requests are deferred until the callback returns; cancel
 wins. A throwing begin/change/State observer cancels once, restores session
 bookkeeping, then rethrows the original error. A throwing terminal callback is

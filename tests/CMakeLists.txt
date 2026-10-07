@@ -1,6 +1,20 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(NATIVEUI_BUILD_TESTS)
+  set(_nativeui_icu_test_dir "${CMAKE_CURRENT_BINARY_DIR}/icu-runtime-contract")
+  add_test(NAME nativeui_skia_icu_runtime_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      "-DTEST_DIR=${_nativeui_icu_test_dir}"
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DBUILD_PACKAGE_DIR=${CMAKE_BINARY_DIR}/nativeui-package"
+      "-DINSTALL_CMAKE_DIR=${NATIVEUI_INSTALL_CMAKE_DIR}"
+      "-DCONFIG=$<CONFIG>"
+      "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/skia_icu_runtime_tests.cmake")
+  set_tests_properties(nativeui_skia_icu_runtime_tests PROPERTIES
+    LABELS "build;cmake;skia;unicode;runtime" RUN_SERIAL TRUE TIMEOUT 600)
   add_test(NAME nativeui_pugl_keyboard_contract_tests
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -165,6 +179,7 @@ if(NATIVEUI_BUILD_TESTS)
   function(nativeui_add_core_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE NativeUI::Core)
+    nativeui_attach_runtime_data(TARGET ${name})
     nativeui_enable_project_warnings(${name})
     nativeui_enable_sanitizers(${name})
     add_test(NAME ${name} COMMAND ${name})
@@ -186,7 +201,9 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_dispatcher_edge_tests ${PROJECT_SOURCE_DIR}/tests/dispatcher_edge_tests.cpp)
   nativeui_add_core_test(nativeui_state_tests ${PROJECT_SOURCE_DIR}/tests/state_tests.cpp)
   nativeui_add_core_test(nativeui_edit_session_tests ${PROJECT_SOURCE_DIR}/tests/edit_session_tests.cpp)
+  nativeui_add_core_test(nativeui_edit_read_transaction_tests ${PROJECT_SOURCE_DIR}/tests/edit_read_transaction_tests.cpp)
   nativeui_add_core_test(nativeui_widget_edit_tests ${PROJECT_SOURCE_DIR}/tests/widget_edit_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_edit_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_edit_retirement_tests.cpp)
   nativeui_add_core_test(nativeui_component_state_tests ${PROJECT_SOURCE_DIR}/tests/component_state_tests.cpp)
   nativeui_add_core_test(nativeui_focus_tests ${PROJECT_SOURCE_DIR}/tests/focus_tests.cpp)
   nativeui_add_core_test(nativeui_routing_tests ${PROJECT_SOURCE_DIR}/tests/routing_tests.cpp)
@@ -349,9 +366,9 @@ if(NATIVEUI_BUILD_TESTS)
     NATIVEUI_ENABLE_TEST_SEAMS=1
   )
   target_link_libraries(nativeui_scalar_source_source_tests PRIVATE
-    SkiaBuilder::svg
     NativeUI::Core
   )
+  nativeui_attach_runtime_data(TARGET nativeui_scalar_source_source_tests)
   nativeui_enable_project_warnings(nativeui_scalar_source_source_tests)
   nativeui_enable_sanitizers(nativeui_scalar_source_source_tests)
   add_test(NAME nativeui_scalar_source_source_tests COMMAND nativeui_scalar_source_source_tests)
@@ -520,6 +537,7 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_t032_slider_completion_tests ${PROJECT_SOURCE_DIR}/tests/t032_slider_completion_tests.cpp)
   nativeui_add_core_test(nativeui_t032_slider_visual_tests ${PROJECT_SOURCE_DIR}/tests/t032_slider_visual_tests.cpp)
   nativeui_add_core_test(nativeui_text_input_tests ${PROJECT_SOURCE_DIR}/tests/text_input_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_text_input_key_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_text_input_key_retirement_tests.cpp)
   nativeui_add_core_test(nativeui_t095_scene_extent_tests ${PROJECT_SOURCE_DIR}/tests/t095_scene_extent_tests.cpp)
   target_include_directories(nativeui_t095_scene_extent_tests PRIVATE
     "${PROJECT_SOURCE_DIR}"
@@ -761,9 +779,164 @@ if(NATIVEUI_BUILD_TESTS)
     endif()
   endif()
 
+  nativeui_add_core_test(nativeui_widget_layout_extraction_tests ${PROJECT_SOURCE_DIR}/tests/widget_layout_extraction_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_controls_extraction_tests ${PROJECT_SOURCE_DIR}/tests/widget_controls_extraction_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_leaf_tests ${PROJECT_SOURCE_DIR}/tests/widget_leaf_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_core_contract_tests ${PROJECT_SOURCE_DIR}/tests/widget_core_contract_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_radio_extraction_tests ${PROJECT_SOURCE_DIR}/tests/widget_radio_extraction_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_button_variants_tests ${PROJECT_SOURCE_DIR}/tests/widget_button_variants_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_toggle_button_tests ${PROJECT_SOURCE_DIR}/tests/widget_toggle_button_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_padding_extents_tests ${PROJECT_SOURCE_DIR}/tests/widget_padding_extents_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_split_view_tests ${PROJECT_SOURCE_DIR}/tests/widget_split_view_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_stepper_tests ${PROJECT_SOURCE_DIR}/tests/widget_stepper_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_unicode_tests ${PROJECT_SOURCE_DIR}/tests/widget_unicode_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_icon_view_tests ${PROJECT_SOURCE_DIR}/tests/widget_icon_view_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_avatar_tests ${PROJECT_SOURCE_DIR}/tests/widget_avatar_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_link_tests ${PROJECT_SOURCE_DIR}/tests/widget_link_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_rating_tests ${PROJECT_SOURCE_DIR}/tests/widget_rating_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_collapsible_tests ${PROJECT_SOURCE_DIR}/tests/widget_collapsible_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_accordion_tests ${PROJECT_SOURCE_DIR}/tests/widget_accordion_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_extended_commands_tests ${PROJECT_SOURCE_DIR}/tests/widget_extended_commands_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_lexical_policy_tests ${PROJECT_SOURCE_DIR}/tests/widget_lexical_policy_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_wrapper_baseline_tests ${PROJECT_SOURCE_DIR}/tests/widget_wrapper_baseline_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_text_input_capture_tests ${PROJECT_SOURCE_DIR}/tests/widget_text_input_capture_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_stepper_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_stepper_retirement_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_focus_reason_tests ${PROJECT_SOURCE_DIR}/tests/widget_focus_reason_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_measurement_passes_tests ${PROJECT_SOURCE_DIR}/tests/widget_measurement_passes_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_tabs_extraction_tests ${PROJECT_SOURCE_DIR}/tests/widget_tabs_extraction_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_text_input_policy_tests ${PROJECT_SOURCE_DIR}/tests/widget_text_input_policy_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_number_input_tests ${PROJECT_SOURCE_DIR}/tests/widget_number_input_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_number_parse_tests ${PROJECT_SOURCE_DIR}/tests/widget_number_parse_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_search_field_tests ${PROJECT_SOURCE_DIR}/tests/widget_search_field_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_composite_initial_actions_tests ${PROJECT_SOURCE_DIR}/tests/widget_composite_initial_actions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_editable_text_tests ${PROJECT_SOURCE_DIR}/tests/widget_editable_text_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_find_bar_tests ${PROJECT_SOURCE_DIR}/tests/widget_find_bar_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_input_transactions_tests ${PROJECT_SOURCE_DIR}/tests/widget_input_transactions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_dynamic_remount_tests ${PROJECT_SOURCE_DIR}/tests/widget_dynamic_remount_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_semantic_fault_tests ${PROJECT_SOURCE_DIR}/tests/widget_semantic_fault_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_descendant_actions_tests ${PROJECT_SOURCE_DIR}/tests/widget_descendant_actions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_dynamic_extraction_tests ${PROJECT_SOURCE_DIR}/tests/widget_dynamic_extraction_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_retained_checkpoint_tests ${PROJECT_SOURCE_DIR}/tests/widget_retained_checkpoint_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_disclosure_faults_tests ${PROJECT_SOURCE_DIR}/tests/widget_disclosure_faults_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_split_callback_faults_tests ${PROJECT_SOURCE_DIR}/tests/widget_split_callback_faults_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_composition_contract_tests ${PROJECT_SOURCE_DIR}/tests/widget_composition_contract_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_svg_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_svg_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_spinner_tests ${PROJECT_SOURCE_DIR}/tests/widget_spinner_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_grid_spans_tests ${PROJECT_SOURCE_DIR}/tests/widget_grid_spans_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_knob_lifetime_tests ${PROJECT_SOURCE_DIR}/tests/widget_knob_lifetime_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_progress_activity_tests ${PROJECT_SOURCE_DIR}/tests/widget_progress_activity_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_timing_context_tests ${PROJECT_SOURCE_DIR}/tests/widget_timing_context_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_header_linkage_tests ${PROJECT_SOURCE_DIR}/tests/widget_header_linkage_tests.cpp)
+  target_sources(nativeui_widget_header_linkage_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/tests/widget_header_linkage_a.cpp
+    ${PROJECT_SOURCE_DIR}/tests/widget_header_linkage_b.cpp)
+
+  nativeui_add_core_test(nativeui_widget_list_view_extraction_tests ${PROJECT_SOURCE_DIR}/tests/widget_list_view_extraction_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_form_fields_tests ${PROJECT_SOURCE_DIR}/tests/widget_form_fields_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_radio_semantic_copy_tests ${PROJECT_SOURCE_DIR}/tests/widget_radio_semantic_copy_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_overlay_ancestor_commands_tests ${PROJECT_SOURCE_DIR}/tests/widget_overlay_ancestor_commands_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_state_key_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_state_key_retirement_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_form_callback_copy_tests ${PROJECT_SOURCE_DIR}/tests/widget_form_callback_copy_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_value_publication_tests ${PROJECT_SOURCE_DIR}/tests/widget_value_publication_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_style_scope_contract_tests ${PROJECT_SOURCE_DIR}/tests/widget_style_scope_contract_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_state_revision_tests ${PROJECT_SOURCE_DIR}/tests/widget_state_revision_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_state_owned_transactions_tests ${PROJECT_SOURCE_DIR}/tests/widget_state_owned_transactions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_tooltip_extensions_tests ${PROJECT_SOURCE_DIR}/tests/widget_tooltip_extensions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_dialog_extensions_tests ${PROJECT_SOURCE_DIR}/tests/widget_dialog_extensions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_checkbox_group_tests ${PROJECT_SOURCE_DIR}/tests/widget_checkbox_group_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_virtual_list_isolation_tests ${PROJECT_SOURCE_DIR}/tests/widget_virtual_list_isolation_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_virtual_list_row_faults_tests ${PROJECT_SOURCE_DIR}/tests/widget_virtual_list_row_faults_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_scroll_metrics_access_tests ${PROJECT_SOURCE_DIR}/tests/widget_scroll_metrics_access_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_layout_structural_publication_tests ${PROJECT_SOURCE_DIR}/tests/widget_layout_structural_publication_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_style_scope_binding_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_style_scope_binding_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_state_snapshot_copy_retirement_tests ${PROJECT_SOURCE_DIR}/tests/widget_state_snapshot_copy_retirement_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_reactivation_tests ${PROJECT_SOURCE_DIR}/tests/widget_reactivation_tests.cpp)
+
+
+  nativeui_add_core_test(nativeui_widget_autocomplete_tests ${PROJECT_SOURCE_DIR}/tests/widget_autocomplete_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_suggestions_generation_tests ${PROJECT_SOURCE_DIR}/tests/widget_suggestions_generation_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_combo_box_reentrancy_tests ${PROJECT_SOURCE_DIR}/tests/widget_combo_box_reentrancy_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_combo_box_tests ${PROJECT_SOURCE_DIR}/tests/widget_combo_box_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_editable_combo_box_tests ${PROJECT_SOURCE_DIR}/tests/widget_editable_combo_box_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_suggestions_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_suggestions_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_color_picker_tests ${PROJECT_SOURCE_DIR}/tests/widget_color_picker_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_color_well_tests ${PROJECT_SOURCE_DIR}/tests/widget_color_well_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_time_input_tests ${PROJECT_SOURCE_DIR}/tests/widget_time_input_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_token_field_tests ${PROJECT_SOURCE_DIR}/tests/widget_token_field_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_value_widgets_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_value_widgets_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_value_widgets_boundary_tests ${PROJECT_SOURCE_DIR}/tests/widget_value_widgets_boundary_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_calendar_tests ${PROJECT_SOURCE_DIR}/tests/widget_calendar_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_value_widgets_read_only_tests ${PROJECT_SOURCE_DIR}/tests/widget_value_widgets_read_only_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_date_input_tests ${PROJECT_SOURCE_DIR}/tests/widget_date_input_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_history_button_tests ${PROJECT_SOURCE_DIR}/tests/widget_history_button_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_breadcrumbs_tests ${PROJECT_SOURCE_DIR}/tests/widget_breadcrumbs_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_virtual_semantic_geometry_tests ${PROJECT_SOURCE_DIR}/tests/widget_virtual_semantic_geometry_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_context_menu_core_tests ${PROJECT_SOURCE_DIR}/tests/widget_context_menu_core_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_popup_menu_legacy_tests ${PROJECT_SOURCE_DIR}/tests/widget_popup_menu_legacy_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_popup_menu_tests ${PROJECT_SOURCE_DIR}/tests/widget_popup_menu_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_context_menu_tests ${PROJECT_SOURCE_DIR}/tests/widget_context_menu_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_menu_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_menu_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_menu_boundaries_tests ${PROJECT_SOURCE_DIR}/tests/widget_menu_boundaries_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_collection_model_tests ${PROJECT_SOURCE_DIR}/tests/widget_collection_model_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_collection_tree_graph_tests ${PROJECT_SOURCE_DIR}/tests/widget_collection_tree_graph_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_collection_views_tests ${PROJECT_SOURCE_DIR}/tests/widget_collection_views_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_roving_focus_transactions_tests ${PROJECT_SOURCE_DIR}/tests/widget_roving_focus_transactions_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_shaped_text_backend_tests ${PROJECT_SOURCE_DIR}/tests/widget_shaped_text_backend_tests.cpp)
+  target_include_directories(nativeui_widget_shaped_text_backend_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+  nativeui_add_core_test(nativeui_widget_collection_publication_tests ${PROJECT_SOURCE_DIR}/tests/widget_collection_publication_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_collection_transactions_tests ${PROJECT_SOURCE_DIR}/tests/widget_collection_transactions_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_overlay_bottom_center_tests ${PROJECT_SOURCE_DIR}/tests/widget_overlay_bottom_center_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_roving_group_admission_tests ${PROJECT_SOURCE_DIR}/tests/widget_roving_group_admission_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_rich_text_tests ${PROJECT_SOURCE_DIR}/tests/widget_rich_text_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_rich_text_layout_tests ${PROJECT_SOURCE_DIR}/tests/widget_rich_text_layout_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_rich_text_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_rich_text_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_rich_text_paint_tests ${PROJECT_SOURCE_DIR}/tests/widget_rich_text_paint_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_sidebar_tests ${PROJECT_SOURCE_DIR}/tests/widget_sidebar_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_popover_overlay_seam_tests ${PROJECT_SOURCE_DIR}/tests/widget_popover_overlay_seam_tests.cpp)
+  target_include_directories(nativeui_widget_rich_text_layout_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_include_directories(nativeui_widget_rich_text_recovery_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  target_include_directories(nativeui_widget_rich_text_paint_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+  nativeui_add_core_test(nativeui_widget_list_owned_selection_adapter_tests ${PROJECT_SOURCE_DIR}/tests/widget_list_owned_selection_adapter_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_tabs_owned_selection_adapter_tests ${PROJECT_SOURCE_DIR}/tests/widget_tabs_owned_selection_adapter_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_group_button_style_tests ${PROJECT_SOURCE_DIR}/tests/widget_group_button_style_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_sidebar_publication_tests ${PROJECT_SOURCE_DIR}/tests/widget_sidebar_publication_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_popover_tests ${PROJECT_SOURCE_DIR}/tests/widget_popover_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_rich_text_contact_generation_tests ${PROJECT_SOURCE_DIR}/tests/widget_rich_text_contact_generation_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_popover_close_revision_tests ${PROJECT_SOURCE_DIR}/tests/widget_popover_close_revision_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_focus_group_revision_tests ${PROJECT_SOURCE_DIR}/tests/widget_focus_group_revision_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_toggle_group_tests ${PROJECT_SOURCE_DIR}/tests/widget_toggle_group_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_segmented_control_tests ${PROJECT_SOURCE_DIR}/tests/widget_segmented_control_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_toolbar_tests ${PROJECT_SOURCE_DIR}/tests/widget_toolbar_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_toast_tests ${PROJECT_SOURCE_DIR}/tests/widget_toast_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_toast_overlay_seam_tests ${PROJECT_SOURCE_DIR}/tests/widget_toast_overlay_seam_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_toast_recovery_tests ${PROJECT_SOURCE_DIR}/tests/widget_toast_recovery_tests.cpp)
+  nativeui_add_core_test(nativeui_widget_toast_quiet_paint_tests ${PROJECT_SOURCE_DIR}/tests/widget_toast_quiet_paint_tests.cpp)
+
+  nativeui_add_core_test(nativeui_widget_toast_close_reentry_tests ${PROJECT_SOURCE_DIR}/tests/widget_toast_close_reentry_tests.cpp)
+
   # Each public header gets its own translation unit so missing direct includes
   # cannot be accidentally masked by umbrella include order.
-  foreach(_header IN ITEMS geometry constraints invalidation input gesture state edit dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise scalar_source svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui)
+  foreach(_header IN ITEMS geometry constraints invalidation input gesture state edit dispatcher desktop_services text_edit text theme path resource embedded_resource resource_manager image shader noise scalar_source svg paint_style paint component component_state command focus layout virtual_list widgets overlay tooltip inspector ui headless window nativeui row column grid scroll scroll_view clip flex spacer stack padding visibility enabled read_only focus_scope command_scope style_scope label header canvas knob toggle button checkbox slider range_slider text_input text_area progress_bar meter divider badge image_view spinner radio_button toggle_button split_view stepper rating collapsible accordion icon_view avatar link if switch for_each tabs number_input search_field editable_text find_bar list_view form field fieldset dialog checkbox_group autocomplete combo_box editable_combo_box time_input color_well color_picker date_input calendar token_field history_button breadcrumbs popup_menu context_menu collection_model tree_view outline_view grid_view table_view outline_table_view rich_text sidebar popover toast toggle_group segmented_control toolbar)
     add_library(nativeui_header_${_header}_compile OBJECT ${PROJECT_SOURCE_DIR}/tests/headers/${_header}.cpp)
     target_link_libraries(nativeui_header_${_header}_compile PRIVATE NativeUI::Core)
     nativeui_enable_project_warnings(nativeui_header_${_header}_compile)

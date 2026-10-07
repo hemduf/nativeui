@@ -3,10 +3,17 @@
     }
 
     [[nodiscard]] std::optional<SemanticInfo> component_semantics(NodeId id) const noexcept {
-        if (!root_) return std::nullopt;
-        const auto* node = find_node(*root_, id);
-        if (!node) return std::nullopt;
-        return node->component->semantics();
+        try {
+            SemanticOperationScope guard{*const_cast<Tree*>(this)};
+            if (!root_) return std::nullopt;
+            auto* node = find_node_mutable(*root_, id);
+            if (!node) return std::nullopt;
+            return const_cast<Tree*>(this)->decorated_component_semantics(*node);
+        } catch (...) {
+            // Keep the historic diagnostic API noexcept. A failed projection
+            // is unavailable for this read and can recover on a later read.
+            return std::nullopt;
+        }
     }
 
     /// Per-UI global dismissal for transient retained presentations (for

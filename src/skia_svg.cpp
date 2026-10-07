@@ -1,8 +1,12 @@
 #include <nativeui/image.hpp>
 #include <nativeui/paint.hpp>
 #include <nativeui/svg.hpp>
+#include "detail/widget_svg_tint.hpp"
 
 #include "include/core/SkCanvas.h"
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkColorFilter.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkStream.h"
 #include "modules/svg/include/SkSVGDOM.h"
 
@@ -10,6 +14,7 @@
 #include <cmath>
 #include <locale>
 #include <memory>
+#include <new>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -25,6 +30,9 @@ struct SvgData {
 };
 
 struct SvgAccess {
+    static void after_transform(Painter& painter) {
+        painter.maybe_fail_layer(Painter::LayerFaultPoint::AfterSvgTransform);
+    }
     [[nodiscard]] static const std::shared_ptr<const SvgData>& data(const SvgIcon& icon) noexcept {
         return icon.data_;
     }
@@ -157,13 +165,32 @@ void draw_svg(Painter& painter, const SvgIcon& icon, Rect destination) {
     const float offset_y = (destination.h - rendered_h) * 0.5f;
 
     auto& canvas = painter.canvas();
-    canvas.save();
+    const SkAutoCanvasRestore restore{&canvas, true};
     canvas.clipRect(SkRect::MakeXYWH(
         destination.x, destination.y, destination.w, destination.h));
     canvas.translate(destination.x + offset_x, destination.y + offset_y);
     canvas.scale(scale, scale);
+    SvgAccess::after_transform(painter);
     data->dom->render(&canvas);
-    canvas.restore();
+}
+
+void draw_svg_monochrome(Painter& painter, const SvgIcon& icon, Rect destination, Color color) {
+    if (!icon.valid() || !drawable_rect(destination) ||
+        !std::isfinite(color.r) || !std::isfinite(color.g) ||
+        !std::isfinite(color.b) || !std::isfinite(color.a) || color.a <= 0.0f) return;
+    const SkColor4f tint{std::clamp(color.r, 0.0f, 1.0f), std::clamp(color.g, 0.0f, 1.0f),
+                         std::clamp(color.b, 0.0f, 1.0f), std::clamp(color.a, 0.0f, 1.0f)};
+    auto filter = SkColorFilters::Blend(tint, nullptr, SkBlendMode::kSrcIn);
+    if (!filter) throw std::bad_alloc{};
+    SkPaint layer;
+    layer.setColorFilter(std::move(filter));
+    auto& canvas = painter.canvas();
+    const SkAutoCanvasRestore restore{&canvas, true};
+    const auto bounds = SkRect::MakeXYWH(destination.x, destination.y, destination.w, destination.h);
+    canvas.saveLayer(&bounds, &layer);
+    // Filter the composed SVG alpha at restore; the shared DOM retains its
+    // original colors when another view draws it with a different style.
+    draw_svg(painter, icon, destination);
 }
 
 } // namespace ui::detail

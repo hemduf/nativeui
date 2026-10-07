@@ -40,6 +40,8 @@ public:
         std::size_t overscan = 2,
         std::optional<std::size_t> focused_index = std::nullopt,
         std::optional<std::size_t> captured_index = std::nullopt) {
+        const auto generation=model_->generation();
+        const auto revision=revision_;
         const auto range = virtual_list_materialization_range(
             model_->size(), row_height_, scroll_y, viewport_height, overscan);
         if (!range) return false;
@@ -59,6 +61,7 @@ public:
             if (!encoded_key || !item) return false;
 
             const std::string retained_key = "virtual-list:" + *encoded_key;
+            const Item owned_item=*item;
             const auto existing = std::find_if(
                 items_.begin(), items_.end(), [&](const MaterializedItem& materialized) {
                     return materialized.key == retained_key;
@@ -68,16 +71,19 @@ public:
             if (existing != items_.end()) {
                 payload = existing->payload;
             } else {
-                payload = std::make_shared<const Payload>(payload_factory_(*item));
+                payload = std::make_shared<const Payload>(payload_factory_(owned_item));
+                if (model_->generation()!=generation || revision_!=revision) return false;
             }
 
             next_keys.push_back(retained_key);
             next_items.push_back(MaterializedItem{retained_key, index, std::move(payload)});
         }
 
+        if (model_->generation()!=generation || revision_!=revision) return false;
         indices_ = *next_indices;
         keys_ = std::move(next_keys);
         items_ = std::move(next_items);
+        ++revision_;
         return true;
     }
 
@@ -100,6 +106,7 @@ private:
     std::vector<std::size_t> indices_;
     std::vector<std::string> keys_;
     std::vector<MaterializedItem> items_;
+    std::uint64_t revision_{};
 };
 
 } // namespace ui::detail

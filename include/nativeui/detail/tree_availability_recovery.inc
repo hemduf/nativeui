@@ -70,10 +70,15 @@
 
                 while (const auto pointer = find_pointer_capture_if(
                            [&](Node* capture) {
-                               return !pending_availability_for(pending, capture).interactive();
+                               const auto next = pending_availability_for(pending, capture);
+                               return !next.interactive() ||
+                                   (next.read_only &&
+                                    !capture->component->effective_read_only() &&
+                                    capture->component->cancel_capture_on_read_only());
                            })) {
                     InputEvent cancel{};
                     cancel.pointer.id = *pointer;
+                    cancel.cancel_reason = PointerCancelReason::Unavailable;
                     (void)cancel_pointer_capture(platform, cancel);
                     if (availability_structure_dirty_) break;
                 }
@@ -91,7 +96,7 @@
                     if (!pending_availability_for(pending, focused).interactive()) {
                         rehome_scope = trapping_scope_for(focused);
                         focus_needs_rehome = true;
-                        clear_focus(platform);
+                        clear_focus(platform, FocusChangeReason::Unavailable);
                         if (!availability_cleared_focus_) availability_cleared_focus_ = focused;
                     }
                 }
