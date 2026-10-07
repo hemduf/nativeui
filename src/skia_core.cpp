@@ -515,9 +515,7 @@ std::optional<ShapingFontMatch> resolve_shaping_font(
             throw std::invalid_argument("Shaping coverage requires Unicode scalars");
         }
     }
-    // Some platform managers can match a character but expose no default
-    // family. RichText still needs a font for empty-line metrics.
-    const auto first = required_scalars.empty() ? U' ' : required_scalars.front();
+    const auto first = required_scalars.empty() ? U'\0' : required_scalars.front();
     const auto covers = [&](const sk_sp<SkTypeface>& face) {
         return face && std::all_of(required_scalars.begin(), required_scalars.end(),
                                   [&](char32_t scalar) { return has_glyph(face, scalar); });
