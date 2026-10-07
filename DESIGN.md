@@ -312,6 +312,8 @@ Until T186 qualifies those signatures, ambient transforms and nested boundaries
 bypass raster caching; internal transforms and effects rerasterize without
 retention. A cold-only canvas observer detects transforms even when component
 code restores them before returning, without changing the public Painter API.
+Only its source-private adapter is compiled without RTTI to match pinned Skia;
+the retained component runtime keeps its existing RTTI and exception behavior.
 T184 exposes no public cache component; T185 owns the public `CachedLayer` API
 and its public headless-renderer integration.
 

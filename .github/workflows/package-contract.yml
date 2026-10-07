@@ -2,7 +2,7 @@ name: Package Contracts
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/offscreen-subtree-raster-cache]
     paths:
       - '.github/workflows/package-contract.yml'
       - 'CMakeLists.txt'

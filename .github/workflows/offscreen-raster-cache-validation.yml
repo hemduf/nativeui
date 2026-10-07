@@ -77,6 +77,12 @@ jobs:
           -DNATIVEUI_BUILD_EXAMPLES=ON
           -DNATIVEUI_BUILD_FEATURE_EXAMPLES=ON
           -DNATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=ON
+      - name: Build warm allocation contract
+        run: cmake --build build --config Release --target nativeui_render_resource_allocation_tests
+      - name: Test warm allocation contract
+        env:
+          NATIVEUI_TRACE_ALLOCATIONS: '1'
+        run: ctest --test-dir build --output-on-failure -C Release -R '^nativeui_render_resource_allocation_tests$'
       - name: Build
         run: cmake --build build --config Release
       # Hosted Windows runners do not provide a deterministic modern OpenGL

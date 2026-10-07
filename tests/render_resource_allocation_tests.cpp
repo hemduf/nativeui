@@ -4,6 +4,7 @@
 #include "src/detail/shader_brush_access.hpp"
 #include <nativeui/detail/raster_cache_access.hpp>
 #include "render_resource_allocation_probe.hpp"
+#include "render_resource_allocation_canvas.hpp"
 #include "test_support.hpp"
 
 #include "include/core/SkColor.h"
@@ -13,6 +14,7 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <new>
 
 namespace ui {
@@ -356,6 +358,10 @@ struct RasterAllocationState {
     ui::detail::RenderResourceMaterializationContext resources;
     std::size_t creates{};
     std::size_t paints{};
+    std::size_t allocations_before_composition{};
+    sk_sp<SkImage> image;
+    bool inject_allocation{};
+    std::unique_ptr<std::byte[]> injected_allocation;
 };
 
 bool allocation_raster_hook(
@@ -370,10 +376,23 @@ bool allocation_raster_hook(
         .create_surface = [](void* opaque, const SkImageInfo& info) {
             ++static_cast<RasterAllocationState*>(opaque)->creates;
             return SkSurfaces::Raster(info);
+        },
+        .snapshot_surface = [](void* opaque, SkSurface& surface) {
+            auto& fixture = *static_cast<RasterAllocationState*>(opaque);
+            fixture.image = surface.makeImageSnapshot();
+            return fixture.image;
+        },
+        .did_hit = [](void* opaque) noexcept {
+            static_cast<RasterAllocationState*>(opaque)->allocations_before_composition =
+                test::render_resource_allocations::count();
         }};
-    return ui::detail::paint_raster_cache_boundary(
+    const bool painted = ui::detail::paint_raster_cache_boundary(
         state.resources, backend, request, canvas, callback_state,
         paint, validate, commit);
+    if (state.inject_allocation) {
+        state.injected_allocation = std::make_unique<std::byte[]>(64U);
+    }
+    return painted;
 }
 
 void entire_warm_boundary_path_allocates_and_creates_zero() {
@@ -391,21 +410,73 @@ void entire_warm_boundary_path_allocates_and_creates_zero() {
         tree, ui::TreeTestAccess::root_id(tree)));
     auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
     NUI_CHECK(surface);
+    auto canvas = test::make_allocation_observing_canvas(*surface->getCanvas());
     const ui::detail::PainterPrivateHooks hooks{
         &state, nullptr, nullptr, nullptr, nullptr, nullptr,
         &allocation_raster_hook};
 
     state.resources.begin_frame();
-    ui::TreeTestAccess::paint(tree, *surface->getCanvas(), platform, &hooks);
+    ui::TreeTestAccess::paint(tree, *canvas, platform, &hooks);
     state.resources.end_frame();
     NUI_CHECK(state.creates == 1U && state.paints == 1U);
 
     tree.invalidate();
+    surface->getCanvas()->clear(SK_ColorBLUE);
     state.resources.begin_frame();
     std::size_t allocations = 0;
     {
         AllocationScope guard;
-        ui::TreeTestAccess::paint(tree, *surface->getCanvas(), platform, &hooks);
+        ui::TreeTestAccess::paint(tree, *canvas, platform, &hooks);
+        allocations = guard.allocations();
+    }
+    state.resources.end_frame();
+    if (allocations != 0U) {
+        std::cerr << "whole warm Tree allocations=" << allocations
+                  << " before composition=" << state.allocations_before_composition
+                  << '\n';
+        test::render_resource_allocations::print_first_allocation_trace();
+        std::size_t backend_allocations = 0;
+        {
+            AllocationScope guard;
+            auto& backend_canvas = *surface->getCanvas();
+            const SkAutoCanvasRestore restore{&backend_canvas, true};
+            backend_canvas.resetMatrix();
+            backend_canvas.drawImageRect(
+                state.image, SkRect::MakeWH(32.0f, 32.0f),
+                SkSamplingOptions{SkFilterMode::kNearest}, nullptr);
+            backend_allocations = guard.allocations();
+        }
+        std::cerr << "equivalent Skia-only draw allocations=" << backend_allocations << '\n';
+    }
+    NUI_CHECK(allocations == 0U);
+    std::array<unsigned char, 4> pixel{};
+    NUI_CHECK(surface->readPixels(
+        SkImageInfo::Make(1, 1, kRGBA_8888_SkColorType, kPremul_SkAlphaType),
+        pixel.data(), pixel.size(), 16, 16));
+    NUI_CHECK(pixel[0] == 255U && pixel[1] == 0U &&
+              pixel[2] == 0U && pixel[3] == 255U);
+    NUI_CHECK(state.creates == 1U && state.paints == 1U);
+
+    // An allocation after composition must still be visible: the oracle must
+    // restore counting rather than exclude the entire hook or Tree paint.
+    state.inject_allocation = true;
+    tree.invalidate();
+    state.resources.begin_frame();
+    {
+        AllocationScope guard;
+        ui::TreeTestAccess::paint(tree, *canvas, platform, &hooks);
+        allocations = guard.allocations();
+    }
+    state.resources.end_frame();
+    NUI_CHECK(allocations == 1U && state.injected_allocation);
+    state.inject_allocation = false;
+    state.injected_allocation.reset();
+
+    tree.invalidate();
+    state.resources.begin_frame();
+    {
+        AllocationScope guard;
+        ui::TreeTestAccess::paint(tree, *canvas, platform, &hooks);
         allocations = guard.allocations();
     }
     state.resources.end_frame();

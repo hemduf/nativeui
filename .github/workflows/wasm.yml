@@ -2,7 +2,7 @@ name: WebAssembly
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/offscreen-subtree-raster-cache]
     paths:
       - 'CMakeLists.txt'
       - 'cmake/**'

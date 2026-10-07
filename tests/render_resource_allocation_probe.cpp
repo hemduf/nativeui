@@ -1,10 +1,15 @@
 #include "render_resource_allocation_probe.hpp"
 
 #include <atomic>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <limits>
 #include <new>
+#if defined(__linux__) && __has_include(<execinfo.h>)
+#  define NATIVEUI_ALLOCATION_BACKTRACE 1
+#  include <execinfo.h>
+#endif
 #if defined(_WIN32)
 #  include <malloc.h>
 #endif
@@ -13,10 +18,22 @@ namespace {
 
 std::atomic<bool> g_count_allocations{false};
 std::atomic<std::size_t> g_allocation_count{0};
+#if defined(NATIVEUI_ALLOCATION_BACKTRACE)
+std::atomic<bool> g_capture_trace{false};
+std::array<void*, 32> g_first_allocation_trace{};
+int g_first_allocation_trace_size{};
+#endif
 
 void record_allocation() noexcept {
     if (g_count_allocations.load(std::memory_order_relaxed)) {
         g_allocation_count.fetch_add(1, std::memory_order_relaxed);
+#if defined(NATIVEUI_ALLOCATION_BACKTRACE)
+        if (g_capture_trace.exchange(false, std::memory_order_relaxed)) {
+            g_first_allocation_trace_size = ::backtrace(
+                g_first_allocation_trace.data(),
+                static_cast<int>(g_first_allocation_trace.size()));
+        }
+#endif
     }
 }
 
@@ -25,6 +42,11 @@ void record_allocation() noexcept {
 namespace test::render_resource_allocations {
 
 void begin() noexcept {
+#if defined(NATIVEUI_ALLOCATION_BACKTRACE)
+    g_first_allocation_trace_size = 0;
+    g_capture_trace.store(std::getenv("NATIVEUI_TRACE_ALLOCATIONS") != nullptr,
+                          std::memory_order_relaxed);
+#endif
     g_allocation_count.store(0, std::memory_order_relaxed);
     g_count_allocations.store(true, std::memory_order_relaxed);
 }
@@ -33,8 +55,25 @@ void end() noexcept {
     g_count_allocations.store(false, std::memory_order_relaxed);
 }
 
+bool pause_counting() noexcept {
+    return g_count_allocations.exchange(false, std::memory_order_relaxed);
+}
+
+void resume_counting(bool previously_enabled) noexcept {
+    g_count_allocations.store(previously_enabled, std::memory_order_relaxed);
+}
+
 std::size_t count() noexcept {
     return g_allocation_count.load(std::memory_order_relaxed);
+}
+
+void print_first_allocation_trace() noexcept {
+#if defined(NATIVEUI_ALLOCATION_BACKTRACE)
+    if (g_first_allocation_trace_size > 0) {
+        ::backtrace_symbols_fd(g_first_allocation_trace.data(),
+                               g_first_allocation_trace_size, 2);
+    }
+#endif
 }
 
 } // namespace test::render_resource_allocations

@@ -1391,13 +1391,20 @@ std::vector<std::uint32_t> read_surface_pixels(
     SkSurface& surface, int width, int height) {
     std::vector<std::uint32_t> pixels(
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
-    const auto info = SkImageInfo::MakeN32Premul(width, height);
+    const auto info = SkImageInfo::Make(
+        width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     NUI_CHECK(surface.readPixels(
         info,
         pixels.data(),
         static_cast<std::size_t>(width) * sizeof(std::uint32_t),
         0,
         0));
+    // N32 selects different channel orders across platforms. Pack explicit
+    // RGBA bytes into canonical SkColor values for portable color assertions.
+    for (auto& pixel : pixels) {
+        const auto* rgba = reinterpret_cast<const unsigned char*>(&pixel);
+        pixel = SkColorSetARGB(rgba[3], rgba[0], rgba[1], rgba[2]);
+    }
     return pixels;
 }
 

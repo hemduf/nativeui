@@ -1,12 +1,12 @@
 #pragma once
 
 #include "painter_private_hooks.hpp"
+#include "raster_cache_canvas.hpp"
 #include "render_resource_materialization.hpp"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkSurface.h"
-#include "include/utils/SkPaintFilterCanvas.h"
 
 #include <cmath>
 #include <limits>
@@ -27,39 +27,6 @@ struct RasterCacheBackend final {
     sk_sp<SkImage> (*snapshot_surface)(void*, SkSurface&){};
     void (*before_retention)(void*){};
     void (*did_hit)(void*) noexcept{};
-};
-
-// Observe operations even when the component restores its transform before
-// returning. SkPaintFilterCanvas preserves target matrix/clip/metadata and
-// forwards drawing; the observer exists only on cold/stale passes.
-class RasterTransformCanvas final : public SkPaintFilterCanvas {
-public:
-    explicit RasterTransformCanvas(SkCanvas& target)
-        : SkPaintFilterCanvas(&target) {}
-
-    [[nodiscard]] bool transformed() const noexcept { return transformed_; }
-
-protected:
-    bool onFilter(SkPaint&) const override { return true; }
-    void didTranslate(SkScalar x, SkScalar y) override {
-        transformed_ |= x != 0.0f || y != 0.0f;
-        SkPaintFilterCanvas::didTranslate(x, y);
-    }
-    void didScale(SkScalar x, SkScalar y) override {
-        transformed_ |= x != 1.0f || y != 1.0f;
-        SkPaintFilterCanvas::didScale(x, y);
-    }
-    void didConcat44(const SkM44& matrix) override {
-        transformed_ |= matrix != SkM44{};
-        SkPaintFilterCanvas::didConcat44(matrix);
-    }
-    void didSetM44(const SkM44& matrix) override {
-        transformed_ = true;
-        SkPaintFilterCanvas::didSetM44(matrix);
-    }
-
-private:
-    bool transformed_{};
 };
 
 [[nodiscard]] inline bool paint_raster_cache_boundary(
@@ -151,11 +118,10 @@ private:
             backend.device_scale, 0.0f, -static_cast<float>(left_px),
             0.0f, backend.device_scale, -static_cast<float>(top_px),
             0.0f, 0.0f, 1.0f));
-        RasterTransformCanvas observer{*canvas};
-        if (!paint_callback(callback_state, observer, backend.painter_hooks)) {
-            return false;
-        }
-        transformed = observer.transformed();
+        const auto observed = observe_raster_paint(
+            *canvas, callback_state, paint_callback, backend.painter_hooks);
+        if (!observed.painted) return false;
+        transformed = observed.transformed;
     }
     if (backend.submit_surface) backend.submit_surface(backend.state, *surface);
     auto image = backend.snapshot_surface
