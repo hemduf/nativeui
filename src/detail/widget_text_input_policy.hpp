@@ -46,6 +46,7 @@ public:
   TextInputSession &operator=(const TextInputSession &) = delete;
   [[nodiscard]] bool mounted() const noexcept;
   [[nodiscard]] TextInputSnapshot snapshot() const;
+  [[nodiscard]] std::optional<std::pair<float, float>> field_geometry() const;
   // Edit the local buffer only. Controllers decide separately whether to
   // publish their backing Binding; source notifications cannot trigger submit.
   void

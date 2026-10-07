@@ -114,6 +114,56 @@ set(_mock_artifacts
 _icu_verify_data("${_mock_data}" ${_mock_artifacts})
 _icu_verify_recovery("${_mock_build}" "${_mock_data}" ${_mock_artifacts})
 
+# Distinct Skia packages cannot safely share a same-name module data file.
+# Reject the second staging attempt without replacing the first module's bytes,
+# and allow a later normal build to keep using those original bytes.
+set(_other_mock_data "${_root}/other-icudtl.dat")
+file(WRITE "${_other_mock_data}" "A different pinned Skia ICU payload\n")
+set(_conflict_build "${_root}/conflict-build")
+_icu_run("conflicting module fixture configure"
+  "${CMAKE_COMMAND}" -S "${_fixture}" -B "${_conflict_build}"
+  ${_generator_args}
+  "-DCMAKE_BUILD_TYPE=${CONFIG}"
+  "-DRUNTIME_DATA_MODE=mock"
+  "-DRUNTIME_DATA_MODULE=${_runtime_module}"
+  "-DICU_DATA_SOURCE=${_mock_data}"
+  "-DMOCK_SECONDARY_DATA_SOURCE=${_other_mock_data}")
+_icu_run("first module staging"
+  "${CMAKE_COMMAND}" --build "${_conflict_build}" --config "${CONFIG}"
+  --target runtime_library)
+include("${_conflict_build}/icu-artifacts-${CONFIG}.cmake")
+get_filename_component(_conflict_directory "${ICU_RUNTIME_LIBRARY}" DIRECTORY)
+set(_conflict_data "${_conflict_directory}/icudtl.dat")
+file(SHA256 "${_mock_data}" _first_hash)
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" --build "${_conflict_build}" --config "${CONFIG}"
+    --target runtime_module
+  RESULT_VARIABLE _conflict_result
+  OUTPUT_VARIABLE _conflict_stdout
+  ERROR_VARIABLE _conflict_stderr
+  TIMEOUT 300)
+if("${_conflict_result}" STREQUAL "0")
+  message(FATAL_ERROR "Skia ICU staging silently replaced another module's data")
+endif()
+string(FIND "${_conflict_stdout}\n${_conflict_stderr}"
+  "different ICU runtime data" _conflict_diagnostic)
+if(_conflict_diagnostic EQUAL -1)
+  message(FATAL_ERROR
+    "Skia ICU conflicting module failed for another reason\n"
+    "${_conflict_stdout}\n${_conflict_stderr}")
+endif()
+file(SHA256 "${_conflict_data}" _after_conflict_hash)
+if(NOT _after_conflict_hash STREQUAL _first_hash)
+  message(FATAL_ERROR "Skia ICU conflict changed the first module's data")
+endif()
+_icu_run("first module rebuild after conflict"
+  "${CMAKE_COMMAND}" --build "${_conflict_build}" --config "${CONFIG}"
+  --target runtime_library)
+file(SHA256 "${_conflict_data}" _after_rebuild_hash)
+if(NOT _after_rebuild_hash STREQUAL _first_hash)
+  message(FATAL_ERROR "Skia ICU recovery changed the first module's data")
+endif()
+
 # A malformed dependency must fail during configuration, with the missing path
 # identified, rather than leaving a successful build with unavailable Unicode.
 set(_missing_data "${_root}/missing-icudtl.dat")

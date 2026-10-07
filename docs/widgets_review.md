@@ -5,12 +5,13 @@ This review applies [CODE_REVIEW.md](../CODE_REVIEW.md) to PR #493 on
 `0f890150735c0b575dff0ca12cf0226c674f10a5`, based on the NativeUI inventory snapshot
 `e10077ff39b8cb977669a7d5604562f66d07cb4c`.
 
-## Main integration on October 5, 2026
+## Historical main integration on October 5, 2026
 
 Merge `0666bc591b14f8f0b73154104d1edfd3e9bb3554` integrates main
 `6c850ab044ba99b7ccbea7076765cd4efe722adb` into the widget branch. All thirteen
-conflicted paths are resolved. Final executable source is **`2c36d801d417c78824dc11961f258b3fe3808ab9`**;
-subsequent documentation bookkeeping does not change it. The extracted file pairs
+conflicted paths are resolved. The integration source was **`2c36d801d417c78824dc11961f258b3fe3808ab9`**;
+later source corrections and qualification are recorded above this historical section.
+The extracted file pairs
 and RichText crash correction coexist with main's rendering resources/raster
 caches, ScalarSource, focus geometry/teardown guards and edit sessions. Pugl uses
 main's exact pin `a4bdafe38f48cf906560e40bd1e9e87986369b06` with the Cocoa
@@ -104,7 +105,7 @@ Documentation verification covers **95 Markdown pages**, **862 valid local file 
 and all **83 eleven-section specifications with matching header/source pairs**.
 No missing link, file pair or section is found.
 
-### Current mandatory review record
+### October 5 integration review record
 
 | Required field | Assessment |
 | --- | --- |

@@ -11,18 +11,18 @@ The [interaction and layout audit](widgets_gallery_audit.md) records findings fr
 The macOS bundle built in this repository is located here:
 
 ```text
-/Volumes/T7/Code/nativeui/build-widgets/nativeui_example_widgets_gallery.app
+/Volumes/T7/Code/nativeui/build/nativeui_example_widgets_gallery.app
 ```
 
 ```sh
-open /Volumes/T7/Code/nativeui/build-widgets/nativeui_example_widgets_gallery.app
+open /Volumes/T7/Code/nativeui/build/nativeui_example_widgets_gallery.app
 ```
 
 To rebuild using the existing configuration:
 
 ```sh
-TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp CMAKE_BUILD_PARALLEL_LEVEL=1 cmake -S /Volumes/T7/Code/nativeui -B /Volumes/T7/Code/nativeui/build-widgets
-TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build /Volumes/T7/Code/nativeui/build-widgets --target nativeui_example_widgets_gallery
+TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp CMAKE_BUILD_PARALLEL_LEVEL=1 cmake -S /Volumes/T7/Code/nativeui -B /Volumes/T7/Code/nativeui/build
+TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build /Volumes/T7/Code/nativeui/build --target nativeui_example_widgets_gallery
 ```
 
 CMake example discovery automatically adds the target, consumer identifier `org.nativeui.example.widgets-gallery` and CTest test. On macOS, `nativeui_add_application` supplies the bundle and consumer-specific platform bridge. On other platforms, use the executable produced by the same target; the validation performed here covers macOS.
@@ -51,8 +51,8 @@ Values remain in memory in the window. “Save” demonstrates Toast and Dialog;
 ## Headless validation
 
 ```sh
-TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --self-test
-TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp ctest --test-dir /Volumes/T7/Code/nativeui/build-widgets -R '^nativeui_(example_widgets_gallery_self_test|widget_(calendar|date_input|sidebar|color_picker|color_well)_tests)$' --output-on-failure
+TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --self-test
+TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp ctest --test-dir /Volumes/T7/Code/nativeui/build -R '^nativeui_(example_widgets_gallery_self_test|widget_(calendar|date_input|sidebar|color_picker|color_well)_tests)$' --output-on-failure
 ```
 
 The self-test renders all eight screens at 1,280 × 900, then at 780 × 600 with a scale of 1.25. It checks the three collection tabs, empty table/grid data, insertion after descending sort without duplicate keys, search result counts, composition transitions, the popover, a dialog closed by Escape, toast expiry with a manual clock and two independent models.
@@ -60,7 +60,7 @@ The self-test renders all eight screens at 1,280 × 900, then at 780 × 600 with
 PPM captures of each screen can be generated without a graphical server:
 
 ```sh
-TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --self-test --snapshot-dir /Volumes/T7/tmp/nativeui-gallery-snapshots
+TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --self-test --snapshot-dir /Volumes/T7/tmp/nativeui-gallery-snapshots
 ```
 
 The export adds eight viewport captures, `page_1.ppm` through `page_8.ppm`, and eight full-height captures, `page_1_full.ppm` through `page_8_full.ppm`, to the chosen directory. It does not run during the ordinary CTest test.
@@ -68,7 +68,7 @@ The export adds eight viewport captures, `page_1.ppm` through `page_8.ppm`, and 
 The native test creates a real macOS window, waits for its first render and requests deferred closure:
 
 ```sh
-TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build-widgets/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --window-self-test
+TMPDIR=/Volumes/T7/tmp TMP=/Volumes/T7/tmp TEMP=/Volumes/T7/tmp /Volumes/T7/Code/nativeui/build/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --window-self-test
 ```
 
 Local validation on October 5, 2026: **6/6 CTest tests passed**, a Release build without warning diagnostics, rendering of all eight screens, and successful macOS window startup and closure. Catalog coverage and lifetimes also received an independent review. After translating the complete demo, including built-in component captions and accessibility text, the Release build, eight-page headless rendering, 22 affected CTest tests and native window test passed.
@@ -89,6 +89,6 @@ with that fix; its eight-page headless self-test and real macOS first-render/
 deferred-close test pass. Those targeted results preceded the final integrated
 qualification recorded below.
 
-## Main integration qualification
+## Historical main integration qualification
 
-At executable source `2c36d801d417c78824dc11961f258b3fe3808ab9`, the relinked gallery passes its eight-page headless self-test in the **408/408** complete Release run and its real macOS first-render/deferred-close check. The final build has zero warnings; **24/24** focused ASan/UBSan suites and the six additional embedded/GPU/scene checks pass. All thirteen merge conflicts with main are resolved. Linux Core CI is **still running** on this same source revision and remains a merge gate. The PR stays Draft while that qualification is active. Exact commands, findings and limitations are recorded in the [current integration review](widgets_review.md#main-integration-on-october-5-2026).
+At historical source `2c36d801d417c78824dc11961f258b3fe3808ab9`, the relinked gallery passed its eight-page headless self-test in a **408/408** complete Release run and its real macOS first-render/deferred-close check. That build had zero warnings; **24/24** focused ASan/UBSan suites and six additional embedded/GPU/scene checks passed. All thirteen merge conflicts with main were resolved. These results belong to the October 5 source. Current qualification is recorded at the top of the [widget review](widgets_review.md).

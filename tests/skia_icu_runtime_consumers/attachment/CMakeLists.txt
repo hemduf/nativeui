@@ -9,6 +9,11 @@ if(RUNTIME_DATA_MODE STREQUAL "mock")
   endfunction()
   foreach(_target IN ITEMS runtime_one runtime_two runtime_shared
       runtime_library runtime_module)
+    if(_target STREQUAL "runtime_module" AND
+       DEFINED MOCK_SECONDARY_DATA_SOURCE)
+      set_property(TARGET runtime_core_stub PROPERTY
+        NATIVEUI_SKIA_ICU_DATA "${MOCK_SECONDARY_DATA_SOURCE}")
+    endif()
     attach_mock_runtime("${_target}")
   endforeach()
 else()

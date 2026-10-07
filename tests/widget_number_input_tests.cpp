@@ -48,6 +48,23 @@ void stepper_aligns_with_the_numeric_field() {
   NUI_CHECK_NEAR(stepper.y + stepper.h * 0.5f, input.y + 47.0f,
                  0.01f);
 }
+void stepper_follows_focused_field_geometry() {
+  ui::State<double> value{12.5};
+  ui::NumberInputStyle style;
+  style.text_input.focused.field_top = 0.0f;
+  style.text_input.focused.field_height = 40.0f;
+  ui::Tree tree{ui::compile(ui::make_spec(
+      ui::NumberInput{"Quantity", value}.style(std::move(style))))};
+  test::MockPlatform platform;
+  tree.mount();
+  tree.layout({450, 82});
+  tree.activate_focus(platform);
+  tree.layout({450, 82});
+  const auto [input, stepper] = ui::TreeTestAccess::input_and_stepper(tree);
+  NUI_CHECK_NEAR(stepper.y + stepper.h * 0.5f, input.y + 20.0f,
+                 0.01f);
+  tree.deactivate_focus(platform);
+}
 void complete_finite_ascii_drafts_publish_without_step_snap() {
   ui::State<double> value{4.0};
   int submits{};
@@ -217,6 +234,7 @@ void submit_source_updates_do_not_rearm_the_same_enter_contact() {
 }
 void suite() {
   stepper_aligns_with_the_numeric_field();
+  stepper_follows_focused_field_geometry();
   stepper_pointer_controls_publish_the_shared_value();
   submit_source_updates_do_not_rearm_the_same_enter_contact();
   passive_rounding_preserves_numeric_submit_and_escape_baseline();

@@ -27,9 +27,11 @@ captures establish headless layout, not a pixel identity claim for the GPU path.
 | G9 | TokenField | The remove action on an initial tag was disabled. | Evaluate source validity and dataset generation before mount; the composite action test removes the tag through `UI` input. |
 | G10 | Calendar | Previous and next month buttons were disabled on the first display. | Allow navigation actions to be available when the source exists; the composite action test clicks Next month and checks the selected date. |
 | G11 | Containers gallery | The Stack demonstration printed its centered background text under the overlay badge. | Keep the colored background and show a single `STACK OVERLAY` badge. The full-height Containers capture checks legibility. |
+| G12 | NumberInput state styles | The Stepper stayed at the normal field position when a focused TextInput style moved the numeric field. | Read the mounted editor's resolved field geometry during layout. A focus-transition regression checks the Stepper center against the focused field. |
 
-The same PR validation exposed three retained-lifetime defects and one Windows
-font-selection defect outside the visual gallery pass:
+The same PR validation and independent review exposed three retained-lifetime
+defects, one Windows font-selection defect, and one Windows packaging collision
+outside the visual gallery pass:
 
 | ID | Surface | Confirmed problem | Correction and executable check |
 | --- | --- | --- | --- |
@@ -37,6 +39,7 @@ font-selection defect outside the visual gallery pass:
 | V2 | Link | Copying a navigation callback can retire its own link and free the callback before the copy finishes. Linux ASan reported a use-after-free. | Keep the callback storage alive across copying; `nativeui_widget_link_tests` covers self-removal. |
 | V3 | Retained descendant actions | A blur callback can deactivate the tree while descendant actions drain; the subsequent availability pass dereferenced a null platform pointer. Linux UBSan reported this in the existing deactivation test. | Recheck activation and platform after draining before the final availability pass. |
 | V4 | RichText on Windows | The DirectWrite manager can resolve a font for a character without exposing a default family; empty-coverage metrics lookup then fails. Windows CI reported failures in the gallery, RichText tests, and installed-package Unicode fixture. | Retry metrics font selection with a space only when the ordinary lookup fails. The existing Windows RichText and package tests qualify this path. |
+| V5 | Windows ICU packaging | Two modules built with different Skia ICU payloads could stage the same `icudtl.dat` in one output directory, silently replacing the first module's data. | Compare the existing file under the staging lock and fail before overwrite if bytes differ. A portable fixture reproduces the conflict, verifies the original bytes survive, and rebuilds the first module successfully. |
 
 ## Screen coverage
 

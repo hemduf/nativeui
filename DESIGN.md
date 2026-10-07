@@ -1136,7 +1136,10 @@ property. `nativeui_attach_platform` stages the file beside the final consumer;
 Core-only executable/module consumers call `nativeui_attach_runtime_data(TARGET
 ...)` explicitly. This build-time dependency works across CMake directories,
 restores removed data on an otherwise up-to-date build, and serializes copies into
-a shared output directory. No runtime I/O, locks or state are added to NativeUI's
+a shared output directory. Shared directories accept only byte-identical ICU
+data: staging a different pinned Skia payload fails before replacing another
+module's file. Modules requiring different ICU data must use separate output
+directories. No runtime I/O, locks or state are added to NativeUI's
 widget or audio-facing code. Data deployment stays within the Skia/platform
 packaging boundary; Unicode processing continues to use the pinned ICU backend.
 Skia searches the executable directory before the module directory. Module-local

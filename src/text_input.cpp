@@ -24,6 +24,14 @@ TextInputSnapshot TextInputSession::snapshot() const {
   return mounted() ? TextInputAccess::snapshot(*storage_->editor)
                    : TextInputSnapshot{};
 }
+std::optional<std::pair<float, float>>
+TextInputSession::field_geometry() const {
+  if (!mounted())
+    return {};
+  const auto &editor = *storage_->editor;
+  const auto style = editor.resolved_style(editor.focused_);
+  return std::pair{style.field_top, style.field_height};
+}
 void TextInputSession::replace(
     std::string text,
     std::optional<std::pair<std::size_t, std::size_t>> selection,
