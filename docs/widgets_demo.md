@@ -3,6 +3,8 @@
 The **NativeUI — The Component Lab** application uses all **83 public components** in the [catalog](widgets.md), across eight interactive screens in English. Its final source is [examples/features/widgets_gallery.cpp](../examples/features/widgets_gallery.cpp). It uses the current public APIs, with `NativeUI::Core` for widgets and the NativeUI platform for its window.
 
 The [interaction and layout audit](widgets_gallery_audit.md) records findings from all eight screens and the direct pointer regressions added during PR completion.
+The [current widget review](widgets_review.md#pr-493-completion-review-on-october-7-2026)
+records exact-source qualification and the independent code-review result.
 
 ![NativeUI gallery: Text and drawing screen](assets/widgets_gallery.png)
 

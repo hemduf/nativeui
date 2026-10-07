@@ -5,6 +5,74 @@ This review applies [CODE_REVIEW.md](../CODE_REVIEW.md) to PR #493 on
 `0f890150735c0b575dff0ca12cf0226c674f10a5`, based on the NativeUI inventory snapshot
 `e10077ff39b8cb977669a7d5604562f66d07cb4c`.
 
+## PR #493 completion review on October 7, 2026
+
+The current executable source is `26b18cecb6e3d2b87cc8b0b7979aa9415e6babd2`.
+The [gallery audit](widgets_gallery_audit.md) records 12 component/layout
+findings and five additional validation findings with direct correction checks.
+The October 5 integration record below remains historical evidence for its own
+source revision.
+
+The latest independent review collected two Important findings before this
+bounded correction. Both received RED/GREEN regressions and an independent
+re-review at the executable source above:
+
+| Finding | Failure and correction | Executable evidence |
+| --- | --- | --- |
+| NumberInput state geometry | The Stepper used the normal TextInput field geometry while a focused style could move the actual field. NumberInput now queries the mounted editor session's resolved geometry; an absent or detached session uses the explicit normal-style fallback. | The focused-field test failed with a center of 47 instead of 20 before correction and passes afterward. The complete `nativeui_widget_number_input_tests` executable passes. |
+| Windows ICU shared directory | Distinct Skia payloads in the same module output directory could overwrite `icudtl.dat`. The staging script now compares both hashes under its existing lock and rejects divergent data before modifying the first module's file. Modules needing different data use separate directories. | The portable CMake fixture failed before correction because the second module replaced the first payload. It now checks rejection, unchanged original bytes, and a successful later build of the first module. `nativeui_skia_icu_runtime_tests` passes. |
+
+Independent source re-review at `26b18cec` reports **0 Blocking / 0 Important**
+for these scopes. The complete local Release build succeeded with the default
+empty warning allowance and zero NativeUI warnings. The graphical-session
+CTest run passed **434/434** without skips in 437.71 seconds. All seven remote
+checks for this executable source passed: the [desktop and sanitizer
+matrix](https://github.com/hemduf/nativeui/actions/runs/37608099758),
+[macOS embedded lifecycle](https://github.com/hemduf/nativeui/actions/runs/37608099777)
+and [documentation contracts](https://github.com/hemduf/nativeui/actions/runs/37608099766).
+Windows x64 passed **415/415** CTest cases, including the ICU runtime fixture;
+Linux ASan/UBSan passed **222/222** unit tests. Linux x64, Linux ARM64 and macOS
+ARM64 also passed. The human merge gate remains separate from executable
+qualification.
+
+The exact local commands were:
+
+```sh
+CMAKE_BUILD_PARALLEL_LEVEL=1 cmake --build build
+env CMAKE_BUILD_PARALLEL_LEVEL=1 ctest --test-dir build --output-on-failure
+build/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --self-test --snapshot-dir /private/tmp/nativeui-pr493-head26-gallery-snapshots
+build/nativeui_example_widgets_gallery.app/Contents/MacOS/nativeui_example_widgets_gallery --window-self-test
+```
+
+The gallery self-test passed all eight pages, compact/HiDPI rendering,
+collections, overlays and instance isolation; it produced 16 viewport/full-height
+captures. The native macOS window rendered and closed. The application was also
+launched for inspection, but Accessibility inspection timed out in this
+environment. Retained pointer-dispatch tests, rather than live-window pointer
+inspection, establish the corrected interactions.
+
+A sandboxed run before this correction produced 19 AppKit registration aborts,
+including `nativeui_example_t065_ui_dispatcher`, and a WindowServer skip for
+embedded keyboard. Those 19 cases and the skipped case passed in the graphical
+session at the preceding source revision. At the current source, the complete
+graphical-session suite passed, including the T065 UI dispatcher self-test (0.46 s),
+its integration contract and the embedded keyboard tests.
+
+### Current CODE_REVIEW.md record
+
+| Required field | Assessment at current executable source |
+| --- | --- |
+| **Instance isolation and globals** | NumberInput geometry is read from its own mounted editor session. ICU staging runs at build time and adds no runtime global or thread-local state. Existing multi-instance tests remain enabled. |
+| **Threading and real-time** | Retained mutation remains on the UI thread. No audio callback, plug-in transport or runtime filesystem access was added. |
+| **Lifetime and reentrancy** | The editor session returns no geometry after detachment. Earlier callback-copy ownership and retained deactivation fixes remain in this source; current-head Linux ASan/UBSan passed 222/222 unit tests. |
+| **Transactions and failure recovery** | Layout style changes request a fresh retained layout. ICU rejects incompatible bytes before copying, preserves the first file after failure and permits its next normal build. Existing retained rollback and queue recovery tests remain enabled. |
+| **Partial construction and teardown** | No new native acquisition or destructor callback was added. The ICU staging failure occurs before the second module's link and changes no first-module data. |
+| **Objective-C and platform boundaries** | Consumer-specific macOS bridge identities, Pugl and Skia pins are preserved. The Windows build-time data boundary is documented in DESIGN.md; Windows x64 passed 415/415 cases, including installed-package ICU runtime. macOS embedded lifecycle passed. |
+| **Rendering and layout** | NumberInput uses its TextInput child's resolved focused, hover, pressed, disabled and read-only field geometry, with a focused-state regression. Gallery visual coverage and limitations are recorded separately. |
+| **Performance and warnings** | NumberInput resolves the field geometry once per layout from the active child session. ICU hashes only during build-time staging. The complete current-head serial Release build passed with zero NativeUI warnings and the default empty allowance. |
+| **Privacy** | No user data, credentials or personal content were added. |
+| **Tests and remaining findings** | The two new targeted regressions and complete local 434/434 CTest pass with no skips. Gallery headless snapshots and native-window self-test pass. All seven current-source remote checks pass, including Windows 415/415 and Linux sanitizer 222/222. Independent source review reports **0 Blocking / 0 Important**. No current code finding remains; human merge is the remaining gate. |
+
 ## Historical main integration on October 5, 2026
 
 Merge `0666bc591b14f8f0b73154104d1edfd3e9bb3554` integrates main
@@ -79,7 +147,8 @@ native checks pass: embedded visibility, per-view resource recreation/isolation,
 ScalarSource and FractalNoise GPU references, T095/T096 scene recovery, and the
 real gallery's first render/deferred close.
 
-Linux Core CI is **still running** on this same source revision and remains a merge gate. The PR stays Draft while that qualification is active. The exact run is
+At that revision, Linux Core CI was **still running** and remained a merge gate;
+the PR was Draft while that qualification was active. The historical run is
 [Linux Core smoke #37332592202](https://github.com/hemduf/nativeui/actions/runs/37332592202).
 Earlier failed/cancelled runs are not final evidence. Linux's first strict-GCC
 failure prompted the style initializer correction; every executable correction
@@ -119,11 +188,11 @@ No missing link, file pair or section is found.
 | **Exception/unwind** | Pass. Originating contacts release even when invalidation throws; secondary release/cancel failures are contained and the first error propagates. Matching generations protect newer interactions. Unmount/destructor cancellation is contained; foreign ABI boundaries are unchanged. |
 | **Partial construction** | Pass for the integration scope. Existing native acquisition rollback and registration ownership remain; edit/session ownership is prepared before exposure. No new native acquisition step. |
 | **Objective-C runtime** | Pass for preserved integration. Consumer-specific Objective-C bridge prefixing and upstream Cocoa focus hooks remain; no new runtime class/category or shared bridge. |
-| **Platform integration** | Pass locally. Final macOS embedded keyboard/visibility, per-view resource recreation, GPU references, scene recovery and gallery startup/closure checks pass. Focused Linux Core CI is pending at the exact executable source SHA; it is a merge gate. |
+| **Platform integration** | Pass locally at that revision. macOS embedded keyboard/visibility, per-view resource recreation, GPU references, scene recovery and gallery startup/closure checks passed. Focused Linux Core CI was pending at that executable source SHA. |
 | **Performance/allocation** | Reasoned impact: cancellation moves existing release actions; pointer publication adds an active-edit check and starts a deferred logical edit only when needed. No new steady-state allocation or layout staging is introduced by this correction. Historical benchmark numbers are not relabeled as measurements of the integrated source. |
 | **Privacy** | Pass. No personal data, credentials or user-file content introduced in production sources, tests, examples or generated project metadata. |
 | **Tests** | Final serial Release build: zero warnings; 408/408 CTest checks, no skips. Final targeted ASan/UBSan build: zero warnings; 24/24 suites, no diagnostics or skips. Seven additional native checks pass. Exact source, commands and limits are recorded below. |
-| **Remaining findings** | No remaining Blocking/Important finding in the bounded integration review. Linux Core qualification remains a merge gate; future contracts and platform limits stay explicit. |
+| **Remaining findings** | No remaining Blocking/Important finding in the bounded October 5 integration review. Linux Core qualification was then a merge gate; future contracts and platform limits stayed explicit. |
 
 ### Final executable commands
 
