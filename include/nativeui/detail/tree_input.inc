@@ -277,6 +277,7 @@
         pending->leave = source_event;
         pending->leave.type = InputType::PointerLeave;
         pending->leave.delta = {};
+        pending->leave.magnification = 0.0f;
         pending_pointer_hover_transition_.swap(pending);
     }
 
@@ -483,6 +484,7 @@
         transition.leave = source_event;
         transition.leave.type = InputType::PointerLeave;
         transition.leave.delta = {};
+        transition.leave.magnification = 0.0f;
         transition.phase = previous
             ? PointerHoverTransitionPhase::ObserverLeave
             : PointerHoverTransitionPhase::ObserverEnter;

@@ -329,6 +329,36 @@ void throwing_callback_recovery_and_instance_isolation() {
   NUI_CHECK(second_platform.pointer_capture_end_count == 1);
 }
 
+void synthetic_leave_payload() {
+  test::MockPlatform platform;
+  ui::UI *owner{};
+  std::vector<float> left_factors, right_factors;
+  bool nest{true};
+  ui::UI tree{ui::Row{
+      probe([&](const ui::InputEvent &event, ui::InputContext &) {
+        if (event.type == ui::InputType::PointerLeave) {
+          left_factors.push_back(event.magnification);
+          // This request is queued while the first hover transition runs.
+          if (std::exchange(nest, false))
+            (void)owner->dispatch(magnify(20.0f, 30.0f, -0.2f), platform);
+        }
+        return ui::EventResult::Handled;
+      }),
+      probe([&](const ui::InputEvent &event, ui::InputContext &) {
+        if (event.type == ui::InputType::PointerLeave)
+          right_factors.push_back(event.magnification);
+        return ui::EventResult::Handled;
+      })}};
+  owner = &tree;
+  tree.resize({200.0f, 100.0f});
+  tree.activate(platform);
+  (void)tree.dispatch(magnify(20.0f, 30.0f), platform);
+  (void)tree.dispatch(magnify(120.0f, 30.0f, 0.3f), platform);
+  NUI_CHECK(left_factors.size() == 1 && right_factors.size() == 1);
+  NUI_CHECK_NEAR(left_factors.front(), 0.0f, 0.0001f);
+  NUI_CHECK_NEAR(right_factors.front(), 0.0f, 0.0001f);
+}
+
 struct Case {
   std::string_view name;
   void (*run)();
@@ -341,7 +371,8 @@ constexpr std::array cases{
     Case{"nested_contact", nested_new_contact},
     Case{"modal", modal_absorption},
     Case{"overlay", overlay_pointer_policy},
-    Case{"throw_recovery", throwing_callback_recovery_and_instance_isolation}};
+    Case{"throw_recovery", throwing_callback_recovery_and_instance_isolation},
+    Case{"leave_payload", synthetic_leave_payload}};
 
 } // namespace
 
