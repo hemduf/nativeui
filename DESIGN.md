@@ -1129,6 +1129,21 @@ NativeUI supports both CPM's flattened archive layout and the original manually 
 
 NativeUI does not rebuild Skia.
 
+On Windows, the pinned Skia archive includes external ICU data at
+`share/icudtl.dat`. NativeUI packages those exact bytes with its installed SDK and
+exports the source path through `NativeUI::Core`'s `NATIVEUI_SKIA_ICU_DATA` CMake
+property. `nativeui_attach_platform` stages the file beside the final consumer;
+Core-only executable/module consumers call `nativeui_attach_runtime_data(TARGET
+...)` explicitly. This build-time dependency works across CMake directories,
+restores removed data on an otherwise up-to-date build, and serializes copies into
+a shared output directory. No runtime I/O, locks or state are added to NativeUI's
+widget or audio-facing code. Data deployment stays within the Skia/platform
+packaging boundary; Unicode processing continues to use the pinned ICU backend.
+Skia searches the executable directory before the module directory. Module-local
+fallback is qualified with an independent host that has no ICU file; compatibility
+with hosts supplying another ICU data file remains outside that evidence.
+
+
 ---
 
 ## 27. Consumer packaging target

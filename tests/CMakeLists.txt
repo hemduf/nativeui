@@ -1,6 +1,20 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 if(NATIVEUI_BUILD_TESTS)
+  set(_nativeui_icu_test_dir "${CMAKE_CURRENT_BINARY_DIR}/icu-runtime-contract")
+  add_test(NAME nativeui_skia_icu_runtime_tests
+    COMMAND ${CMAKE_COMMAND}
+      "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      "-DTEST_DIR=${_nativeui_icu_test_dir}"
+      "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DBUILD_PACKAGE_DIR=${CMAKE_BINARY_DIR}/nativeui-package"
+      "-DINSTALL_CMAKE_DIR=${NATIVEUI_INSTALL_CMAKE_DIR}"
+      "-DCONFIG=$<CONFIG>"
+      "-DGENERATOR=${CMAKE_GENERATOR}"
+      "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/skia_icu_runtime_tests.cmake")
+  set_tests_properties(nativeui_skia_icu_runtime_tests PROPERTIES
+    LABELS "build;cmake;skia;unicode;runtime" RUN_SERIAL TRUE TIMEOUT 600)
   add_test(NAME nativeui_pugl_keyboard_contract_tests
     COMMAND ${CMAKE_COMMAND}
       "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
@@ -165,6 +179,7 @@ if(NATIVEUI_BUILD_TESTS)
   function(nativeui_add_core_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE NativeUI::Core)
+    nativeui_attach_runtime_data(TARGET ${name})
     nativeui_enable_project_warnings(${name})
     nativeui_enable_sanitizers(${name})
     add_test(NAME ${name} COMMAND ${name})
@@ -353,6 +368,7 @@ if(NATIVEUI_BUILD_TESTS)
   target_link_libraries(nativeui_scalar_source_source_tests PRIVATE
     NativeUI::Core
   )
+  nativeui_attach_runtime_data(TARGET nativeui_scalar_source_source_tests)
   nativeui_enable_project_warnings(nativeui_scalar_source_source_tests)
   nativeui_enable_sanitizers(nativeui_scalar_source_source_tests)
   add_test(NAME nativeui_scalar_source_source_tests COMMAND nativeui_scalar_source_source_tests)
