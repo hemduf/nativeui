@@ -1,6 +1,16 @@
 name: CI
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/**'
+      - '.github/workflows/ci.yml'
   schedule:
     - cron: '17 2 * * *'
   workflow_dispatch:
@@ -19,15 +29,14 @@ env:
 jobs:
   build:
     name: ${{ matrix.name }}
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     strategy:
       fail-fast: false
       matrix:
         include:
-          # macOS Intel disabled: the macos-15-intel runner is far slower than
-          # the other platforms and adds no additional coverage. Re-enable by
-          # uncommenting the two entries below.
-          # - name: macOS Intel
-          #   os: macos-15-intel
+          - name: macOS Intel
+            os: macos-15-intel
+            timeout: 180
           - name: macOS ARM64
             os: macos-15
           - name: Windows x64
@@ -37,7 +46,7 @@ jobs:
           - name: Linux ARM64
             os: ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.timeout || 90 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +98,34 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Install Windows software OpenGL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z'
+          $expected = 'dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0-release-msvc.7z'
+          $extract = Join-Path $env:RUNNER_TEMP 'mesa3d-26.2.0'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Mesa archive checksum mismatch: expected $expected, got $actual"
+          }
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip failed with exit $LASTEXITCODE" }
+          $opengl = Get-ChildItem -Path $extract -Recurse -File -Filter opengl32.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          $gallium = Get-ChildItem -Path $extract -Recurse -File -Filter libgallium_wgl.dll |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+            Select-Object -First 1
+          if (-not $opengl -or -not $gallium) {
+            throw 'Mesa x64 opengl32.dll/libgallium_wgl.dll were not found after extraction'
+          }
+          Copy-Item $opengl.FullName build\opengl32.dll -Force
+          Copy-Item $gallium.FullName build\libgallium_wgl.dll -Force
+
       - name: Test Linux
         if: runner.os == 'Linux'
         run: >-
@@ -102,6 +139,7 @@ jobs:
 
   sanitizers:
     name: Linux ASan + UBSan
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -144,6 +182,7 @@ jobs:
   # libdbus transport is built and executed on Linux, including sanitizers.
   linux-dbus-contract:
     name: Linux D-Bus contract
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

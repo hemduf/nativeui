@@ -38,6 +38,8 @@ struct NativeUIImeBridge {
   float width;
   float height;
   float cursorOffset;
+  NativeUIImeMagnifyCallback magnifyCallback;
+  void* magnifyUserData;
 };
 
 // Per-object associated state only. The key is immutable and carries no
@@ -381,6 +383,41 @@ nativeuiFlagsChanged(id self, SEL selector, NSEvent* event)
   [retainedView release];
 }
 
+// Same modifier encoding as the pinned Pugl's own getModifiers() so the
+// delivered PuglMods mask matches every other nativeui event source.
+static PuglMods
+magnifyModifiers(NSEvent* event)
+{
+  const NSEventModifierFlags flags = [event modifierFlags];
+  return (
+    (PuglMods)((flags & NSShiftKeyMask) ? PUGL_MOD_SHIFT : 0) |
+    (PuglMods)((flags & NSControlKeyMask) ? PUGL_MOD_CTRL : 0) |
+    (PuglMods)((flags & NSAlternateKeyMask) ? PUGL_MOD_ALT : 0) |
+    (PuglMods)((flags & NSCommandKeyMask) ? PUGL_MOD_SUPER : 0));
+}
+
+static void
+nativeuiMagnifyWithEvent(id self, SEL selector, NSEvent* event)
+{
+  (void)selector;
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  // Trackpad pinch. No "unhandled" sound path exists for gestures, so there is
+  // no report/handled bookkeeping here: deliver and let the app react.
+  if (!bridge || bridge->forwardingKey || !bridge->magnifyCallback) {
+    callSuperKeyDown(self, selector, event);
+    return;
+  }
+  // Same coordinate chain as Pugl pointer events: view-local points scaled to
+  // physical pixels. The view is flipped, so this is already top-down.
+  const NSView* const view = (NSView*)self;
+  const NSPoint local = [view convertPoint:[event locationInWindow] fromView:nil];
+  const double scale = (double)[[view window] backingScaleFactor];
+  bridge->magnifyCallback(bridge->magnifyUserData,
+                          (float)[event magnification],
+                          local.x * scale, local.y * scale,
+                          magnifyModifiers(event));
+}
+
 static NSTextInputContext*
 nativeuiInputContext(id self, SEL selector)
 {
@@ -408,6 +445,18 @@ void
 nativeuiImeReportKeyHandled(NativeUIImeBridge* bridge, bool handled)
 {
   if (bridge && bridge->dispatchingKey) bridge->keyHandled |= handled;
+}
+
+void
+nativeuiImeSetMagnifyCallback(NativeUIImeBridge*          bridge,
+                              NativeUIImeMagnifyCallback  callback,
+                              void*                       user_data)
+{
+  if (!bridge) {
+    return;
+  }
+  bridge->magnifyCallback = callback;
+  bridge->magnifyUserData = user_data;
 }
 
 static void
@@ -552,6 +601,7 @@ bridgeSubclass(Class original)
       !addOverride(subclass, original, "keyUp:", (IMP)nativeuiKeyUp) ||
       !addOverride(subclass, original, "flagsChanged:", (IMP)nativeuiFlagsChanged) ||
       !addOverride(subclass, original, "performKeyEquivalent:", (IMP)nativeuiPerformKeyEquivalent) ||
+      !addOverride(subclass, original, "magnifyWithEvent:", (IMP)nativeuiMagnifyWithEvent) ||
       !addOverride(subclass, original, "inputContext", (IMP)nativeuiInputContext) ||
       !addOverride(subclass, original,
         "puglPreserveEmbeddedFocus",

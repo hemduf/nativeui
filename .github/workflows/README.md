@@ -2,7 +2,7 @@
 
 - `main-smoke.yml` runs the Core unit suite after a merge to `main`.
 - `pugl-integration.yml` qualifies focused Pugl/native-view lifecycle changes on macOS PRs.
-- `ci.yml` builds supported desktop platforms and runs CTest checks except package contracts, nightly and on demand.
+- `ci.yml` builds macOS Intel/ARM64, Windows x64 and Linux x64/ARM64 and runs CTest checks except package contracts, on ready pull requests, nightly and on demand. Draft pull requests defer this full matrix; marking them ready launches qualification. Windows GPU checks use the pinned, checksum-verified Mesa runtime already used by focused qualification workflows.
 - `package-contract.yml` builds an installable package and runs CTest package-consumer checks.
 - `wasm.yml` validates the WebAssembly build and browser integration.
 

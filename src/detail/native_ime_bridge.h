@@ -24,6 +24,16 @@ typedef void (*NativeUIImeCallback)(void*                user_data,
                                     size_t                cursor_byte,
                                     size_t                selection_bytes);
 
+/// macOS trackpad pinch delivery. `magnification` is the continuous relative
+/// scale factor of the event (e.g. 0.04 = +4% this event); `x`/`y` are
+/// view-local physical pixels (same convention as Pugl pointer events), and
+/// `mods` is the PuglMods mask of the event's keyboard modifiers.
+typedef void (*NativeUIImeMagnifyCallback)(void*     user_data,
+                                           float      magnification,
+                                           double     x,
+                                           double     y,
+                                           PuglMods   mods);
+
 typedef struct NativeUIImeBridge NativeUIImeBridge;
 
 #if defined(__APPLE__)
@@ -37,6 +47,13 @@ nativeuiImeCreate(PuglWorld* world,
                   PuglView* view,
                   void* user_data,
                   NativeUIImeCallback callback);
+
+// Optional magnify (trackpad pinch) delivery. When unset, `magnifyWithEvent:`
+// keeps its default responder behavior. Available on macOS; a no-op elsewhere.
+void
+nativeuiImeSetMagnifyCallback(NativeUIImeBridge*          bridge,
+                              NativeUIImeMagnifyCallback  callback,
+                              void*                       user_data);
 
 void
 nativeuiImeDestroy(NativeUIImeBridge* bridge);

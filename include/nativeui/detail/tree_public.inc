@@ -419,7 +419,8 @@ private:
         const auto& event = keyboard_context ? *normalized_context : source_event;
         const bool needs_geometry = is_drop || event.type == InputType::PointerDown ||
             event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
-            event.type == InputType::PointerWheel || event.type == InputType::ContextMenu;
+            event.type == InputType::PointerWheel || event.type == InputType::Magnify ||
+            event.type == InputType::ContextMenu;
         if (dispatch_depth_ == 0 && needs_geometry) {
             // Geometry commit may publish local visibility plans. Drain their
             // retained suffix before acquiring an input token: refresh cannot
@@ -652,7 +653,8 @@ private:
                 return finish(EventResult::Ignored);
             }
 
-            if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
+            if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel ||
+                event.type == InputType::Magnify) {
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
                 if (event.pointer.hover_capable()) {

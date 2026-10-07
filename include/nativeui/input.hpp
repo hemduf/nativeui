@@ -145,7 +145,19 @@ enum class InputType {
     // platform's equivalent) carries the logical position and modifiers like a
     // pointer press. Routing does not move keyboard focus or start a new capture;
     // an existing capture is cancelled before the request is delivered.
-    ContextMenu
+    ContextMenu,
+    // Appended after ContextMenu so every pre-existing public enumerator keeps
+    // its numeric value. Normalized zoom gesture: macOS trackpad pinch
+    // (`magnifyWithEvent:`) delivers one event per continuous delta, and other
+    // platforms normalize ctrl/cmd+scroll (the OS-synthesized pinch and the
+    // browser ctrlKey wheel) into the same event. `magnification` carries the
+    // relative factor (e.g. 0.04 = +4% scale) and position anchors zoom at
+    // the pointer. Delivery mirrors PointerWheel: pointer hit target, no
+    // keyboard focus move, no capture establishment, and PointerWheel never
+    // carries ctrl/gui after normalization.
+    // A capture request for this pointer is ignored, including a request
+    // through an outer borrowed InputContext during reentrant delivery.
+    Magnify
 };
 
 /// Result returned by a component after receiving an input event.
@@ -194,6 +206,9 @@ struct InputEvent {
     // initializers. Legacy pointer events leave this at its id-0 default.
     PointerContact pointer{};
     PointerCancelReason cancel_reason{PointerCancelReason::Native};
+    // InputType::Magnify: relative scale factor of the trackpad pinch event
+    // (e.g. 0.04 = zoom in by 4% this event). Zero for every other event type.
+    float magnification{};
 
     [[nodiscard]] bool primary_shortcut() const noexcept { return primary; }
     [[nodiscard]] bool offers_drop_type(std::string_view requested_type) const noexcept {

@@ -252,14 +252,31 @@
 
         case PUGL_SCROLL: {
             InputEvent input{};
-            input.type = InputType::PointerWheel;
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(event->scroll.x), static_cast<float>(event->scroll.y)},
                 geometry_.last_valid_scale());
-            input.delta = Point{static_cast<float>(event->scroll.dx),
-                                static_cast<float>(event->scroll.dy)};
             input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->scroll.state);
+            if (input.ctrl || input.gui) {
+                // Zoom convention (Figma): ctrl/cmd + scroll means zoom on
+                // every platform — Windows synthesizes ctrl+wheel for the
+                // trackpad pinch, browsers send ctrlKey wheel events for the
+                // pinch gesture, and explicit ctrl/cmd+scroll means zoom.
+                // Normalized into one continuous relative-scale event so all
+                // consumers share a single code path (PointerWheel never
+                // carries ctrl/gui). Pugl normalizes "positive dy = scroll
+                // up" on every backend, so one signed factor serves all of
+                // them (see detail/pugl_scroll_translation.hpp).
+                const auto translation = detail::translate_pugl_scroll(
+                    input.ctrl, input.gui, event->scroll.dy);
+                input.type = translation.type;
+                input.magnification = translation.magnification;
+                ui_.dispatch(input, services_);
+                return PUGL_SUCCESS;
+            }
+            input.type = InputType::PointerWheel;
+            input.delta = Point{static_cast<float>(event->scroll.dx),
+                                static_cast<float>(event->scroll.dy)};
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }

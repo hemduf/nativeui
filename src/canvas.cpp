@@ -33,6 +33,7 @@ EventResult CanvasComponent::input(const InputEvent &event,
       event.type == InputType::PointerMove ||
       event.type == InputType::PointerUp ||
       event.type == InputType::PointerWheel ||
+      event.type == InputType::Magnify ||
       event.type == InputType::DropOffer || event.type == InputType::DropData) {
     const auto bounds = context.bounds();
     local.position.x -= bounds.x;

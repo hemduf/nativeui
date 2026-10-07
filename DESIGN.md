@@ -652,7 +652,7 @@ PUGL_KEY_PRESS/RELEASE -> KeyDown / KeyUp
 PUGL_TEXT              -> committed TextInput
 PUGL_BUTTON_*          -> PointerDown / PointerUp (left), ContextMenu (right press)
 PUGL_MOTION            -> PointerMove
-PUGL_SCROLL            -> PointerWheel
+PUGL_SCROLL            -> PointerWheel, or Magnify when ctrl/cmd is held
 PUGL_FOCUS_*           -> focus activation/deactivation
 PUGL_CONFIGURE         -> logical resize / scale handling
 PUGL_EXPOSE            -> native frame render
@@ -665,6 +665,24 @@ press and is delivered to the pointer hit target without moving keyboard focus. 
 pointer capture is active, its owner first receives `PointerCancel` and the capture is
 released; context-menu routing cannot establish a replacement capture. Ignored requests
 bubble through ancestors like other targeted input.
+
+`InputType::Magnify` is the normalized zoom gesture: a continuous relative scale
+factor (`magnification`, > 0 zooms in) anchored at the event position, delivered to
+the pointer hit target exactly like `PointerWheel`. On macOS it is the native
+trackpad pinch; on every other backend ctrl/cmd + scroll (the OS-synthesized pinch
+and the browser ctrlKey wheel) is normalized to it at the Pugl boundary, and
+`PointerWheel` never carries ctrl or gui after normalization. Delivery mirrors
+`PointerWheel`: an active capture owner receives it like a wheel event during its
+drag, routing never moves keyboard focus or establishes capture, and ignored events
+bubble through ancestors. The pinned Pugl normalizes positive scroll `dy` to
+scroll-up on every backend, so the same ctrl/cmd+wheel-up gesture yields a
+positive magnification on all platforms.
+
+`Canvas` converts the anchor to Canvas-local coordinates, as it does for wheel
+input. Normal overlays and modal barriers absorb ignored `Magnify` input like
+wheel input. A `Magnify` callback cannot establish or replace its pointer's capture,
+including through an outer borrowed input context during reentrant dispatch.
+A nested new pointer-down frame retains its own normal capture permission.
 
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 
