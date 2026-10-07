@@ -550,6 +550,7 @@ public:
                                    event.type == InputType::PointerMove ||
                                    event.type == InputType::PointerUp ||
                                    event.type == InputType::PointerCancel ||
+                                   event.type == InputType::Magnify ||
                                    event.type == InputType::PointerWheel;
         if (pointer_event && pointer_policy_ == OverlayPointerPolicy::Normal) {
             return EventResult::Handled;
@@ -589,6 +590,7 @@ public:
                                    event.type == InputType::PointerMove ||
                                    event.type == InputType::PointerUp ||
                                    event.type == InputType::PointerCancel ||
+                                   event.type == InputType::Magnify ||
                                    event.type == InputType::PointerWheel;
         return pointer_event ? EventResult::Handled : EventResult::Ignored;
     }

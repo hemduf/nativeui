@@ -96,12 +96,13 @@
             pointer_capture_barrier_ || dynamic_teardown_quarantines(&node)) {
             return;
         }
-        // A callback for an older frame can still hold its InputContext while
-        // a nested terminal callback for this same contact is running. Do not
-        // let it renew capture between terminal entry and token-matched cleanup.
+        // An older frame may still hold a permitted InputContext while a
+        // nested terminal or Magnify callback for this contact is running.
+        // That borrow must not bypass the current frame's capture restriction.
         if (active_input_callback_pointer_id_ == pointer &&
             (active_input_callback_type_ == InputType::PointerUp ||
              active_input_callback_type_ == InputType::PointerCancel ||
+             active_input_callback_type_ == InputType::Magnify ||
              active_input_callback_type_ == InputType::ContextMenu)) {
             return;
         }
@@ -221,6 +222,7 @@
              pointer_interaction_dispatch_token(event.pointer.id),
              event.type != InputType::PointerUp &&
                  event.type != InputType::PointerCancel &&
+                 event.type != InputType::Magnify &&
                  event.type != InputType::ContextMenu},
             // Capture is stack-confined. Release can be retained by a gesture
             // and resolves weak ownership instead of a borrowed Node address.

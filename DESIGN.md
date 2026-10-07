@@ -678,6 +678,12 @@ bubble through ancestors. The pinned Pugl normalizes positive scroll `dy` to
 scroll-up on every backend, so the same ctrl/cmd+wheel-up gesture yields a
 positive magnification on all platforms.
 
+`Canvas` converts the anchor to Canvas-local coordinates, as it does for wheel
+input. Normal overlays and modal barriers absorb ignored `Magnify` input like
+wheel input. A `Magnify` callback cannot establish or replace its pointer's capture,
+including through an outer borrowed input context during reentrant dispatch.
+A nested new pointer-down frame retains its own normal capture permission.
+
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 
 ---

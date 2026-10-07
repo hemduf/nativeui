@@ -155,6 +155,8 @@ enum class InputType {
     // the pointer. Delivery mirrors PointerWheel: pointer hit target, no
     // keyboard focus move, no capture establishment, and PointerWheel never
     // carries ctrl/gui after normalization.
+    // A capture request for this pointer is ignored, including a request
+    // through an outer borrowed InputContext during reentrant delivery.
     Magnify
 };
 
