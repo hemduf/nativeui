@@ -27,7 +27,14 @@ public:
         if (!callback_) return;
         if (dirty_) {
             dirty_ = false;
-            state_.queue(ui.measure().preferred);
+            try {
+                state_.queue(ui.measure().preferred);
+            } catch (...) {
+                // Measurement is user code. Preserve the queued notification
+                // for the next safe checkpoint if it throws.
+                dirty_ = true;
+                throw;
+            }
         }
         // The callback may synchronously destroy its owner. Nothing reads
         // this object after dispatch_once returns.

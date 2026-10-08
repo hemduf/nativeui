@@ -2,7 +2,6 @@
 
 // Platform desktop services factories for standalone and embedded views.
 #include "standalone_window.hpp"
-#include "standalone_window.hpp"
 #include "embedded_view.hpp"
 #if defined(__APPLE__)
 #  include "../macos_desktop_services.hpp"
