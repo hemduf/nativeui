@@ -1,0 +1,17 @@
+name: NativeUI C/C++ compiler cache
+description: Configure pinned sccache for CMake/Ninja build jobs on GitHub Actions.
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned sccache
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.16.0
+
+    - name: Enable cache for subsequent CMake configuration and builds
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"

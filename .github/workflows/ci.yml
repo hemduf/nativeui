@@ -10,7 +10,8 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'examples/**'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/**'
+      - '.github/actions/setup-cpp-cache/**'
   schedule:
     - cron: '17 2 * * *'
   workflow_dispatch:
@@ -24,9 +25,18 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
-  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+  CMAKE_BUILD_PARALLEL_LEVEL: '3'
 
 jobs:
+  workflow-policy:
+    name: Shared CI workflow policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shared workflow contract
+        run: python3 tests/ci_workflow_contract.py
+
   build:
     name: ${{ matrix.name }}
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
@@ -50,6 +60,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
 
       - name: Restore dependency cache
         uses: actions/cache@v4
@@ -142,8 +155,13 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
 
       - name: Restore dependency cache
         uses: actions/cache@v4

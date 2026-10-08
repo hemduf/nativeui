@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
-  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+  CMAKE_BUILD_PARALLEL_LEVEL: '3'
 
 jobs:
   package:
@@ -50,6 +50,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
 
       - name: Restore dependency cache
         uses: actions/cache@v4
