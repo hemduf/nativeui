@@ -5,6 +5,9 @@
 
 namespace ui {
 struct TreeTestAccess {
+  static std::string numeric_draft(Tree &tree) {
+    return tree.root_->component->semantics().text_value;
+  }
   static std::pair<Rect, Rect> input_and_stepper(Tree &tree) {
     return {tree.root_->children[0]->bounds,
             tree.root_->children[1]->bounds};
@@ -232,7 +235,42 @@ void submit_source_updates_do_not_rearm_the_same_enter_contact() {
   tree.dispatch(test::key(ui::Key::Enter), platform);
   NUI_CHECK(submits == 2 && value.get() == 3);
 }
+void throwing_invalidation_does_not_publish_speculative_step() {
+  ui::State<double> value{12.5};
+  ui::Tree tree{ui::compile(ui::make_spec(
+      ui::NumberInput{"Quantity", value}.range(0, 100).step(0.5).precision(1)))};
+  test::MockPlatform platform;
+  tree.mount();
+  tree.layout({450, 82});
+  tree.activate_focus(platform);
+
+  bool fail = false;
+  tree.set_invalidation_callback([&](ui::Rect) {
+    if (fail)
+      throw std::runtime_error("injected numeric step invalidation failure");
+  });
+  NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "12.5");
+
+  fail = true;
+  bool caught = false;
+  try {
+    (void)tree.dispatch(test::key(ui::Key::Up), platform);
+  } catch (const std::runtime_error&) {
+    caught = true;
+  }
+  NUI_CHECK(caught);
+  NUI_CHECK(value.get() == 12.5);
+  NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "12.5");
+
+  fail = false;
+  (void)tree.dispatch(test::key(ui::Key::Up), platform);
+  NUI_CHECK(value.get() == 13.0);
+  NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "13.0");
+  tree.deactivate_focus(platform);
+}
+
 void suite() {
+  throwing_invalidation_does_not_publish_speculative_step();
   stepper_aligns_with_the_numeric_field();
   stepper_follows_focused_field_geometry();
   stepper_pointer_controls_publish_the_shared_value();

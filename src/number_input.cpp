@@ -229,21 +229,25 @@ struct NumberState : std::enable_shared_from_this<NumberState> {
   void step_to(double value, std::function<bool()> guard = {}) {
     if (!can_write())
       return;
+    // Validate the future display before any publication. An invalidator can
+    // throw, retire the editor, or synchronously change the backing value.
+    // Do not stage the draft or accepted_number ahead of that boundary:
+    // source observers/retained checkpoints perform authoritative reconciliation.
     auto text = format_number(value, precision);
     const double expected = source.get();
     const auto serial = ++generation;
-    accepted_number = value;
-    presentation_validity(false);
-    if (!set_draft(std::move(text)))
-      return;
     if (invalidate)
       invalidate();
-    if (can_write() && generation == serial &&
-        same_double(source.get(), expected) && (!guard || guard())) {
-      seen = value;
-      auto copy = source;
-      copy.set(value);
+    if (!can_write() || generation != serial ||
+        !same_double(source.get(), expected) || (guard && !guard()))
+      return;
+    if (same_double(value, expected)) {
+      // An edge step still normalizes an invalid draft, without a value write.
+      (void)set_draft(std::move(text));
+      return;
     }
+    auto copy = source;
+    copy.set(value);
   }
   std::optional<EventResult> input(const InputEvent &event,
                                    InputContext &context,
