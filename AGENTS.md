@@ -10,6 +10,14 @@ Authoritative sources:
 - [`CODE_REVIEW.md`](CODE_REVIEW.md) — detailed mandatory review gate.
 - [`.github/workflows/README.md`](.github/workflows/README.md) — CI model.
 
+## Language policy
+
+All project content must be in English, including documentation, examples and demos,
+code identifiers and comments, UI labels, accessibility text, diagnostics, tests,
+commit messages, and pull request titles and descriptions.
+
+Use another language only when the user explicitly requests it.
+
 ## 1. Project boundary
 
 NativeUI is a C++20 retained-mode UI toolkit for standalone and embedded/plugin views.

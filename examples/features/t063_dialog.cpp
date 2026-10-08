@@ -646,9 +646,15 @@ int throwing_completion_releases_slot_contract() {
 
 int overlay_command_failure_recovery_contract() {
     example::Platform platform;
+    const auto is_full_viewport = [](ui::Rect damage) {
+        return damage.x == 0.0f && damage.y == 0.0f &&
+            damage.w == 240.0f && damage.h == 180.0f;
+    };
 
     {
         ui::State<int> selection{1};
+        int selection_commits = 0;
+        auto selection_observer = selection.observe([&](const int&) { ++selection_commits; });
         ui::UI tree{ui::ComboBox<int>{
             selection,
             {{1, "One", true}, {2, "Two", true}}}};
@@ -656,8 +662,12 @@ int overlay_command_failure_recovery_contract() {
         tree.activate(platform);
 
         bool fail_invalidation = false;
-        tree.set_invalidation_callback(std::function<void()>{[&] {
-            if (fail_invalidation) {
+        bool close_phase = false;
+        int injected_failures = 0;
+        tree.set_invalidation_callback(std::function<void(ui::Rect)>{[&](ui::Rect damage) {
+            if (fail_invalidation &&
+                (!close_phase || is_full_viewport(damage))) {
+                ++injected_failures;
                 throw std::runtime_error{"T131 injected popup transaction failure"};
             }
         }});
@@ -670,7 +680,8 @@ int overlay_command_failure_recovery_contract() {
             show_threw = true;
         }
         fail_invalidation = false;
-        if (!show_threw || !tree.overlay_entries().empty() || selection.get() != 1) {
+        if (!show_threw || injected_failures != 1 || !tree.overlay_entries().empty() ||
+            selection.get() != 1 || selection_commits != 0) {
             tree.clear_invalidation_callback();
             return example::fail("T131 ComboBox failed show left overlay/opener state wedged");
         }
@@ -684,6 +695,23 @@ int overlay_command_failure_recovery_contract() {
         }
         (void)tree.dispatch(example::key(ui::Key::Down), platform);
 
+        // Consume existing damage before arming the fault. Otherwise a close
+        // notification can coalesce with that damage and the first exception
+        // may occur only after the selection callback has already committed.
+        ui::HeadlessRenderer renderer{{240.0f, 180.0f}};
+        if (!renderer.render(tree) || tree.paint_dirty() || tree.layout_dirty()) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 ComboBox close fault setup did not consume pending damage");
+        }
+        // Panel painting precedes accepting the close command. Inject only
+        // the full-viewport structural notification at the close transaction.
+        const auto close_entries = tree.overlay_entries();
+        if (close_entries.size() != 1 || is_full_viewport(close_entries.front().bounds)) {
+            tree.clear_invalidation_callback();
+            return example::fail("T131 ComboBox close fault needs sub-viewport popup bounds");
+        }
+        injected_failures = 0;
+        close_phase = true;
         fail_invalidation = true;
         bool close_threw = false;
         try {
@@ -692,14 +720,15 @@ int overlay_command_failure_recovery_contract() {
             close_threw = true;
         }
         fail_invalidation = false;
-        if (!close_threw || selection.get() != 1 || tree.overlay_entries().size() != 1) {
+        if (!close_threw || injected_failures != 1 || selection.get() != 1 ||
+            selection_commits != 0 || tree.overlay_entries().size() != 1) {
             tree.clear_invalidation_callback();
             return example::fail("T131 ComboBox failed close lost pending commit/overlay state");
         }
 
         (void)tree.dispatch(key_up(ui::Key::Enter), platform);
         tree.clear_invalidation_callback();
-        if (selection.get() != 2 || !tree.overlay_entries().empty()) {
+        if (selection.get() != 2 || selection_commits != 1 || !tree.overlay_entries().empty()) {
             return example::fail("T131 ComboBox close retry did not commit exactly once");
         }
     }
@@ -717,9 +746,21 @@ int overlay_command_failure_recovery_contract() {
             return example::fail("T131 PopupMenu retry setup did not open");
         }
 
+        // As for ComboBox, target the fallible structural notification before
+        // close commits, independently of earlier focus/layout invalidations.
+        ui::HeadlessRenderer renderer{{240.0f, 180.0f}};
+        if (!renderer.render(tree) || tree.paint_dirty() || tree.layout_dirty()) {
+            return example::fail("T131 PopupMenu close fault setup did not consume pending damage");
+        }
         bool fail_invalidation = false;
-        tree.set_invalidation_callback(std::function<void()>{[&] {
-            if (fail_invalidation) {
+        int injected_failures = 0;
+        const auto close_entries = tree.overlay_entries();
+        if (close_entries.size() != 1 || is_full_viewport(close_entries.front().bounds)) {
+            return example::fail("T131 PopupMenu close fault needs sub-viewport popup bounds");
+        }
+        tree.set_invalidation_callback(std::function<void(ui::Rect)>{[&](ui::Rect damage) {
+            if (fail_invalidation && is_full_viewport(damage)) {
+                ++injected_failures;
                 throw std::runtime_error{"T131 injected menu close failure"};
             }
         }});
@@ -731,7 +772,8 @@ int overlay_command_failure_recovery_contract() {
             close_threw = true;
         }
         fail_invalidation = false;
-        if (!close_threw || actions != 0 || tree.overlay_entries().size() != 1) {
+        if (!close_threw || injected_failures != 1 || actions != 0 ||
+            tree.overlay_entries().size() != 1) {
             tree.clear_invalidation_callback();
             return example::fail("T131 PopupMenu failed close lost pending action/overlay state");
         }

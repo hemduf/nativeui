@@ -1,15 +1,8 @@
-    /// Take exclusive ownership of one already-compiled retained root.
-    ///
-    /// `root` must be a valid non-null hierarchy such as `compile()` returns;
-    /// Tree does not define a nullable-root mode. Ownership transfers completely
-    /// to this Tree. Construction may allocate while reserving transition state.
     explicit Tree(std::unique_ptr<Node> root) : root_(std::move(root)) {
         focus_transition_stack_.reserve(4);
         pointer_hover_transition_stack_.reserve(4);
     }
 
-    /// Best-effort no-throw teardown. Explicit lifecycle calls may propagate
-    /// application callback failures; destructor cleanup contains them.
     ~Tree() noexcept {
         try {
             unmount();
@@ -20,8 +13,6 @@
     Tree(const Tree&) = delete;
     Tree& operator=(const Tree&) = delete;
 
-    /// Mount the retained hierarchy once. Parents mount before children.
-    /// Partial failure is rolled back before the exception propagates.
     void mount() {
         if (mounted_) return;
         reset_semantic_recovery();
@@ -72,26 +63,15 @@
         mounted_ = true;
     }
 
-    /// Measure the root under logical constraints without publishing layout.
-    ///
-    /// Inputs and returned metrics use logical pixels. Pending dynamic structure
-    /// is flushed first, so this const API is not a pure read: component factories
-    /// or measure callbacks may allocate/throw. During a lifecycle transition it
-    /// is suppressed and returns a default ChildMetrics.
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints) const {
         if (lifecycle_transition_active()) return {};
         const_cast<Tree*>(this)->flush_dynamic_mutations();
         return measure_node(*root_, constraints);
     }
 
-    /// Publish retained geometry for one logical-pixel viewport.
-    ///
-    /// Pending dynamic structure is reconciled first. Unchanged clean geometry is
-    /// a no-op. Layout callbacks may allocate/throw; failure rolls publication
-    /// back to the last coherent geometry and keeps layout dirty for retry.
-    /// Suppressed while another lifecycle transition is active.
     void layout(Size viewport) {
         if (lifecycle_transition_active()) return;
+        refresh_retained_components();
         flush_dynamic_mutations();
         const bool size_changed = viewport.w != viewport_.w || viewport.h != viewport_.h;
         if (!size_changed && !layout_dirty_) return;
@@ -106,18 +86,23 @@
         commit_layout_publication();
     }
 
-    /// Activate mounted components and the retained focus/input domain.
-    ///
-    /// `platform` is borrowed for the active interval and must remain alive until
-    /// deactivation/teardown clears that borrow. Activation may invoke component
-    /// and focus callbacks. On failure Tree performs best-effort deactivation,
-    /// clears active focus/capture/platform state, then rethrows.
     void activate_focus(PlatformServices& platform) {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Activate, true};
         if (!mounted_) return;
         flush_dynamic_mutations();
         if (active_) return;
 
+        if (activation_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
+            throw std::overflow_error("Tree activation identity exhausted");
+        }
+        ++activation_epoch_;
+
+        Dispatcher dispatcher;
+        if (const auto* provider = dynamic_cast<const DispatcherProvider*>(&platform)) {
+            dispatcher = provider->dispatcher();
+        }
+        const auto previous_dispatcher = lifecycle_dispatcher_;
+        lifecycle_dispatcher_ = std::move(dispatcher);
         active_ = true;
         try {
             activate_node(*root_);
@@ -134,6 +119,7 @@
             reset_focus_scope_cache(*root_);
             focus_structure_dirty_ = true;
             active_ = false;
+            lifecycle_dispatcher_ = previous_dispatcher;
             throw;
         }
 
@@ -161,33 +147,30 @@
             reset_focus_scope_cache(*root_);
             focus_structure_dirty_ = true;
             active_ = false;
+            lifecycle_dispatcher_ = previous_dispatcher;
             std::rethrow_exception(activation_error);
         }
     }
 
-    /// Re-notify the active focused component after structural synchronization.
-    ///
-    /// The focused component receives `focus_changed(true, ...)` again; that
-    /// callback may re-enter Tree or throw. Inactive/unfocused/lifecycle-transition
-    /// cases are no-ops. `platform` is borrowed only for this call.
     void refresh_focus(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
+        refresh_retained_components();
         flush_dynamic_mutations();
         if (!active_) return;
         sync_availability_structure(platform);
         sync_focus_structure(platform);
-        if (focusables_.empty() || !focus_active_) return;
-        auto* node = focusables_[focused_index_];
+        if (!active_ || focusables_.empty() || !focus_active_) return;
+        // This refresh bypasses the ordinary focus-transition state machine.
+        // Do not deliver stale bounds when layout was invalidated in-place.
+        ensure_layout();
+        if (!active_) return;
+        auto* node = current_focus_node();
+        if (!focus_target_available(node)) return;
         FocusContext context{
             node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
         node->component->focus_changed(true, context);
     }
 
-    /// Clear hover/capture/focus and deactivate the active retained hierarchy.
-    ///
-    /// Cleanup continues across pointer/focus/lifecycle callback failures. The
-    /// first captured exception is rethrown only after active state and the
-    /// retained PlatformServices borrow have been cleared.
     void deactivate_focus(PlatformServices& platform) {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Deactivate, true};
         std::exception_ptr first_error;
@@ -213,7 +196,8 @@
         if (!focusables_.empty() && focus_active_) {
             auto* node = focusables_[focused_index_];
             FocusContext context{
-                node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node)};
+                node->bounds, platform, paint_invalidator(*node), layout_invalidator(*node),
+                FocusChangeReason::Teardown};
             capture_error([&] { node->component->focus_changed(false, context); });
             capture_error([&] { invalidate_node_paint(*node); });
         }
@@ -234,10 +218,10 @@
         capture_error([&] { invalidate_paint(viewport_rect()); });
         reset_semantic_recovery();
 
+        lifecycle_dispatcher_ = {};
         if (first_error) std::rethrow_exception(first_error);
     }
 
-    /// Unmount child-to-parent, deactivating first when still active.
     void unmount() {
         LifecycleTransitionScope lifecycle{*this, LifecycleTransition::Unmount, true};
         if (!mounted_ || !root_) {
@@ -269,36 +253,22 @@
         mounted_ = false;
         reset_semantic_recovery();
 
+        lifecycle_dispatcher_ = {};
         if (first_error) std::rethrow_exception(first_error);
     }
 
-    /// True when layout or paint work remains.
     [[nodiscard]] bool dirty() const noexcept {
         return layout_dirty_ || !paint_dirty_.empty();
     }
-    /// True when retained geometry must be recomputed.
     [[nodiscard]] bool layout_dirty() const noexcept { return layout_dirty_; }
-
-    /// True when one or more logical paint regions remain dirty.
     [[nodiscard]] bool paint_dirty() const noexcept { return !paint_dirty_.empty(); }
-
-    /// Borrow current logical-pixel damage rectangles.
-    ///
-    /// The vector is Tree-owned and may be invalidated by later layout/paint/
-    /// invalidation mutation. Copy it when a longer lifetime is required.
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return paint_dirty_.rects();
     }
-    /// Borrow the latest structural-reconciliation diagnostic.
-    ///
-    /// The string is Tree-owned and may change on later dynamic reconciliation.
-    /// Copy it for retention beyond immediate inspection.
     [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
         return structural_diagnostic_;
     }
 
-    /// Read effective availability for one retained node, or nullopt for a
-    /// stale/missing identity.
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {
         if (!root_) return std::nullopt;
@@ -307,13 +277,6 @@
         return node->component->effective_availability();
     }
 
-    /// Replace the logical-region invalidation callback.
-    ///
-    /// Tree owns the callable. Notification is synchronous on the UI/main thread
-    /// when newly exposed damage is published, and existing dirty rectangles are
-    /// replayed immediately on installation. A callback may re-enter or throw;
-    /// dirty state is already retained and the new callback remains installed.
-    /// Empty clears notification without clearing damage.
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         invalidation_callback_ = std::move(callback);
         if (invalidation_callback_) {
@@ -321,7 +284,6 @@
         }
     }
 
-    /// Region-agnostic invalidation callback convenience overload.
     void set_invalidation_callback(std::function<void()> callback) {
         if (!callback) {
             set_invalidation_callback(std::function<void(Rect)>{});
@@ -331,22 +293,10 @@
             [callback = std::move(callback)](Rect) mutable { callback(); });
     }
 
-    /// Mark the complete viewport for repaint.
     void invalidate() { invalidate_paint(viewport_rect()); }
-    /// Mark one root-logical rectangle for repaint.
-    ///
-    /// Damage is bounded by the current viewport/DirtyRegion policy. If this
-    /// publishes new damage, the invalidation callback runs synchronously and
-    /// may re-enter/throw after the dirty state has been recorded.
     void invalidate(Rect rect) { invalidate_paint(rect); }
-    /// Mark retained layout dirty from the root.
-    ///
-    /// Bounds may move on the next layout, so this also conservatively dirties
-    /// the complete viewport. Callback exceptions propagate after dirty/layout
-    /// state has already been recorded.
     void invalidate_layout() { invalidate_layout_from(*root_); }
 
-    /// Move focus to the next eligible retained target.
     void focus_next(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -354,7 +304,6 @@
         move_focus(1, platform);
     }
 
-    /// Move focus to the previous eligible retained target.
     void focus_previous(PlatformServices& platform) {
         if (lifecycle_transition_active()) return;
         flush_dynamic_mutations();
@@ -362,28 +311,15 @@
         move_focus(-1, platform);
     }
 
-    /// Replace semantic-command fallback after retained routing returns Ignored.
-    ///
-    /// Tree owns the callback; it runs on the UI/main thread and its EventResult
-    /// becomes the dispatch result. Exceptions propagate. Empty removes it.
     void set_global_command_handler(std::function<EventResult(Command)> handler) {
         global_command_handler_ = std::move(handler);
     }
 
-    /// Replace fallback handling for KeyDown left unconsumed by retained routing.
-    ///
-    /// Tree owns the callback and keeps the currently executing callable alive
-    /// across reentrant replacement/clear. Exceptions propagate only after input
-    /// dispatch bookkeeping has been restored. Empty removes the fallback.
     void set_global_key_down_handler(
         std::function<EventResult(const InputEvent&)> handler) {
         global_key_down_handler_ = std::move(handler);
     }
 
-    /// Return the internal slot index for one active pointer interaction.
-    ///
-    /// Advanced integration/test seam. An untracked ID returns the current
-    /// interaction count as an end sentinel. No allocation or callbacks.
     [[nodiscard]] std::size_t pointer_interaction_index(
         PointerId pointer) const noexcept {
         for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
@@ -392,10 +328,6 @@
         return active_pointer_interaction_count_;
     }
 
-    /// Return the Tree-local dispatch generation for `pointer`, or 0 if absent.
-    ///
-    /// The token distinguishes older outer events from newer reentrant contacts
-    /// reusing the same PointerId; it is not a persistent application identity.
     [[nodiscard]] std::uint64_t pointer_interaction_dispatch_token(
         PointerId pointer) const noexcept {
         const auto index = pointer_interaction_index(pointer);
@@ -404,10 +336,6 @@
             : active_pointer_interactions_[index].dispatch_token;
     }
 
-    /// Begin/refresh one allocation-free Tree-local pointer interaction.
-    ///
-    /// The current dispatch generation is captured. Up to 16 PointerIds are
-    /// tracked; a new ID is not appended when capacity is already full.
     void begin_pointer_interaction(PointerId pointer = 0U) noexcept {
         const auto index = pointer_interaction_index(pointer);
         if (index != active_pointer_interaction_count_) {
@@ -423,7 +351,6 @@
         pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
     }
 
-    /// End one tracked pointer interaction; absent IDs are no-ops.
     void end_pointer_interaction(PointerId pointer = 0U) noexcept {
         const auto index = pointer_interaction_index(pointer);
         if (index == active_pointer_interaction_count_) return;
@@ -436,10 +363,6 @@
         pointer_interaction_active_ = active_pointer_interaction_count_ != 0U;
     }
 
-    /// End only the interaction whose dispatch generation still matches.
-    ///
-    /// Mismatch/absence is a no-op, protecting a newer nested interaction with
-    /// the same PointerId from cleanup owned by an older outer event.
     void end_pointer_interaction_if_token(
         PointerId pointer, std::uint64_t dispatch_token) noexcept {
         const auto index = pointer_interaction_index(pointer);
@@ -450,10 +373,6 @@
         end_pointer_interaction(pointer);
     }
 
-    /// Clear tracked interaction generations without delivering PointerCancel.
-    ///
-    /// Normal lifecycle owners should use `cancel_pointer()` when callbacks and
-    /// capture teardown are required.
     void clear_pointer_interactions() noexcept {
         for (std::size_t i = 0; i < active_pointer_interaction_count_; ++i) {
             active_pointer_interactions_[i] = {};
@@ -462,27 +381,56 @@
         pointer_interaction_active_ = false;
     }
 
-    /// Route one normalized event through retained focus/hit-test/capture policy.
-    ///
-    /// Non-drop events require an active Tree; DropOffer/DropData may target a
-    /// mounted inactive Tree. Pointer positions are root-logical coordinates.
-    /// The call may flush dynamic structure, invoke application callbacks,
-    /// allocate and throw.
-    ///
-    /// Dispatch is reentrant. Tree-local generation tokens prevent cleanup from
-    /// an older PointerDown/Up/Cancel frame from erasing a newer nested contact
-    /// with the same PointerId. On exception depth/token bookkeeping is restored
-    /// before propagation; outermost successful return flushes pending structural
-    /// and availability/focus work. `platform` is borrowed for this call.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
+        return dispatch_prepared(event, platform, false);
+    }
+
+private:
+    EventResult dispatch_prepared(const InputEvent& source_event, PlatformServices& platform,
+                                  bool checkpoint_prepared) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
-        const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
+        const bool is_drop = source_event.type == InputType::DropOffer || source_event.type == InputType::DropData;
         if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
 
+        const auto dispatch_activation_epoch = activation_epoch_;
+        if (!checkpoint_prepared) refresh_retained_components();
         resume_pointer_hover_transitions(platform);
         flush_dynamic_mutations();
         sync_availability_structure(platform);
         if (active_) sync_focus_structure(platform);
+        // Focus preparation can run layout callbacks that retire this view.
+        if (is_drop ? !mounted_ : !active_) return EventResult::Ignored;
+
+        const bool keyboard_context = source_event.type == InputType::KeyDown &&
+            (source_event.key == Key::Menu || (source_event.key == Key::F10 && source_event.shift));
+        std::optional<InputEvent> normalized_context;
+        NodeId keyboard_context_target{kInvalidNodeId};
+        if (keyboard_context) {
+            ensure_input_geometry();
+            auto* focused = current_focus_node();
+            if (!focused || !focus_target_available(focused)) return EventResult::Ignored;
+            keyboard_context_target = focused->id;
+            normalized_context.emplace(source_event);
+            normalized_context->type = InputType::ContextMenu;
+            normalized_context->key = Key::None;
+            normalized_context->position = {focused->bounds.x + focused->bounds.w * 0.5f,
+                                           focused->bounds.y + focused->bounds.h * 0.5f};
+        }
+        const auto& event = keyboard_context ? *normalized_context : source_event;
+        const bool needs_geometry = is_drop || event.type == InputType::PointerDown ||
+            event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
+            event.type == InputType::PointerWheel || event.type == InputType::Magnify ||
+            event.type == InputType::ContextMenu;
+        if (dispatch_depth_ == 0 && needs_geometry) {
+            // Geometry commit may publish local visibility plans. Drain their
+            // retained suffix before acquiring an input token: refresh cannot
+            // reconcile availability while a component input stack is active.
+            ensure_input_geometry();
+            if (active_) sync_focus_structure(platform);
+            if (is_drop ? !mounted_ : (!active_ || activation_epoch_ != dispatch_activation_epoch)) {
+                return EventResult::Ignored;
+            }
+        }
 
         const auto previous_dispatch_depth = dispatch_depth_;
         const auto previous_input_dispatch_token = active_input_dispatch_token_;
@@ -501,12 +449,19 @@
             if (previous_dispatch_depth == 0) {
                 flush_dynamic_mutations();
                 sync_availability_structure(platform);
-                if (active_) sync_focus_structure(platform);
+                if (active_) {
+                    sync_focus_structure(platform);
+                    drain_descendant_actions(platform);
+                    sync_availability_structure(platform);
+                }
             }
             return result;
         };
 
         try {
+            // A nested callback may have requested newer geometry since the
+            // outer safe checkpoint. Preserve the existing guarded retry.
+            if (needs_geometry) ensure_input_geometry();
             Node& pointer_hit_root =
                 pointer_passthrough_dynamic_root_ && root_->children.size() == 1
                     ? *root_->children.front()
@@ -527,9 +482,9 @@
                     child_clip = intersect(inherited_clip, node.bounds);
                 }
                 if (!child_clip.empty()) {
-                    for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-                        if (auto* result = self(self, **it, point, child_clip)) return result;
-                    }
+                    if (auto* result = hit_test_children(node, [&](Node& child) {
+                        return self(self, child, point, child_clip);
+                    })) return result;
                 }
                 return node.bounds.contains(point) && node.component->pointer_targetable() ? &node : nullptr;
             };
@@ -553,7 +508,13 @@
                 int group_direction = 0;
                 if (event.key == Key::Left || event.key == Key::Up) group_direction = -1;
                 if (event.key == Key::Right || event.key == Key::Down) group_direction = 1;
-                if (group_direction != 0 && move_focus_in_current_group(group_direction, platform)) {
+                const bool boundary = event.key == Key::Home || event.key == Key::End;
+                if (boundary) group_direction = event.key == Key::Home ? -1 : 1;
+                const auto* participant = focus_group_participant(current_focus_node());
+                if (group_direction != 0 && participant &&
+                    (boundary ? participant->focus_group_accepts_boundary_key(event.key)
+                              : participant->focus_group_accepts_navigation_key(event.key)) &&
+                    move_focus_in_current_group(group_direction, platform, boundary)) {
                     return finish(EventResult::Handled);
                 }
             }
@@ -574,6 +535,15 @@
                 }
                 if (!handled(result) && global_command_handler_) {
                     result = global_command_handler_(command_event.command);
+                }
+                // Newly added find shortcuts retain the application's raw
+                // KeyDown fallback when no find owner accepts the command.
+                // Historical editing shortcuts and explicit Command events
+                // remain exclusively on their established command route.
+                if (!handled(result) && event.type == InputType::KeyDown &&
+                    (command_event.command == Command::FindNext ||
+                     command_event.command == Command::FindPrevious) && global_key_down_handler_) {
+                    result = global_key_down_handler_(event);
                 }
                 return finish(result);
             }
@@ -609,7 +579,9 @@
                     const auto stale_interaction_token =
                         pointer_interaction_dispatch_token(event.pointer.id);
                     pointer_route_committed = true;
-                    (void)cancel_pointer_capture(platform, event);
+                    auto replacement_cancel = event;
+                    replacement_cancel.cancel_reason = PointerCancelReason::Replaced;
+                    (void)cancel_pointer_capture(platform, replacement_cancel);
                     pointer_route_committed = false;
 
                     // The cancellation callback may synchronously deliver a
@@ -632,6 +604,10 @@
                 }
                 if (target) {
                     focus_nearest_ancestor(target);
+                    if (!active_) {
+                        pointer_route_committed = true;
+                        return finish(EventResult::Ignored);
+                    }
                     const auto result = route_from(*target, event, platform);
                     pointer_route_committed = true;
                     return finish(result);
@@ -649,20 +625,36 @@
                     pointer_interaction_dispatch_token(event.pointer.id);
                 pointer_route_committed = true;
                 if (pointer_capture_owner(event.pointer.id)) {
-                    (void)cancel_pointer_capture(platform, event);
+                    auto replacement_cancel = event;
+                    replacement_cancel.cancel_reason = PointerCancelReason::Replaced;
+                    (void)cancel_pointer_capture(platform, replacement_cancel);
                 } else {
                     end_pointer_interaction_if_token(
                         event.pointer.id, interaction_token);
                 }
-                auto* target = hit_test_pointer(
-                    hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
-                if (target) {
+                if (!active_ || activation_epoch_ != dispatch_activation_epoch) return finish(EventResult::Ignored);
+                // Capture only after authoritative layout and native contact
+                // cancellation. A cancellation callback can dirty geometry.
+                ensure_input_geometry();
+                Node& current_hit_root =
+                    pointer_passthrough_dynamic_root_ && root_->children.size() == 1
+                        ? *root_->children.front() : *root_;
+                auto* target = keyboard_context
+                    ? retained_invalidation_node(keyboard_context_target)
+                    : hit_test_pointer(hit_test_pointer, current_hit_root, event.position, viewport_rect());
+                if (target && target->component->effective_availability().interactive()) {
+                    if (context_overlay_route_) {
+                        for (auto* owner = target; owner; owner = owner->parent) {
+                            if (overlay_commands_for(*owner)) context_overlay_route_->push_back(owner->id);
+                        }
+                    }
                     return finish(route_without_pointer_capture(*target, event, platform));
                 }
                 return finish(EventResult::Ignored);
             }
 
-            if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel) {
+            if (event.type == InputType::PointerMove || event.type == InputType::PointerWheel ||
+                event.type == InputType::Magnify) {
                 auto* target = hit_test_pointer(
                     hit_test_pointer, pointer_hit_root, event.position, viewport_rect());
                 if (event.pointer.hover_capable()) {
@@ -715,7 +707,7 @@
             }
 
             if (is_drop) {
-                ensure_layout();
+                ensure_input_geometry();
                 if (auto* target = hit_test_any(*root_, event.position, viewport_rect())) {
                     return finish(route_from(*target, event, platform));
                 }
@@ -753,11 +745,7 @@
         }
     }
 
-    /// Deliver PointerCancel to active capture owners and clear interaction state.
-    ///
-    /// Component callbacks may re-enter or throw; cleanup owned by cancellation
-    /// is completed before an error propagates. Suppressed during lifecycle
-    /// transitions. `platform` is borrowed for the call.
+public:
     EventResult cancel_pointer(PlatformServices& platform) {
         if (lifecycle_transition_active()) return EventResult::Ignored;
         flush_dynamic_mutations();
@@ -765,13 +753,6 @@
         return cancel_all_pointer_captures(platform);
     }
 
-    /// Paint the complete retained tree into a borrowed SkCanvas.
-    ///
-    /// Pending structure/focus/layout is prepared first. A successful traversal
-    /// consumes only damage that existed before the first component paint
-    /// callback; invalidation raised reentrantly survives for the next frame.
-    /// On paint failure pre-existing damage is merged back before propagation.
-    /// `canvas` and `platform` are borrowed synchronously. Not audio-RT safe.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         paint_with_resources(canvas, platform, nullptr);
     }

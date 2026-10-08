@@ -5,6 +5,7 @@
 #include <nativeui/detail/focus_group.hpp>
 #include <nativeui/detail/interaction_observer.hpp>
 #include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/detail/raster_cache_epoch.hpp>
 #include <nativeui/detail/theme_binding.hpp>
 #include <nativeui/detail/transient_presentation.hpp>
@@ -40,15 +41,6 @@ class Dialog;
 class UI;
 struct TreeTestAccess;
 
-/// Low-level retained component-tree runtime.
-///
-/// Most applications should own a `UI`, which wraps Tree with overlay/dialog
-/// policy and view-oriented lifecycle conveniences. Tree is the advanced public
-/// surface for integrations/tests that intentionally drive retained mounting,
-/// measurement/layout, focus/input, invalidation and painting themselves.
-///
-/// Tree is non-copyable, instance-owned and UI/main-thread confined. It does not
-/// provide synchronization for concurrent calls or an audio-thread transport.
 class Tree {
 public:
 #include <nativeui/detail/tree_public.inc>
@@ -67,6 +59,7 @@ private:
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>
+#include <nativeui/detail/tree_descendant_actions.inc>
 #include <nativeui/detail/tree_layout.inc>
 #include <nativeui/detail/tree_focus.inc>
 #include <nativeui/detail/tree_input.inc>

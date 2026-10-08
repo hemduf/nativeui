@@ -60,11 +60,16 @@
             }
             if (!availability_differs(*root_)) return;
             availability_structure_dirty_ = true;
+            if (lifecycle_transition_ == LifecycleTransition::Refresh) {
+                invalidate_node_paint(node);
+                return;
+            }
             if (!active_) {
                 sync_availability_inactive();
                 return;
             }
-            if (active_platform_ && dispatch_depth_ == 0) {
+            if (active_platform_ && dispatch_depth_ == 0 &&
+            lifecycle_transition_ != LifecycleTransition::Refresh) {
                 sync_availability_structure(*active_platform_);
                 return;
             }
@@ -140,6 +145,7 @@
             paint_changed = paint_changed ||
                 old.visibility != change.value.visibility || style_paint_changed;
             change.node->component->set_effective_availability(change.value);
+            change.node->component->effective_availability_changed(old, change.value);
         }
     }
 
@@ -290,6 +296,8 @@
     }
 
     void invalidate_layout_from(Node& node) {
+        input_layout_rollback_ = false;
+        if (layout_transaction_active_) layout_requested_during_transaction_ = true;
         invalidate_raster_cache_ancestry(&node);
         mark_paint_culling_dirty();
         for (Node* current = &node; current; current = current->parent) {
@@ -304,23 +312,40 @@
 
     static std::vector<ChildMetrics> measure_children(
         const Node& node, const Constraints& constraints) {
+        std::vector<ChildMetrics> metadata(node.children.size());
+        for (std::size_t i = 0; i < node.children.size(); ++i) {
+            metadata[i].participates_in_layout =
+                node.children[i]->component->effective_visibility() != VisibilityMode::Collapsed;
+        }
         std::vector<ChildMetrics> child_metrics;
         child_metrics.reserve(node.children.size());
-        for (std::size_t i = 0; i < node.children.size(); ++i) {
-            const auto child_constraints =
-                node.component->child_constraints(constraints, i, node.children.size());
-            child_metrics.push_back(measure_node(*node.children[i], child_constraints));
+        const auto passes = std::clamp<std::size_t>(node.component->child_measurement_passes(), 1, 2);
+        for (std::size_t pass = 0; pass < passes; ++pass) {
+            node.component->measure_children_pass_started(constraints, pass);
+            child_metrics.clear();
+            for (std::size_t i = 0; i < node.children.size(); ++i) {
+                const auto child_constraints =
+                    node.component->child_constraints(constraints, i, metadata);
+                child_metrics.push_back(measure_node(*node.children[i], child_constraints));
+            }
         }
         return child_metrics;
     }
 
     static ChildMetrics measure_node(const Node& node, const Constraints& constraints) {
         if (node.component->effective_visibility() == VisibilityMode::Collapsed) {
-            return ChildMetrics{Size{}, Size{}, FlexFactors{}};
+            ChildMetrics metrics{Size{}, Size{}, FlexFactors{}};
+            metrics.participates_in_layout = false;
+            return metrics;
         }
         const auto child_metrics = measure_children(node, constraints);
         auto metrics = node.component->measure_constrained(constraints, child_metrics);
         metrics.flex = node.component->flex_factors();
+        if (const auto own = node.component->first_baseline(metrics.preferred))
+            metrics.first_baseline = own;
+        if (metrics.first_baseline && (!std::isfinite(*metrics.first_baseline) ||
+            *metrics.first_baseline < 0 || *metrics.first_baseline > metrics.preferred.h))
+            metrics.first_baseline.reset();
         return metrics;
     }
 
@@ -350,7 +375,8 @@
             }
         }
         LifecycleContext context{
-            node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
+            node.id, node.bounds, paint_invalidator(node), layout_invalidator(node),
+                        lifecycle_dispatcher_};
         try {
             node.component->deactivate(context);
         } catch (...) {
@@ -369,7 +395,8 @@
             }
         }
         LifecycleContext context{
-            node.id, node.bounds, paint_invalidator(node), layout_invalidator(node)};
+            node.id, node.bounds, paint_invalidator(node), layout_invalidator(node),
+                        lifecycle_dispatcher_};
         try {
             node.component->unmount(context);
         } catch (...) {
@@ -397,6 +424,29 @@
         if (first_error) std::rethrow_exception(first_error);
     }
 
+    template<class PaintChild>
+    static void visit_paint_children(const Node& node, PaintChild&& paint) {
+        const auto foreground = node.component->foreground_child_index();
+        for (std::size_t i = 0; i < node.children.size(); ++i) {
+            if (foreground && i == *foreground) continue;
+            paint(*node.children[i]);
+        }
+        if (foreground && *foreground < node.children.size()) paint(*node.children[*foreground]);
+    }
+
+    template<class HitChild>
+    static Node* hit_test_children(Node& node, HitChild&& hit) {
+        const auto foreground = node.component->foreground_child_index();
+        if (foreground && *foreground < node.children.size()) {
+            if (auto* result = hit(*node.children[*foreground])) return result;
+        }
+        for (std::size_t i = node.children.size(); i-- > 0;) {
+            if (foreground && i == *foreground) continue;
+            if (auto* result = hit(*node.children[i])) return result;
+        }
+        return nullptr;
+    }
+
     void paint_node(
         const Node& node,
         Painter& painter,
@@ -420,15 +470,15 @@
             const Rect child_clip = intersect(inherited_clip, node.bounds);
             if (child_clip.empty()) return;
             auto clip_scope = painter.scoped_clip(node.bounds);
-            for (const auto& child : node.children) {
-                paint_node(*child, painter, platform, child_clip);
-            }
+            visit_paint_children(node, [&](const Node& child) {
+                paint_node(child, painter, platform, child_clip);
+            });
             return;
         }
 
-        for (const auto& child : node.children) {
-            paint_node(*child, painter, platform, inherited_clip);
-        }
+        visit_paint_children(node, [&](const Node& child) {
+            paint_node(child, painter, platform, inherited_clip);
+        });
     }
 
     static Node* hit_test_focusable(Node& node, Point p, Rect inherited_clip) {
@@ -446,9 +496,9 @@
         }
 
         if (!child_clip.empty()) {
-            for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-                if (auto* result = hit_test_focusable(**it, p, child_clip)) return result;
-            }
+            if (auto* result = hit_test_children(node, [&](Node& child) {
+                return hit_test_focusable(child, p, child_clip);
+            })) return result;
         }
         if (node.component->focusable() && node.bounds.contains(p)) return &node;
         return nullptr;
@@ -466,9 +516,9 @@
         Rect child_clip = inherited_clip;
         if (node.component->clips_children()) child_clip = intersect(inherited_clip, node.bounds);
         if (!child_clip.empty()) {
-            for (auto it = node.children.rbegin(); it != node.children.rend(); ++it) {
-                if (auto* result = hit_test_any(**it, p, child_clip)) return result;
-            }
+            if (auto* result = hit_test_children(node, [&](Node& child) {
+                return hit_test_any(child, p, child_clip);
+            })) return result;
         }
         return node.bounds.contains(p) ? &node : nullptr;
     }

@@ -185,7 +185,7 @@ NativeUI currently pins:
 
 ```text
 repository: hemduf/pugl
-commit:     195f79b22644010c81a5e0c3231c591856787ec6
+commit:     a4bdafe38f48cf906560e40bd1e9e87986369b06
 license:    ISC
 ```
 
@@ -652,7 +652,7 @@ PUGL_KEY_PRESS/RELEASE -> KeyDown / KeyUp
 PUGL_TEXT              -> committed TextInput
 PUGL_BUTTON_*          -> PointerDown / PointerUp (left), ContextMenu (right press)
 PUGL_MOTION            -> PointerMove
-PUGL_SCROLL            -> PointerWheel
+PUGL_SCROLL            -> PointerWheel, or Magnify when ctrl/cmd is held
 PUGL_FOCUS_*           -> focus activation/deactivation
 PUGL_CONFIGURE         -> logical resize / scale handling
 PUGL_EXPOSE            -> native frame render
@@ -665,6 +665,24 @@ press and is delivered to the pointer hit target without moving keyboard focus. 
 pointer capture is active, its owner first receives `PointerCancel` and the capture is
 released; context-menu routing cannot establish a replacement capture. Ignored requests
 bubble through ancestors like other targeted input.
+
+`InputType::Magnify` is the normalized zoom gesture: a continuous relative scale
+factor (`magnification`, > 0 zooms in) anchored at the event position, delivered to
+the pointer hit target exactly like `PointerWheel`. On macOS it is the native
+trackpad pinch; on every other backend ctrl/cmd + scroll (the OS-synthesized pinch
+and the browser ctrlKey wheel) is normalized to it at the Pugl boundary, and
+`PointerWheel` never carries ctrl or gui after normalization. Delivery mirrors
+`PointerWheel`: an active capture owner receives it like a wheel event during its
+drag, routing never moves keyboard focus or establishes capture, and ignored events
+bubble through ancestors. The pinned Pugl normalizes positive scroll `dy` to
+scroll-up on every backend, so the same ctrl/cmd+wheel-up gesture yields a
+positive magnification on all platforms.
+
+`Canvas` converts the anchor to Canvas-local coordinates, as it does for wheel
+input. Normal overlays and modal barriers absorb ignored `Magnify` input like
+wheel input. A `Magnify` callback cannot establish or replace its pointer's capture,
+including through an outer borrowed input context during reentrant dispatch.
+A nested new pointer-down frame retains its own normal capture permission.
 
 Keyboard command/navigation events and committed text are deliberately separate. `KeyDown` is not used as a substitute for text insertion.
 
@@ -1076,7 +1094,7 @@ NATIVEUI_ENABLE_SANITIZERS=OFF
 NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS=OFF
 
 NATIVEUI_PUGL_SOURCE=
-NATIVEUI_PUGL_COMMIT=195f79b22644010c81a5e0c3231c591856787ec6
+NATIVEUI_PUGL_COMMIT=a4bdafe38f48cf906560e40bd1e9e87986369b06
 
 NATIVEUI_SKIA_ROOT=
 NATIVEUI_SKIA_TAG=chrome/m149
@@ -1128,6 +1146,24 @@ Skia is downloaded as a pinned binary archive from `olilarkin/skia-builder` usin
 NativeUI supports both CPM's flattened archive layout and the original manually extracted `build/` archive layout.
 
 NativeUI does not rebuild Skia.
+
+On Windows, the pinned Skia archive includes external ICU data at
+`share/icudtl.dat`. NativeUI packages those exact bytes with its installed SDK and
+exports the source path through `NativeUI::Core`'s `NATIVEUI_SKIA_ICU_DATA` CMake
+property. `nativeui_attach_platform` stages the file beside the final consumer;
+Core-only executable/module consumers call `nativeui_attach_runtime_data(TARGET
+...)` explicitly. This build-time dependency works across CMake directories,
+restores removed data on an otherwise up-to-date build, and serializes copies into
+a shared output directory. Shared directories accept only byte-identical ICU
+data: staging a different pinned Skia payload fails before replacing another
+module's file. Modules requiring different ICU data must use separate output
+directories. No runtime I/O, locks or state are added to NativeUI's
+widget or audio-facing code. Data deployment stays within the Skia/platform
+packaging boundary; Unicode processing continues to use the pinned ICU backend.
+Skia searches the executable directory before the module directory. Module-local
+fallback is qualified with an independent host that has no ICU file; compatibility
+with hosts supplying another ICU data file remains outside that evidence.
+
 
 ---
 
@@ -1355,6 +1391,8 @@ The [value editing contract](docs/value-editing.md) defines generic `EditSession
 notifications, standard control input boundaries, exception/reentrancy policy,
 and optional hidden `EmbeddedView` construction. State and editing remain
 UI-thread abstractions; plugin/host/audio semantics belong to external adapters.
+The [embedded keyboard contract](docs/embedded-keyboard.md) defines consumed-key
+ownership, host responder fallback and retained focus geometry recovery.
 The pinned macOS Pugl backend owns embedded visibility and focus behavior
 directly. NativeUI consumes that exact source commit without build-time source
 rewriting.

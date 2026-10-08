@@ -21,11 +21,25 @@ struct NativeUIImeBridge {
   NativeUIImeCallback callback;
   bool active;
   bool composing;
+  bool embedded;
+  bool dispatchingKey;
+  bool keyHandled;
+  bool forwardingKey;
+  NSView* temporaryFocusParent;
+  NSWindow* temporaryFocusWindow;
+  SEL embeddedFocusSelector;
+  NSEvent* lastKeyEvent;
+  bool lastKeyHandled;
+  // 0: no press, 1: host owns this press, 2: NativeUI owns this press.
+  // Cocoa hardware key codes fit in 8 bits; unknown codes remain unpaired.
+  uint8_t keyOwners[256];
   float x;
   float y;
   float width;
   float height;
   float cursorOffset;
+  NativeUIImeMagnifyCallback magnifyCallback;
+  void* magnifyUserData;
 };
 
 // Per-object associated state only. The key is immutable and carries no
@@ -122,6 +136,9 @@ emitEvent(NativeUIImeBridge* bridge,
           size_t selectionBytes)
 {
   if (bridge && bridge->callback) {
+    // The first marked-text event can consume a key before any PUGL_TEXT is
+    // emitted. It belongs to the IME just like subsequent candidate keys.
+    nativeuiImeReportKeyHandled(bridge, true);
     bridge->callback(
       bridge->userData, type, utf8, size, cursorByte, selectionBytes);
   }
@@ -178,21 +195,268 @@ nativeuiWindowShouldClose(id self, SEL selector, id sender)
   return NO;
 }
 
-static void
-nativeuiKeyDown(id self, SEL selector, NSEvent* event)
+static bool
+sameKeyEvent(NSEvent* lhs, NSEvent* rhs)
+{
+  return lhs && rhs &&
+    ([lhs type] == [rhs type]) && ([lhs timestamp] == [rhs timestamp]) &&
+    ([lhs modifierFlags] == [rhs modifierFlags]) &&
+    ([lhs windowNumber] == [rhs windowNumber]) &&
+    ([lhs keyCode] == [rhs keyCode]) && ([lhs isARepeat] == [rhs isARepeat]) &&
+    [[lhs characters] isEqualToString:[rhs characters]] &&
+    [[lhs charactersIgnoringModifiers] isEqualToString:[rhs charactersIgnoringModifiers]];
+}
+
+static bool
+dispatchKeyDown(id self, NSEvent* event)
 {
   NativeUIImeBridge* bridge = bridgeForObject(self);
-  if (bridge && bridge->active && bridge->composing) {
+  if (!bridge || bridge->forwardingKey) return false;
+  if (sameKeyEvent(bridge->lastKeyEvent, event)) return bridge->lastKeyHandled;
+  NSView* const retainedView = [(NSView*)self retain];
+
+  // Preserve ownership until release, even if a repeat changes the focus or
+  // the control handles only KeyDown (arrows and text commands commonly do).
+  const NSUInteger code = [event keyCode];
+  const uint8_t owner = [event isARepeat] && code < sizeof(bridge->keyOwners)
+    ? bridge->keyOwners[code] : 0U;
+  const bool previousDispatch = bridge->dispatchingKey;
+  const bool previousHandled = bridge->keyHandled;
+  bridge->dispatchingKey = true;
+  bridge->keyHandled = false;
+  if ([event isARepeat] && owner == 1U) {
+    // A repeat of a DAW shortcut must not start editing a newly focused field.
+  } else if (bridge->active && bridge->composing) {
     // Pugl deliberately dispatches special keys without interpretKeyEvents:.
     // Once marked text is active, however, Return/Escape/arrows and similar
     // keys belong to the input manager. Feeding them directly to Cocoa keeps
     // candidate navigation/commit/cancel in the IME and prevents a second
     // NativeUI editor-command path from running for the same key sequence.
     [(NSView*)self interpretKeyEvents:@[event]];
-    return;
+    if (bridgeForObject(self) == bridge) bridge->keyHandled = true;
+  } else {
+    callSuperKeyDown(self, sel_registerName("keyDown:"), event);
   }
 
+  // A callback may retire the view/bridge. Do not touch its borrowed state.
+  if (bridgeForObject(self) != bridge) {
+    [retainedView release];
+    return true;
+  }
+  const bool result = owner != 0U ? owner == 2U : bridge->keyHandled;
+  bridge->dispatchingKey = previousDispatch;
+  bridge->keyHandled = previousHandled;
+  [bridge->lastKeyEvent release];
+  bridge->lastKeyEvent = [event retain];
+  bridge->lastKeyHandled = result;
+  if (code < sizeof(bridge->keyOwners)) bridge->keyOwners[code] = result ? 2U : 1U;
+  [retainedView release];
+  return result;
+}
+
+static void
+forwardKey(id self, NSEvent* event, bool down)
+{
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  if (!bridge || bridge->forwardingKey) return;
+  bridge->forwardingKey = true;
+  NSView* const view = [(NSView*)self retain];
+  NSWindow* const window = [[view window] retain];
+  NSView* const parent = [[view superview] retain];
+  // Like JUCE's Ableton AU workaround, deliver a rejected key with the host's
+  // parent as first responder. Never run this during performKeyEquivalent:.
+  const bool live = down && bridge->embedded &&
+    [[[NSBundle mainBundle] bundleIdentifier] isEqualToString:@"com.ableton.live"];
+  const bool restore = live && parent && [window firstResponder] == view;
+  if (restore) {
+    bridge->temporaryFocusParent = parent;
+    bridge->temporaryFocusWindow = window;
+    [window makeFirstResponder:parent];
+  }
+  NSResponder* const next = live && parent ? parent : [view nextResponder];
+  if ([event type] == NSEventTypeFlagsChanged) [next flagsChanged:event];
+  else if (down) [next keyDown:event];
+  else [next keyUp:event];
+
+  if (bridgeForObject(self) == bridge) {
+    // Host shortcuts can close, hide, or reparent the editor, or deliberately
+    // select another responder. Restore only a still-live unchanged attachment.
+    if (restore && [view superview] == parent && [view window] == window &&
+        [window firstResponder] == parent && ![view isHiddenOrHasHiddenAncestor]) {
+      [window makeFirstResponder:view];
+    }
+    if (bridgeForObject(self) == bridge) {
+      bridge->temporaryFocusParent = nil;
+      bridge->temporaryFocusWindow = nil;
+      bridge->forwardingKey = false;
+      // Reconcile a real host focus change/close after the temporary handoff.
+      // The same attachment/responder after restoration emits no transition.
+      if (restore && bridge->embeddedFocusSelector) {
+        const BOOL focused = [view window] && [[view window] isKeyWindow] &&
+          [[view window] firstResponder] == view && ![view isHiddenOrHasHiddenAncestor];
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(self, bridge->embeddedFocusSelector, focused);
+      }
+    }
+  }
+  [parent release];
+  [window release];
+  [view release];
+}
+
+static void
+nativeuiKeyDown(id self, SEL selector, NSEvent* event)
+{
+  (void)selector;
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  if (!bridge) {
+    callSuperKeyDown(self, sel_registerName("keyDown:"), event);
+    return;
+  }
+  if (!dispatchKeyDown(self, event)) forwardKey(self, event, true);
+}
+
+static void
+nativeuiKeyUp(id self, SEL selector, NSEvent* event)
+{
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  if (!bridge) {
+    callSuperKeyDown(self, selector, event);
+    return;
+  }
+  if (bridge->forwardingKey) return;
+  NSView* const retainedView = [(NSView*)self retain];
+  const NSUInteger code = [event keyCode];
+  const uint8_t owner = code < sizeof(bridge->keyOwners) ? bridge->keyOwners[code] : 0U;
+  if (code < sizeof(bridge->keyOwners)) bridge->keyOwners[code] = 0U;
+  [bridge->lastKeyEvent release];
+  bridge->lastKeyEvent = nil;
+  const bool previousDispatch = bridge->dispatchingKey;
+  const bool previousHandled = bridge->keyHandled;
+  bridge->dispatchingKey = true;
+  bridge->keyHandled = false;
   callSuperKeyDown(self, selector, event);
+  if (bridgeForObject(self) != bridge) {
+    [retainedView release];
+    return;
+  }
+  const bool consumed = owner != 0U ? owner == 2U : bridge->keyHandled;
+  bridge->dispatchingKey = previousDispatch;
+  bridge->keyHandled = previousHandled;
+  if (!consumed) forwardKey(self, event, false);
+  [retainedView release];
+}
+
+static BOOL
+nativeuiPerformKeyEquivalent(id self, SEL selector, NSEvent* event)
+{
+  (void)selector;
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  // AppKit probes sibling views too. Only the focused editor can claim keys.
+  if (!bridge || bridge->forwardingKey || [event type] != NSEventTypeKeyDown ||
+      [[(NSView*)self window] firstResponder] != self ||
+      [(NSView*)self isHiddenOrHasHiddenAncestor]) return NO;
+  // Returning NO lets AppKit continue toward DAW menus/keyDown. It must not
+  // forward to the host here: that would deliver the event twice or close the
+  // window while AppKit is still traversing its key-equivalent hierarchy.
+  return dispatchKeyDown(self, event) ? YES : NO;
+}
+
+static void
+nativeuiFlagsChanged(id self, SEL selector, NSEvent* event)
+{
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  if (!bridge || bridge->forwardingKey) return;
+  NSView* const retainedView = [(NSView*)self retain];
+  const bool previousDispatch = bridge->dispatchingKey;
+  const bool previousHandled = bridge->keyHandled;
+  bridge->dispatchingKey = true;
+  bridge->keyHandled = false;
+  callSuperKeyDown(self, selector, event);
+  if (bridgeForObject(self) != bridge) {
+    [retainedView release];
+    return;
+  }
+  const bool consumed = bridge->keyHandled;
+  bridge->dispatchingKey = previousDispatch;
+  bridge->keyHandled = previousHandled;
+  if (!consumed) forwardKey(self, event, false);
+  [retainedView release];
+}
+
+// Same modifier encoding as the pinned Pugl's own getModifiers() so the
+// delivered PuglMods mask matches every other nativeui event source.
+static PuglMods
+magnifyModifiers(NSEvent* event)
+{
+  const NSEventModifierFlags flags = [event modifierFlags];
+  return (
+    (PuglMods)((flags & NSShiftKeyMask) ? PUGL_MOD_SHIFT : 0) |
+    (PuglMods)((flags & NSControlKeyMask) ? PUGL_MOD_CTRL : 0) |
+    (PuglMods)((flags & NSAlternateKeyMask) ? PUGL_MOD_ALT : 0) |
+    (PuglMods)((flags & NSCommandKeyMask) ? PUGL_MOD_SUPER : 0));
+}
+
+static void
+nativeuiMagnifyWithEvent(id self, SEL selector, NSEvent* event)
+{
+  (void)selector;
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  // Trackpad pinch. No "unhandled" sound path exists for gestures, so there is
+  // no report/handled bookkeeping here: deliver and let the app react.
+  if (!bridge || bridge->forwardingKey || !bridge->magnifyCallback) {
+    callSuperKeyDown(self, selector, event);
+    return;
+  }
+  // Same coordinate chain as Pugl pointer events: view-local points scaled to
+  // physical pixels. The view is flipped, so this is already top-down.
+  const NSView* const view = (NSView*)self;
+  const NSPoint local = [view convertPoint:[event locationInWindow] fromView:nil];
+  const double scale = (double)[[view window] backingScaleFactor];
+  bridge->magnifyCallback(bridge->magnifyUserData,
+                          (float)[event magnification],
+                          local.x * scale, local.y * scale,
+                          magnifyModifiers(event));
+}
+
+static NSTextInputContext*
+nativeuiInputContext(id self, SEL selector)
+{
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  if (bridge && !bridge->active) return nil;
+  struct objc_super superInfo = {self, class_getSuperclass(object_getClass(self))};
+  return ((id (*)(struct objc_super*, SEL))objc_msgSendSuper)(&superInfo, selector);
+}
+
+static BOOL
+nativeuiPreserveEmbeddedFocus(id self, SEL selector)
+{
+  (void)selector;
+  NativeUIImeBridge* bridge = bridgeForObject(self);
+  NSView* const view = (NSView*)self;
+  NSWindow* const window = [view window];
+  return bridge && bridge->forwardingKey && bridge->temporaryFocusParent &&
+    [view superview] == bridge->temporaryFocusParent &&
+    window == bridge->temporaryFocusWindow && [window isKeyWindow] &&
+    ![view isHiddenOrHasHiddenAncestor] &&
+    ([window firstResponder] == self || [window firstResponder] == bridge->temporaryFocusParent);
+}
+
+void
+nativeuiImeReportKeyHandled(NativeUIImeBridge* bridge, bool handled)
+{
+  if (bridge && bridge->dispatchingKey) bridge->keyHandled |= handled;
+}
+
+void
+nativeuiImeSetMagnifyCallback(NativeUIImeBridge*          bridge,
+                              NativeUIImeMagnifyCallback  callback,
+                              void*                       user_data)
+{
+  if (!bridge) {
+    return;
+  }
+  bridge->magnifyCallback = callback;
+  bridge->magnifyUserData = user_data;
 }
 
 static void
@@ -334,6 +598,14 @@ bridgeSubclass(Class original)
   }
 
   if (!addOverride(subclass, original, "keyDown:", (IMP)nativeuiKeyDown) ||
+      !addOverride(subclass, original, "keyUp:", (IMP)nativeuiKeyUp) ||
+      !addOverride(subclass, original, "flagsChanged:", (IMP)nativeuiFlagsChanged) ||
+      !addOverride(subclass, original, "performKeyEquivalent:", (IMP)nativeuiPerformKeyEquivalent) ||
+      !addOverride(subclass, original, "magnifyWithEvent:", (IMP)nativeuiMagnifyWithEvent) ||
+      !addOverride(subclass, original, "inputContext", (IMP)nativeuiInputContext) ||
+      !addOverride(subclass, original,
+        "puglPreserveEmbeddedFocus",
+        (IMP)nativeuiPreserveEmbeddedFocus) ||
       !addOverride(subclass,
                    original,
                    "setMarkedText:selectedRange:replacementRange:",
@@ -448,6 +720,8 @@ nativeuiImeCreate(PuglWorld* world,
     installCloseGuard ? candidateDelegateClass : Nil;
   bridge->userData = userData;
   bridge->callback = callback;
+  bridge->embedded = puglGetParent(puglView) != 0U;
+  bridge->embeddedFocusSelector = sel_registerName("puglSetEmbeddedFocus:");
 
   object_setClass(view, subclass);
   if (installCloseGuard) {
@@ -473,6 +747,7 @@ nativeuiImeDestroy(NativeUIImeBridge* bridge)
     object_setClass(
       bridge->windowDelegate, bridge->originalWindowDelegateClass);
   }
+  [bridge->lastKeyEvent release];
   free(bridge);
 }
 

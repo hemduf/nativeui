@@ -46,6 +46,7 @@
         NodeId next{kInvalidNodeId};
         NodeId cursor{kInvalidNodeId};
         FocusTransitionPhase phase{FocusTransitionPhase::BlurOld};
+        FocusChangeReason reason{FocusChangeReason::Ordinary};
     };
 
     std::vector<FocusTransitionState> focus_transition_stack_;
@@ -53,14 +54,19 @@
     std::size_t focus_semantic_running_{};
     NodeId pending_focus_target_{kInvalidNodeId};
     bool pending_focus_request_{};
+    FocusChangeReason pending_focus_reason_{FocusChangeReason::Ordinary};
+    NodeId retained_focus_target_{kInvalidNodeId};
+    bool retained_focus_request_{};
     bool fail_next_focus_invalidation_publication_for_testing_{};
 
     [[nodiscard]] Node* focus_transition_node(NodeId id) noexcept {
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
     }
 
-    void queue_pending_focus(NodeId target) noexcept {
+    void queue_pending_focus(NodeId target,
+                             FocusChangeReason reason = FocusChangeReason::Ordinary) noexcept {
         pending_focus_target_ = target;
+        pending_focus_reason_ = reason;
         pending_focus_request_ = true;
     }
 
@@ -94,7 +100,8 @@
                         old->bounds,
                         platform,
                         paint_invalidator(*old),
-                        layout_invalidator(*old)};
+                        layout_invalidator(*old),
+                        focus_transition_stack_[index].reason};
                     // Preparation above may allocate. Advance only once the next
                     // operation is the application callback itself: if it throws,
                     // recovery never invokes that already-started callback again.
@@ -117,10 +124,20 @@
                     break;
                 }
                 case FocusTransitionPhase::Commit: {
+                    // Focus callbacks consume geometry (for example, text caret
+                    // scrolling). Dynamic/availability reconciliation can reach
+                    // this phase before paint or public layout. Prepare a complete
+                    // frame before publishing the new focus owner; a failed layout
+                    // leaves this phase pending and does not replay the old blur.
+                    if (focus_transition_stack_[index].next != kInvalidNodeId) ensure_layout();
+                    // Layout callbacks may deactivate/unmount this live Tree,
+                    // retiring the transition without destroying the owner.
+                    if (index >= focus_transition_stack_.size()) break;
                     const auto next_id = focus_transition_stack_[index].next;
                     auto* next = focus_transition_node(next_id);
-                    if (!next) {
+                    if (!focus_target_available(next)) {
                         focus_active_ = false;
+                        focus_transition_stack_[index].next = kInvalidNodeId;
                         focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                         focus_transition_stack_[index].cursor =
                             focus_transition_stack_[index].previous;
@@ -129,6 +146,7 @@
                     const auto it = std::find(focusables_.begin(), focusables_.end(), next);
                     if (it == focusables_.end()) {
                         focus_active_ = false;
+                        focus_transition_stack_[index].next = kInvalidNodeId;
                         focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                         focus_transition_stack_[index].cursor =
                             focus_transition_stack_[index].previous;
@@ -138,12 +156,20 @@
                         std::distance(focusables_.begin(), it));
                     focus_active_ = true;
                     focus_transition_stack_[index].phase = FocusTransitionPhase::FocusNew;
+                    if (auto* participant = focus_group_participant(next))
+                        participant->focus_group_did_focus();
                     break;
                 }
                 case FocusTransitionPhase::FocusNew: {
+                    // Context preparation can fail after Commit. A later retry
+                    // must also observe any layout invalidated in the meantime.
+                    ensure_layout();
+                    if (index >= focus_transition_stack_.size()) break;
                     const auto id = focus_transition_stack_[index].next;
                     auto* next = focus_transition_node(id);
-                    if (!next) {
+                    if (!focus_target_available(next)) {
+                        focus_active_ = false;
+                        focus_transition_stack_[index].next = kInvalidNodeId;
                         focus_transition_stack_[index].phase = FocusTransitionPhase::FocusWithinLeave;
                         focus_transition_stack_[index].cursor =
                             focus_transition_stack_[index].previous;
@@ -311,7 +337,7 @@
     }
 
     [[nodiscard]] bool focus_target_available(const Node* node) const noexcept {
-        if (!node || dynamic_teardown_quarantines(node) ||
+        if (!node || !node->component->focusable() || dynamic_teardown_quarantines(node) ||
             !node->component->effective_availability().interactive()) {
             return false;
         }
@@ -374,6 +400,7 @@
         }
 
         const auto requested = pending_focus_target_;
+        const auto reason = pending_focus_reason_;
         Node* next = nullptr;
         if (requested != kInvalidNodeId) {
             next = focus_transition_node(requested);
@@ -407,6 +434,7 @@
         transition.next = next ? next->id : kInvalidNodeId;
         transition.cursor = transition.previous;
         transition.phase = old ? FocusTransitionPhase::BlurOld : FocusTransitionPhase::Commit;
+        transition.reason = reason;
 
         // Allocation is the last fallible operation before consuming the
         // coalesced request. If push_back throws, the pending intent remains
@@ -434,14 +462,15 @@
     NodeId focus_blur_started_{kInvalidNodeId};
     bool focus_blur_started_from_availability_{};
 
-    void clear_focus(PlatformServices& platform) {
+    void clear_focus(PlatformServices& platform,
+                     FocusChangeReason reason = FocusChangeReason::Ordinary) {
         const bool resume_started_blur =
             focus_active_ && focused_index_ < focusables_.size() &&
             focus_blur_started_ == focusables_[focused_index_]->id;
         if (!resume_started_blur &&
             (focus_transition_running_ != 0 || focus_semantic_running_ != 0 ||
              !focus_transition_stack_.empty() || pending_focus_request_)) {
-            queue_pending_focus(kInvalidNodeId);
+            queue_pending_focus(kInvalidNodeId, reason);
             if (focus_transition_running_ == 0 && focus_semantic_running_ == 0) {
                 resume_focus_transitions(platform);
             }
@@ -477,7 +506,8 @@
                     old->bounds,
                     platform,
                     paint_invalidator(*old),
-                    layout_invalidator(*old)};
+                    layout_invalidator(*old),
+                    reason};
                 // Publish caller-independent started-callback identity immediately
                 // before application code. Recovery may finish framework bookkeeping
                 // but must never re-enter this already-started blur merely because
@@ -496,6 +526,7 @@
             transition.next = kInvalidNodeId;
             transition.cursor = transition.previous;
             transition.phase = FocusTransitionPhase::InvalidateOld;
+            transition.reason = reason;
             focus_transition_stack_.push_back(transition);
             const auto index = focus_transition_stack_.size() - 1;
 
@@ -557,7 +588,11 @@
     }
 
     void reconcile_scope_deactivations(Node& node, PlatformServices& platform) {
-        for (auto& child : node.children) reconcile_scope_deactivations(*child, platform);
+        for (auto& child : node.children) {
+            if (!active_) return;
+            reconcile_scope_deactivations(*child, platform);
+        }
+        if (!active_) return;
         if (!node.component->is_focus_scope()) return;
         const bool now = scope_effectively_active(node);
         if (node.focus_scope_active_cached && !now) {
@@ -574,37 +609,54 @@
                     ? nullptr
                     : find_node_mutable(*root_, restore_id);
                 if (focus_target_available(restore)) {
-                    set_focus(restore, platform);
+                    set_focus(restore, platform, FocusChangeReason::Unavailable);
                 } else if (auto* fallback = first_available_focusable()) {
-                    set_focus(fallback, platform);
+                    set_focus(fallback, platform, FocusChangeReason::Unavailable);
                 } else {
-                    clear_focus(platform);
+                    clear_focus(platform, FocusChangeReason::Unavailable);
                 }
             }
         }
     }
 
     void reconcile_scope_activations(Node& node, PlatformServices& platform) {
+        if (!active_) return;
         if (node.component->is_focus_scope()) {
             const bool now = scope_effectively_active(node);
             if (!node.focus_scope_active_cached && now) {
-                node.focus_scope_active_cached = true;
-                if (auto* restore = current_focus_node()) {
-                    node.focus_restore = restore->id;
-                } else {
-                    node.focus_restore = kInvalidNodeId;
-                }
+                // A structural checkpoint may reconcile another owner before
+                // this scope's dynamic child has mounted. Consume activation
+                // only once a default target exists; an empty scope requests no
+                // extra work and is reconsidered on the next structural change.
                 if (auto* target = default_focus_for_scope(node)) {
+                    node.focus_scope_active_cached = true;
+                    if (auto* restore = current_focus_node()) {
+                        node.focus_restore = restore->id;
+                    } else {
+                        node.focus_restore = kInvalidNodeId;
+                    }
                     set_focus(target, platform);
                 }
             }
         }
-        for (auto& child : node.children) reconcile_scope_activations(*child, platform);
+        for (auto& child : node.children) {
+            if (!active_) return;
+            reconcile_scope_activations(*child, platform);
+        }
     }
 
     void sync_focus_structure(PlatformServices& platform) {
         resume_focus_transitions(platform);
-        if (!focus_structure_dirty_) return;
+        if (retained_focus_request_ && active_ && focus_transition_running_ == 0 &&
+            focus_semantic_running_ == 0 && focus_transition_stack_.empty()) {
+            const auto id = std::exchange(retained_focus_target_, kInvalidNodeId);
+            retained_focus_request_ = false;
+            if (auto* target = retained_invalidation_node(id); focus_target_available(target)) {
+                queue_pending_focus(id);
+                resume_focus_transitions(platform);
+            }
+        }
+        if (!active_ || !focus_structure_dirty_) return;
 
         // Only an availability-origin failed blur can be cancelled by an
         // availability reversal. Generic direct-clear recovery must keep its
@@ -620,20 +672,26 @@
         }
 
         reconcile_scope_deactivations(*root_, platform);
+        if (!active_) return;
         reconcile_scope_activations(*root_, platform);
+        if (!active_) return;
         if (focus_active_ && !focus_target_available(current_focus_node())) {
-            if (auto* fallback = first_available_focusable()) set_focus(fallback, platform);
-            else clear_focus(platform);
+            if (auto* fallback = first_available_focusable())
+                set_focus(fallback, platform, FocusChangeReason::Unavailable);
+            else clear_focus(platform, FocusChangeReason::Unavailable);
         }
+        if (!active_) return;
         if (!focus_active_ && focus_target_available(availability_cleared_focus_)) {
             set_focus(availability_cleared_focus_, platform);
         }
+        if (!active_) return;
         if (focus_active_) availability_cleared_focus_ = nullptr;
         focus_structure_dirty_ = false;
     }
 
-    void set_focus(Node* node, PlatformServices& platform) {
-        if (!node || !focus_target_available(node)) return;
+    void set_focus(Node* node, PlatformServices& platform,
+                   FocusChangeReason reason = FocusChangeReason::Ordinary) {
+        if (!active_ || !mounted_ || !node || !focus_target_available(node)) return;
 
         // Pointer targeting and other direct focus moves must not let an
         // already-active trapping scope leak focus into an ordinary sibling.
@@ -651,7 +709,7 @@
 
         if (focus_transition_running_ != 0 || focus_semantic_running_ != 0 ||
             !focus_transition_stack_.empty() || pending_focus_request_) {
-            queue_pending_focus(node->id);
+            queue_pending_focus(node->id, reason);
             if (focus_transition_running_ == 0 && focus_semantic_running_ == 0) {
                 resume_focus_transitions(platform);
             }
@@ -667,6 +725,7 @@
         transition.next = node->id;
         transition.cursor = transition.previous;
         transition.phase = old ? FocusTransitionPhase::BlurOld : FocusTransitionPhase::Commit;
+        transition.reason = reason;
 
         // Prepare the durable transition before publishing focus state or
         // entering application code. Allocation failure leaves old focus intact.

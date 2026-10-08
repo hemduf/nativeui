@@ -96,12 +96,13 @@
             pointer_capture_barrier_ || dynamic_teardown_quarantines(&node)) {
             return;
         }
-        // A callback for an older frame can still hold its InputContext while
-        // a nested terminal callback for this same contact is running. Do not
-        // let it renew capture between terminal entry and token-matched cleanup.
+        // An older frame may still hold a permitted InputContext while a
+        // nested terminal or Magnify callback for this contact is running.
+        // That borrow must not bypass the current frame's capture restriction.
         if (active_input_callback_pointer_id_ == pointer &&
             (active_input_callback_type_ == InputType::PointerUp ||
              active_input_callback_type_ == InputType::PointerCancel ||
+             active_input_callback_type_ == InputType::Magnify ||
              active_input_callback_type_ == InputType::ContextMenu)) {
             return;
         }
@@ -195,13 +196,24 @@
         return id == kInvalidNodeId || !root_ ? nullptr : find_node_mutable(*root_, id);
     }
 
+    static void release_input_contact(const InputContext::PointerRelease& action_owner,
+                                      const InputContext::PointerAction& action) {
+        const auto lifetime = action_owner.immediate_owner ? std::shared_ptr<void>{}
+                                                          : action_owner.owner.lock();
+        auto* tree = action_owner.immediate_owner ? static_cast<Tree*>(action_owner.immediate_owner)
+            : lifetime ? static_cast<RetainedInvalidationLifetime*>(lifetime.get())->tree : nullptr;
+        if (!tree) return;
+        if (auto* live = tree->retained_invalidation_node(action_owner.node)) {
+            tree->release_pointer_capture(*live, action.id, action.interaction_token);
+        }
+    }
     [[nodiscard]] InputContext prepare_input_context(
         Node& node, const InputEvent& event, PlatformServices& platform) {
         if (fail_next_input_context_preparation_for_testing_) {
             fail_next_input_context_preparation_for_testing_ = false;
             throw std::bad_alloc{};
         }
-        return InputContext{
+        InputContext context{
             node.bounds,
             platform,
             paint_invalidator(node),
@@ -210,16 +222,22 @@
              pointer_interaction_dispatch_token(event.pointer.id),
              event.type != InputType::PointerUp &&
                  event.type != InputType::PointerCancel &&
+                 event.type != InputType::Magnify &&
                  event.type != InputType::ContextMenu},
-            // The action is owned by this callback context. The closures keep
-            // their two-pointer small-buffer representation, while reentrant
-            // dispatch cannot replace the outer context's pointer identity.
+            // Capture is stack-confined. Release can be retained by a gesture
+            // and resolves weak ownership instead of a borrowed Node address.
+            // Each callback keeps the originating contact generation.
             [this, &node](const InputContext::PointerAction& action) {
                 set_pointer_capture(node, action.id, action.interaction_token);
             },
-            [this, &node](const InputContext::PointerAction& action) {
-                release_pointer_capture(node, action.id, action.interaction_token);
-            }};
+            {this, {}, node.id, &Tree::retain_input_owner, &Tree::release_input_contact}};
+        const bool contact_event = event.type == InputType::PointerDown ||
+            event.type == InputType::PointerMove || event.type == InputType::PointerUp ||
+            event.type == InputType::PointerCancel || event.type == InputType::PointerLeave;
+        context.input_capability_ = retained_input_capability(node.id,event.pointer.id,
+            contact_event ? pointer_interaction_dispatch_token(event.pointer.id) : 0,
+            activation_epoch_);
+        return context;
     }
 
     [[nodiscard]] EventResult send_prepared_to(
@@ -259,6 +277,7 @@
         pending->leave = source_event;
         pending->leave.type = InputType::PointerLeave;
         pending->leave.delta = {};
+        pending->leave.magnification = 0.0f;
         pending_pointer_hover_transition_.swap(pending);
     }
 
@@ -465,6 +484,7 @@
         transition.leave = source_event;
         transition.leave.type = InputType::PointerLeave;
         transition.leave.delta = {};
+        transition.leave.magnification = 0.0f;
         transition.phase = previous
             ? PointerHoverTransitionPhase::ObserverLeave
             : PointerHoverTransitionPhase::ObserverEnter;
@@ -574,6 +594,7 @@
         while (const auto pointer = first_pointer_capture_id()) {
             InputEvent event{};
             event.pointer.id = *pointer;
+            event.cancel_reason = PointerCancelReason::Teardown;
             try {
                 const auto one = cancel_pointer_capture(platform, event);
                 if (handled(one)) result = one;
@@ -612,6 +633,7 @@
     bool pointer_passthrough_dynamic_root_{};
     bool mounted_{};
     bool active_{};
+    std::uint64_t activation_epoch_{};
     bool focus_active_{};
     bool focus_structure_dirty_{true};
     bool availability_structure_dirty_{};
@@ -619,6 +641,7 @@
     Node* availability_cleared_focus_{};
     std::size_t dispatch_depth_{};
     PlatformServices* active_platform_{};
+    Dispatcher lifecycle_dispatcher_;
     Size viewport_{720.0f, 520.0f};
     bool layout_dirty_{true};
     DirtyRegion paint_dirty_;

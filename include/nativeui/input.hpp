@@ -13,12 +13,6 @@
 
 namespace ui {
 
-/// Platform-neutral non-text key identifier used for navigation, shortcuts and
-/// widget control. Printable text is delivered separately through `TextInput`
-/// or `Composition`; do not reconstruct text from `Key`.
-///
-/// Enumerator numeric values are compatibility details and are intentionally
-/// non-contiguous for letters added after the original v1 set.
 enum class Key {
     None,
     Tab,
@@ -63,12 +57,15 @@ enum class Key {
     S,
     T,
     U,
-    W
+    W,
+    F2,
+    F3,
+    PageUp,
+    PageDown,
+    Menu,
+    F10
 };
 
-/// Portable semantic editing command. Commands are routed independently from
-/// raw key identity so widgets can own Copy/Paste/Undo behavior without testing
-/// platform-specific modifier conventions.
 enum class Command {
     None,
     Copy,
@@ -76,10 +73,13 @@ enum class Command {
     Paste,
     SelectAll,
     Undo,
-    Redo
+    Redo,
+    Submit,
+    Cancel,
+    FindNext,
+    FindPrevious
 };
 
-/// Lifecycle phase for an IME/text-composition transaction.
 enum class CompositionType {
     Start,
     Update,
@@ -87,12 +87,6 @@ enum class CompositionType {
     Cancel
 };
 
-/// Text-composition payload delivered with `InputType::Composition`.
-///
-/// `cursor_byte` and `selection_bytes` are byte offsets/counts into `text`,
-/// not Unicode code-point or grapheme indices. The event owns its string for the
-/// duration of normal value semantics; components should copy application data
-/// they need after the input callback returns.
 struct CompositionEvent {
     CompositionType type{CompositionType::Start};
     std::string text;
@@ -100,13 +94,8 @@ struct CompositionEvent {
     std::size_t selection_bytes{};
 };
 
-/// Stable identity for one pointer contact while that contact is active.
-/// `0` is the legacy/untracked pointer identity; non-zero IDs are tracked
-/// contacts such as touch or pen streams.
 using PointerId = std::uint32_t;
 
-/// Normalized pointer-device family. `Unknown` is valid when the platform
-/// cannot provide a more specific device type.
 enum class PointerType {
     Unknown,
     Mouse,
@@ -115,12 +104,6 @@ enum class PointerType {
     Eraser
 };
 
-/// Optional per-contact metadata carried by pointer events.
-///
-/// Pressure and contact extents use NaN when the platform did not provide a
-/// value. Contact extents are expressed in NativeUI logical pixels. `coalesced`
-/// and `predicted` identify samples synthesized from the native pointer stream;
-/// applications that do not need high-frequency drawing can ignore both flags.
 struct PointerContact {
     PointerId id{};
     PointerType type{PointerType::Unknown};
@@ -139,12 +122,6 @@ struct PointerContact {
     }
 };
 
-/// Kind of normalized event delivered to the retained input system.
-///
-/// Pointer positions/deltas are NativeUI logical geometry. Text and IME input
-/// are separate from `KeyDown`/`KeyUp`. Drop negotiation uses `DropOffer`
-/// before `DropData`; context-menu requests do not implicitly move keyboard
-/// focus or begin pointer capture.
 enum class InputType {
     None,
     KeyDown,
@@ -168,7 +145,19 @@ enum class InputType {
     // platform's equivalent) carries the logical position and modifiers like a
     // pointer press. Routing does not move keyboard focus or start a new capture;
     // an existing capture is cancelled before the request is delivered.
-    ContextMenu
+    ContextMenu,
+    // Appended after ContextMenu so every pre-existing public enumerator keeps
+    // its numeric value. Normalized zoom gesture: macOS trackpad pinch
+    // (`magnifyWithEvent:`) delivers one event per continuous delta, and other
+    // platforms normalize ctrl/cmd+scroll (the OS-synthesized pinch and the
+    // browser ctrlKey wheel) into the same event. `magnification` carries the
+    // relative factor (e.g. 0.04 = +4% scale) and position anchors zoom at
+    // the pointer. Delivery mirrors PointerWheel: pointer hit target, no
+    // keyboard focus move, no capture establishment, and PointerWheel never
+    // carries ctrl/gui after normalization.
+    // A capture request for this pointer is ignored, including a request
+    // through an outer borrowed InputContext during reentrant delivery.
+    Magnify
 };
 
 /// Result returned by a component after receiving an input event.
@@ -182,18 +171,15 @@ enum class EventResult {
     Handled
 };
 
-/// Convenience predicate equivalent to `result == EventResult::Handled`.
 [[nodiscard]] constexpr bool handled(EventResult result) noexcept {
     return result == EventResult::Handled;
 }
 
-/// Value-semantic normalized input payload.
-///
-/// Only fields relevant to `type` are meaningful. `position` and `delta`
-/// use NativeUI logical coordinates. `primary` is the platform-normalized
-/// primary shortcut modifier (Command on macOS, Control on Windows/Linux).
-/// Drop strings/bytes and composition text are owned by this value; callback
-/// contexts are separate borrowed objects and must not be retained.
+/// Why a pointer gesture is ending. Only Native represents a user/platform
+/// cancellation that may restore an interaction's starting value. Retained
+/// policy and teardown signals must stop activity without writing old values.
+enum class PointerCancelReason { Native, Replaced, Unavailable, Removed, Teardown };
+
 struct InputEvent {
     InputType type{InputType::None};
     Key key{Key::None};
@@ -219,12 +205,12 @@ struct InputEvent {
     // Appended to preserve the field order of all pre-existing aggregate
     // initializers. Legacy pointer events leave this at its id-0 default.
     PointerContact pointer{};
+    PointerCancelReason cancel_reason{PointerCancelReason::Native};
+    // InputType::Magnify: relative scale factor of the trackpad pinch event
+    // (e.g. 0.04 = zoom in by 4% this event). Zero for every other event type.
+    float magnification{};
 
-    /// True when the platform's primary command modifier was held.
     [[nodiscard]] bool primary_shortcut() const noexcept { return primary; }
-
-    /// Exact, case-sensitive membership test for a MIME/data type announced by
-    /// a `DropOffer`.
     [[nodiscard]] bool offers_drop_type(std::string_view requested_type) const noexcept {
         for (const auto& offered : drop_types) {
             if (offered == requested_type) return true;
@@ -233,13 +219,10 @@ struct InputEvent {
     }
 };
 
-/// Translate NativeUI's portable primary-modifier editing shortcuts.
-///
-/// Recognized KeyDown mappings are Primary+A/C/X/V/Z/Y, with Shift+Primary+Z
-/// producing Redo. Non-KeyDown events, events without the normalized primary
-/// modifier and unrelated keys return `Command::None`.
 [[nodiscard]] constexpr Command command_from_shortcut(const InputEvent& event) noexcept {
-    if (event.type != InputType::KeyDown || !event.primary_shortcut()) return Command::None;
+    if (event.type != InputType::KeyDown) return Command::None;
+    if (event.key == Key::F3) return event.shift ? Command::FindPrevious : Command::FindNext;
+    if (!event.primary_shortcut()) return Command::None;
     switch (event.key) {
         case Key::A: return Command::SelectAll;
         case Key::C: return Command::Copy;
@@ -247,6 +230,7 @@ struct InputEvent {
         case Key::V: return Command::Paste;
         case Key::Z: return event.shift ? Command::Redo : Command::Undo;
         case Key::Y: return Command::Redo;
+        case Key::G: return event.shift ? Command::FindPrevious : Command::FindNext;
         default: return Command::None;
     }
 }

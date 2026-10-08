@@ -371,6 +371,14 @@ void layout_exception_transaction_contract() {
         test::pointer(ui::InputType::PointerDown, 125.0f, 20.0f), platform);
     NUI_CHECK(old_geometry_result == ui::EventResult::Ignored);
     NUI_CHECK(state->first_pointer_downs == 0);
+    NUI_CHECK(tree.layout_dirty());
+    // New geometry work withdraws rollback routing authority. The original
+    // fault must then be observable again rather than silently using old bounds.
+    tree.invalidate_layout();
+    bool retried = false;
+    try { (void)tree.dispatch(test::pointer(ui::InputType::PointerDown,125.0f,20.0f),platform); }
+    catch (const std::runtime_error& error) { retried = std::string{error.what()} == "second child layout fault"; }
+    NUI_CHECK(retried && tree.layout_dirty() && state->first_pointer_downs == 0);
 
     state->fault = LayoutFault::None;
     tree.resize({300.0f, 100.0f});

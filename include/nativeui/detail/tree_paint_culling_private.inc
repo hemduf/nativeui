@@ -175,15 +175,15 @@
             const Rect child_clip = intersect(inherited_clip, node.bounds);
             if (child_clip.empty() || intersect(child_clip, repaint_region).empty()) return;
             auto clip_scope = painter.scoped_clip(node.bounds);
-            for (const auto& child : node.children) {
-                paint_cull_paint_node(*child, painter, platform, child_clip, repaint_region);
-            }
+            visit_paint_children(node, [&](const Node& child) {
+                paint_cull_paint_node(child, painter, platform, child_clip, repaint_region);
+            });
             return;
         }
 
-        for (const auto& child : node.children) {
-            paint_cull_paint_node(*child, painter, platform, inherited_clip, repaint_region);
-        }
+        visit_paint_children(node, [&](const Node& child) {
+            paint_cull_paint_node(child, painter, platform, inherited_clip, repaint_region);
+        });
     }
 
     void paint_with_resources(
@@ -191,6 +191,7 @@
         PlatformServices& platform,
         const detail::PainterPrivateHooks* private_hooks) {
         if (lifecycle_transition_active()) return;
+        refresh_retained_components();
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
@@ -216,6 +217,7 @@
             }
             throw;
         }
+        retain_descendant_action_frame();
     }
 
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
@@ -225,6 +227,7 @@
         PlatformServices& platform,
         const detail::PainterPrivateHooks* private_hooks) {
         if (lifecycle_transition_active()) return {};
+        refresh_retained_components();
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
@@ -255,6 +258,7 @@
             }
             throw;
         }
+        retain_descendant_action_frame();
         return snapshot;
     }
 #endif
@@ -264,6 +268,7 @@
                                  Rect requested_region) {
         if (lifecycle_transition_active()) return;
 
+        refresh_retained_components();
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);
@@ -285,6 +290,7 @@
         requires_full_repaint = layout_dirty_ ||
             !dirty_dynamic_nodes_.empty() || dynamic_reconcile_retry_all_ ||
             availability_structure_dirty_ || focus_structure_dirty_;
+        refresh_retained_components();
         flush_dynamic_mutations();
         if (active_) {
             sync_availability_structure(platform);

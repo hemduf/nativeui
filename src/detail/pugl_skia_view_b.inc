@@ -129,15 +129,22 @@
             const auto tab = detail::normalize_tab_key(event->key.key, input.shift);
             input.key = tab.is_tab ? Key::Tab : translate_key(event->key.key, event->key.state);
             input.shift = tab.shift;
-            if (input.type == InputType::KeyDown && input.key == Key::Quit) {
+            bool key_handled = false;
+            if (!embedded_ && input.type == InputType::KeyDown && input.key == Key::Quit) {
                 if (close_callback_) {
                     close_callback_();
                 } else {
                     (void)close_native_view();
                 }
+                key_handled = true;
             } else if (input.key != Key::None) {
-                ui_.dispatch(input, services_);
+                key_handled = handled(ui_.dispatch(input, services_));
             }
+#if defined(__APPLE__)
+            nativeuiImeReportKeyHandled(ime_bridge_, key_handled);
+#else
+            (void)key_handled;
+#endif
             return PUGL_SUCCESS;
         }
 
@@ -151,7 +158,12 @@
             input.type = InputType::TextInput;
             input.text.assign(text);
             apply_modifiers(input, event->text.state);
-            ui_.dispatch(input, services_);
+            const bool text_handled = handled(ui_.dispatch(input, services_));
+#if defined(__APPLE__)
+            nativeuiImeReportKeyHandled(ime_bridge_, text_handled);
+#else
+            (void)text_handled;
+#endif
             return PUGL_SUCCESS;
         }
 
@@ -240,14 +252,31 @@
 
         case PUGL_SCROLL: {
             InputEvent input{};
-            input.type = InputType::PointerWheel;
             input.position = detail::physical_to_logical_point(
                 {static_cast<float>(event->scroll.x), static_cast<float>(event->scroll.y)},
                 geometry_.last_valid_scale());
-            input.delta = Point{static_cast<float>(event->scroll.dx),
-                                static_cast<float>(event->scroll.dy)};
             input.pointer.type = PointerType::Mouse;
             apply_modifiers(input, event->scroll.state);
+            if (input.ctrl || input.gui) {
+                // Zoom convention (Figma): ctrl/cmd + scroll means zoom on
+                // every platform — Windows synthesizes ctrl+wheel for the
+                // trackpad pinch, browsers send ctrlKey wheel events for the
+                // pinch gesture, and explicit ctrl/cmd+scroll means zoom.
+                // Normalized into one continuous relative-scale event so all
+                // consumers share a single code path (PointerWheel never
+                // carries ctrl/gui). Pugl normalizes "positive dy = scroll
+                // up" on every backend, so one signed factor serves all of
+                // them (see detail/pugl_scroll_translation.hpp).
+                const auto translation = detail::translate_pugl_scroll(
+                    input.ctrl, input.gui, event->scroll.dy);
+                input.type = translation.type;
+                input.magnification = translation.magnification;
+                ui_.dispatch(input, services_);
+                return PUGL_SUCCESS;
+            }
+            input.type = InputType::PointerWheel;
+            input.delta = Point{static_cast<float>(event->scroll.dx),
+                                static_cast<float>(event->scroll.dy)};
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }

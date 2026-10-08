@@ -4,6 +4,7 @@
 #include <nativeui/detail/dialog_state.hpp>
 #include <nativeui/detail/overlay_commands.hpp>
 #include <nativeui/detail/overlay_service.hpp>
+#include <nativeui/detail/ui_lifecycle_observer.hpp>
 #include <nativeui/overlay.hpp>
 #include <nativeui/theme.hpp>
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
@@ -11,6 +12,7 @@
 #include <nativeui/inspector.hpp>
 #endif
 
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -23,36 +25,22 @@
 namespace ui {
 
 class Dialog;
-namespace detail {
-class SkiaGlRenderer;
-}
+class Toast;
+namespace detail { class SkiaGlRenderer; }
 
-/// Retained UI root for one view-domain component tree.
+/// One retained NativeUI component tree.
 ///
-/// UI owns the materialized component hierarchy, layout state, focus/input
-/// routing, overlays/dialog coordination, semantic projection and paint-damage
-/// state for one retained UI domain. Native standalone/embedded view wrappers
-/// borrow the resulting UI and must not outlive it.
-///
-/// All public mutation, lifecycle, dispatch and paint operations are confined to
-/// the host/platform UI thread. The object is not internally synchronized and
-/// is never an audio/DSP real-time primitive. Application/component callbacks
-/// run synchronously inside the initiating call and may re-enter ordinary UI
-/// state. Some completion paths may also destroy the UI; those paths repair
-/// retained ownership before invoking application code.
+/// UI is intentionally confined to the host/platform UI thread. Its retained
+/// tree, focus/input routing, invalidation, layout and painting APIs are not
+/// synchronized and must not be called directly from a VST3/CLAP audio or
+/// worker thread. Plug-in adapters must transfer cross-thread state through an
+/// explicitly reviewed thread-safe bridge and apply it from the UI domain.
 class UI {
 public:
-    /// Construct and mount one retained tree using `default_theme()`.
-    /// Root composition is consumed into UI-owned retained component instances.
-    /// Construction may allocate/invoke mount callbacks and may throw after rollback.
-    /// UI construction is UI-thread work and is not audio/DSP real-time safe.
     template <class Root>
     explicit UI(Root&& root)
         : UI(std::forward<Root>(root), default_theme()) {}
 
-    /// Construct and mount one retained tree with an owned Theme value.
-    /// The Theme is moved into the Tree; caller storage need not outlive this call.
-    /// Construction has the same rollback/threading/error rules as the default overload.
     template <class Root>
     UI(Root&& root, Theme theme)
         : dialog_state_(std::make_shared<detail::DialogState>()),
@@ -65,18 +53,16 @@ public:
         tree_.mount();
     }
 
-    /// Begin terminal UI teardown and release the retained tree without unwinding.
-    ///
-    /// Native StandaloneWindow/EmbeddedView objects borrowing this UI must
-    /// already have been destroyed. Dialog completion is made terminal and the
-    /// presentation invalidation callback is detached before retained members
-    /// unwind. Teardown is noexcept.
     ~UI() noexcept {
         // Publish owner death before any teardown callback can run. Code that
         // intentionally permits an application callback to delete its UI takes
         // a weak copy of this token before the callback and never dereferences
         // `this` after the token expires.
         lifetime_.reset();
+        if (overlay_state_) overlay_state_->begin_owner_teardown();
+        auto observers = std::move(lifecycle_observers_);
+        for (const auto& weak : observers)
+            if (const auto observer = weak.lock()) observer->ui_will_teardown();
 
         // T063 distinguishes whole-UI teardown from explicit Dialog controller
         // destruction. Publish the terminal state before Tree/overlay members
@@ -94,58 +80,13 @@ public:
         }
     }
 
-    /// Borrow the current UI-owned Theme.
-    ///
-    /// The reference aliases storage owned by this UI and is valid only until
-    /// the next successful theme replacement or UI destruction. Reading the
-    /// reference does not allocate, invoke callbacks, or transfer ownership.
-    /// Like all UI state access, it belongs to the owning UI/main-thread domain.
     [[nodiscard]] const Theme& theme() const noexcept { return tree_.theme(); }
-
-    /// Replace the UI-owned Theme and publish the minimum required invalidation.
-    ///
-    /// @param theme Owned replacement value; the argument is moved into retained
-    /// storage, so caller-owned theme/string/vector storage need not outlive
-    /// this call.
-    ///
-    /// NativeUI classifies the resolved theme change as no-op, paint-only, or
-    /// layout-affecting and publishes the corresponding dirty state. Existing
-    /// references returned by theme() must be considered invalid after a
-    /// successful replacement. Re-resolution may allocate or execute component
-    /// work; exceptions propagate after retained state has preserved its normal
-    /// retry invariants. This is UI-thread work and not audio/DSP real-time safe.
     void set_theme(Theme theme) { tree_.set_theme(std::move(theme)); }
 
-    /// Measure preferred root content without publishing retained geometry.
-    ///
-    /// @param constraints Borrowed logical-pixel constraints valid only for this
-    /// call. The default is fully unbounded.
-    /// @return An owned ChildMetrics value. During an active lifecycle
-    /// transition the operation is suppressed and returns a default/empty
-    /// metrics value rather than observing partially transitioned retained state.
-    ///
-    /// Dynamic reconciliation and component measurement execute synchronously
-    /// and may allocate, invoke application/component code, or throw. The call
-    /// does not establish a viewport or acknowledge paint damage. UI/main-thread
-    /// confinement applies; this is not an audio/DSP real-time API.
     [[nodiscard]] ChildMetrics measure(const Constraints& constraints = Constraints::unbounded()) const {
         if (tree_.lifecycle_transition_active()) return {};
         return tree_.measure_overlay_content(constraints);
     }
-
-    /// Publish the root viewport size used by layout, hit testing and painting.
-    ///
-    /// @param viewport Width/height in root-logical UI pixels. UI stores the
-    /// requested value; component/layout policy remains responsible for how that
-    /// geometry is consumed.
-    ///
-    /// Outside lifecycle transitions, overlay/root layout is prepared
-    /// synchronously and failures propagate while keeping deferred retry state
-    /// coherent. If called reentrantly during mount/activate/deactivate/unmount,
-    /// the latest requested viewport is recorded and replayed at a later safe
-    /// checkpoint instead of mutating retained geometry mid-transition.
-    /// This operation may allocate/invoke component work and is UI-thread,
-    /// non-real-time work.
     void resize(Size viewport) {
         if (tree_.lifecycle_transition_active()) {
             pending_viewport_resize_ = viewport;
@@ -153,35 +94,42 @@ public:
             tree_.invalidate();
             return;
         }
+        pending_viewport_resize_valid_ = false;
+        const std::weak_ptr<void> alive = lifetime_;
+        const auto previous = viewport_;
         viewport_ = viewport;
-        prepare_overlay_layout();
+        try { prepare_overlay_layout(); }
+        catch (...) { if (!alive.expired()) viewport_ = previous; throw; }
     }
-    /// Activate component lifecycle plus the focus/input domain for this view.
-    ///
-    /// @param platform Host-view services for the same native view that will
-    /// later drive dispatch, paint and deactivation. The retained Tree borrows
-    /// this object for the active interval; keep it alive until deactivation or
-    /// teardown clears that borrow.
-    ///
-    /// Activation synchronously reconciles dynamic, availability and focus
-    /// state and may invoke application callbacks. Partial retained activation is
-    /// rolled back before a callback exception propagates; subsequent overlay
-    /// layout may also allocate or throw.
     void activate(PlatformServices& platform) {
+        const std::weak_ptr<void> alive = lifetime_;
+        if (!flush_quiet_overlay_refresh()) return;
         tree_.activate_focus(platform);
+        if (alive.expired()) return;
         prepare_overlay_layout();
+        if (alive.expired()) return;
         enforce_new_modal_capture_barrier(platform);
     }
-    /// End the active interaction interval and dismiss transient view state.
-    ///
-    /// @param platform Services for the currently active host view.
-    ///
-    /// Pointer capture/hover, focus, anchored/transient presentation and
-    /// component active state are reconciled in teardown order. Cleanup
-    /// continues across callback failures; after active state and the retained
-    /// PlatformServices borrow are cleared, the first captured exception may be
-    /// rethrown.
     void deactivate(PlatformServices& platform) {
+        if (toast_deactivating_) return;
+        const auto observers = lifecycle_observers_;
+        const std::weak_ptr<void> alive = lifetime_;
+        toast_deactivating_ = true;
+        for (const auto& weak : observers) {
+            if (const auto observer = weak.lock()) observer->ui_will_deactivate();
+            if (alive.expired()) return;
+        }
+        try {
+            if (!flush_quiet_overlay_refresh()) return;
+            deactivate_retained(platform);
+        } catch (...) {
+            if (!alive.expired()) toast_deactivating_ = false;
+            throw;
+        }
+        if (!alive.expired()) toast_deactivating_ = false;
+    }
+private:
+    void deactivate_retained(PlatformServices& platform) {
         // Transient presentations such as a pending/visible Tooltip are
         // cancelled at the view lifecycle boundary before focus/hover teardown
         // so their T065 timers cannot fire into an inactive UI.
@@ -202,33 +150,11 @@ public:
         close_anchored_overlays();
         tree_.deactivate_focus(platform);
     }
-    /// Re-synchronize retained availability and focus for the active view.
-    ///
-    /// @param platform Host-view services for this UI's active platform domain;
-    /// the reference is borrowed for the call and is not retained by this helper.
-    ///
-    /// When focus remains active, the focused node may be notified again after
-    /// reconciliation. Component/focus callbacks execute synchronously, may
-    /// re-enter ordinary UI/state work, and may throw; retained focus bookkeeping
-    /// is repaired before propagation by the underlying Tree contract. Call only
-    /// from the owning UI/main thread and never from an audio/DSP callback.
+public:
     void refresh_focus(PlatformServices& platform) { tree_.refresh_focus(platform); }
-    /// Route one normalized event through dialog, overlay and retained input policy.
-    ///
-    /// @param event Value input payload; pointer geometry is in root-logical coordinates.
-    /// @param platform Host-view services borrowed only for this dispatch frame.
-    /// @return Handled when NativeUI/application routing consumes the event,
-    /// otherwise Ignored. Lifecycle-transition calls return Ignored.
-    ///
-    /// Dispatch may reconcile dynamic composition, availability and focus,
-    /// allocate and invoke application callbacks. It is intentionally reentrant:
-    /// generation/transaction guards prevent older pointer/overlay/dialog frames
-    /// from corrupting newer nested work. Structural changes commit only at safe
-    /// outer checkpoints. Completion callbacks may re-enter ordinary UI/state
-    /// work or destroy this UI; retained ownership/retry bookkeeping is repaired
-    /// before propagation or callback return.
     EventResult dispatch(const InputEvent& event, PlatformServices& platform) {
         if (tree_.lifecycle_transition_active()) return EventResult::Ignored;
+        if (!flush_quiet_overlay_refresh()) return EventResult::Ignored;
         // T063 Escape is dialog policy, not focused-child policy. Resolve it
         // before ordinary retained routing so a focused TextInput/custom body
         // cannot consume Escape ahead of the enabled Cancel action/Dismissed
@@ -241,6 +167,9 @@ public:
                 return EventResult::Handled;
             }
         }
+
+        const bool is_drop = event.type == InputType::DropOffer || event.type == InputType::DropData;
+        if (is_drop ? tree_.mounted_ : tree_.active_) tree_.refresh_retained_components();
 
         // PointerDown anywhere and Escape are global dismissal gestures for
         // transient presentations such as a pending/visible Tooltip. This is
@@ -255,19 +184,28 @@ public:
             tree_.dismiss_transient_presentations();
         }
 
+        const bool context_request = event.type == InputType::ContextMenu ||
+            (event.type == InputType::KeyDown &&
+             (event.key == Key::Menu || (event.key == Key::F10 && event.shift)));
+        std::optional<std::vector<NodeId>> context_sources;
+        if (context_request) context_sources.emplace();
+
         // Keep the no-overlay path as close as possible to the pre-T061 UI
         // dispatch contract. T035 component requests are drained only after
         // Tree::dispatch reaches its T058 structural safe checkpoint. Capture
         // the source identity before dispatch because application providers may
         // change availability/focus while the source component is still alive.
         if (overlay_state_->entries.empty()) {
-            const auto command_source = overlay_command_source(event);
-            const auto result = dispatch_tree_dialog_safe(event, platform);
+            auto command_source = context_request ? kInvalidNodeId : overlay_command_source(event);
+            const auto result = dispatch_tree_dialog_safe(event, platform, context_request ? &*context_sources : nullptr);
             const bool completing_dialog = has_pending_dialog_completion();
             if (!completing_dialog) {
-                if (!process_component_overlay_command(command_source, platform)) return result;
+                const bool owner_alive = context_request
+                    ? process_context_overlay_command(*context_sources, platform)
+                    : process_component_overlay_command(command_source, platform, true);
+                if (!owner_alive) return result;
                 if (!overlay_state_->entries.empty()) {
-                    prepare_overlay_layout();
+                    prepare_overlay_layout(true);
                     enforce_new_modal_capture_barrier(platform);
                 }
             }
@@ -282,7 +220,7 @@ public:
         // overlay bounds for pointer containment or dismissal. A newly-created
         // modal also terminates any capture established by lower content before
         // this event can be routed through the modal barrier.
-        prepare_overlay_layout();
+        prepare_overlay_layout(true);
         enforce_new_modal_capture_barrier(platform);
 
         // Overlay dismissal is policy that must run before normal retained-tree
@@ -307,8 +245,15 @@ public:
                     const bool resolve_widget_teardown = it->spec.anchor &&
                         anchor_dismisses_on_tab(*it->spec.anchor);
                     const auto id = it->id;
-                    (void)overlay_state_->close_id(id);
-                    if (resolve_widget_teardown) prepare_overlay_layout();
+                    const bool observe_close = it->spec.anchor &&
+                        anchor_observes_user_close(*it->spec.anchor);
+                    const auto alive = std::weak_ptr{lifetime_};
+                    auto state = overlay_state_;
+                    (void)state->close_id(id, OverlayCloseReason::UserOutside);
+                    if (alive.expired()) return EventResult::Handled;
+                    if (observe_close) tree_.refresh_retained_components();
+                    if (alive.expired()) return EventResult::Handled;
+                    if (resolve_widget_teardown || observe_close) prepare_overlay_layout(true);
                     return EventResult::Handled;
                 }
 
@@ -319,12 +264,20 @@ public:
         } else if (event.type == InputType::KeyDown && event.key == Key::Escape) {
             for (auto it = overlay_state_->entries.rbegin();
                  it != overlay_state_->entries.rend(); ++it) {
+                if (it->spec.anchor && anchor_handles_escape(*it->spec.anchor)) break;
                 if (it->spec.dismiss_on_escape) {
                     const bool resolve_widget_teardown = it->spec.anchor &&
                         anchor_dismisses_on_tab(*it->spec.anchor);
                     const auto id = it->id;
-                    (void)overlay_state_->close_id(id);
-                    if (resolve_widget_teardown) prepare_overlay_layout();
+                    const bool observe_close = it->spec.anchor &&
+                        anchor_observes_user_close(*it->spec.anchor);
+                    const auto alive = std::weak_ptr{lifetime_};
+                    auto state = overlay_state_;
+                    (void)state->close_id(id, OverlayCloseReason::UserEscape);
+                    if (alive.expired()) return EventResult::Handled;
+                    if (observe_close) tree_.refresh_retained_components();
+                    if (alive.expired()) return EventResult::Handled;
+                    if (resolve_widget_teardown || observe_close) prepare_overlay_layout(true);
                     return EventResult::Handled;
                 }
 
@@ -344,25 +297,27 @@ public:
                 if (it->spec.anchor && anchor_dismisses_on_tab(*it->spec.anchor)) {
                     const auto id = it->id;
                     (void)overlay_state_->close_id(id);
-                    prepare_overlay_layout();
+                    prepare_overlay_layout(true);
                     break;
                 }
                 if (it->spec.mode == OverlayMode::Modal) break;
             }
         }
 
-        const auto command_source = overlay_command_source(event);
-        const auto result = dispatch_tree_dialog_safe(event, platform);
+        auto command_source = context_request ? kInvalidNodeId : overlay_command_source(event);
+        const auto result = dispatch_tree_dialog_safe(event, platform, context_request ? &*context_sources : nullptr);
         const bool completing_dialog = has_pending_dialog_completion();
-        if (!completing_dialog &&
-            !process_component_overlay_command(command_source, platform)) {
-            return result;
+        if (!completing_dialog) {
+            const bool owner_alive = context_request
+                ? process_context_overlay_command(*context_sources, platform)
+                : process_component_overlay_command(command_source, platform, true);
+            if (!owner_alive) return result;
         }
 
         // Tree::dispatch may have removed/disabled an anchor while a popup was
         // open. Resolve that source transition in the same outer dispatch, not
         // on a later paint/input event.
-        if (!overlay_state_->entries.empty()) prepare_overlay_layout();
+        if (!overlay_state_->entries.empty()) prepare_overlay_layout(true);
 
         // A callback may have captured the pointer and shown a modal in the
         // same dispatch. T058 mounts that modal only after the callback stack
@@ -376,106 +331,37 @@ public:
         if (completing_dialog) flush_pending_dialog_completion();
         return result;
     }
-    /// Cancel every active pointer-capture interaction owned by this UI.
-    ///
-    /// @param platform Host-view services borrowed only for cancellation delivery.
-    /// @return Handled when cancellation was delivered/consumed by retained input
-    /// routing, otherwise Ignored according to the Tree input contract.
-    ///
-    /// PointerCancel callbacks execute synchronously and may re-enter UI/state
-    /// work or throw. NativeUI completes the capture cleanup owned by this
-    /// operation before propagating a callback exception, so a failed callback
-    /// does not leave the old capture live. UI-thread confinement applies.
     EventResult cancel_pointer(PlatformServices& platform) {
         return tree_.cancel_pointer(platform);
     }
-
-    /// Install the owned fallback for Commands not handled by focused routing.
-    ///
-    /// Passing an empty std::function clears the slot. The callable is invoked
-    /// synchronously on the UI thread from dispatch(), receives Command by value,
-    /// and may re-enter UI/state work or throw. Replacing the slot transfers
-    /// ownership of the new callable to UI; captures inside it retain only the
-    /// lifetimes they own under normal C++ rules.
     void set_command_handler(std::function<EventResult(Command)> handler) {
         tree_.set_global_command_handler(std::move(handler));
     }
-
-    /// Install the owned fallback for unhandled KeyDown events.
-    ///
-    /// Passing an empty std::function clears the slot. InputEvent is borrowed
-    /// only for the callback invocation; copy any required fields before the
-    /// callback returns. The executing callable remains valid across reentrant
-    /// replacement/clear by nested UI work. Exceptions propagate from dispatch()
-    /// after dispatch bookkeeping is restored. This is UI-thread, non-RT work.
     void set_key_down_handler(std::function<EventResult(const InputEvent&)> handler) {
         tree_.set_global_key_down_handler(std::move(handler));
     }
-    /// Report whether either retained layout or paint work is pending.
-    ///
-    /// This allocation-free query does not flush reconciliation or consume dirty
-    /// state. The result is only a point-in-time value in the owning UI thread.
-    [[nodiscard]] bool dirty() const noexcept { return tree_.dirty(); }
-
-    /// Report whether retained logical geometry requires recomputation.
-    ///
-    /// Reading the flag has no side effects and does not perform layout.
-    [[nodiscard]] bool layout_dirty() const noexcept { return tree_.layout_dirty(); }
-
-    /// Report whether one or more root-logical paint-damage regions are pending.
-    ///
-    /// Reading the flag does not acknowledge or consume damage.
-    [[nodiscard]] bool paint_dirty() const noexcept { return tree_.paint_dirty(); }
-
-    /// Borrow the current root-logical paint-damage region vector.
-    ///
-    /// Rectangles use root-logical UI pixels. The vector and its elements remain
-    /// UI-owned; any later mutation/reconciliation/invalidation may change or
-    /// reallocate the storage, and UI destruction ends the borrow. Copy the
-    /// vector when a diagnostic snapshot must survive later UI work. Reading it
-    /// neither clears nor coalesces damage beyond the Tree's existing policy.
+    [[nodiscard]] bool dirty() const noexcept { return overlay_state_->quiet_structure_refresh || tree_.dirty(); }
+    [[nodiscard]] bool layout_dirty() const noexcept { return overlay_state_->quiet_structure_refresh || tree_.layout_dirty(); }
+    [[nodiscard]] bool paint_dirty() const noexcept { return overlay_state_->quiet_structure_refresh || tree_.paint_dirty(); }
     [[nodiscard]] const std::vector<Rect>& dirty_regions() const noexcept {
         return tree_.dirty_regions();
     }
-
-    /// Borrow the latest bounded structural-reconciliation diagnostic.
-    ///
-    /// The string is UI-owned and may be replaced by later reconciliation.
-    /// Empty means no currently published diagnostic. Copy it if it must outlive
-    /// subsequent UI work or this UI object. The query itself performs no work.
     [[nodiscard]] const std::string& structural_diagnostic() const noexcept {
         return tree_.structural_diagnostic();
     }
-
-    /// Snapshot effective retained availability for one NodeId.
-    ///
-    /// @return An owned value when the identity is currently live, otherwise
-    /// std::nullopt for invalid/stale/missing identity. The result does not keep
-    /// the node/component alive and remains independent of later reconciliation.
     [[nodiscard]] std::optional<ComponentAvailability> component_availability(
         NodeId id) const noexcept {
         return tree_.component_availability(id);
     }
-
-    /// Snapshot the semantic projection currently published for one retained node.
-    ///
-    /// @return An owned SemanticInfo value for a live identity, otherwise
-    /// std::nullopt. The snapshot does not retain a Node/component and does not
-    /// extend callback/action or retained-tree lifetime beyond whatever ownership
-    /// SemanticInfo itself explicitly carries. This is a diagnostic/read API;
-    /// it performs no native accessibility bridge work.
+    /// Read-only T045 semantic projection for one retained node. T068 replaces
+    /// this diagnostic read with immutable per-view semantic snapshots.
     [[nodiscard]] std::optional<SemanticInfo> component_semantics(
         NodeId id) const noexcept {
         return tree_.component_semantics(id);
     }
-
-    /// Return an owned diagnostic snapshot of the current overlay stack.
-    ///
-    /// Entries are emitted in creation/stack order and copy only public policy,
-    /// anchor identity and resolved root-logical geometry. Content Components and
-    /// platform objects are never exposed or kept alive by the result. Building
-    /// the vector may allocate and throw; later overlay mutation does not alter
-    /// an already returned snapshot.
+    /// Read-only diagnostic snapshot of the current T061 overlay stack in
+    /// creation order. Exposes only overlay policy/resolved geometry; it never
+    /// returns content components or platform objects.
     [[nodiscard]] std::vector<OverlayEntryInfo> overlay_entries() const {
         std::vector<OverlayEntryInfo> entries;
         entries.reserve(overlay_state_->entries.size());
@@ -492,99 +378,38 @@ public:
         }
         return entries;
     }
-    /// Install an owned root-logical invalidation callback.
-    ///
-    /// Passing an empty callable clears notification. On installation, every
-    /// already-pending dirty region is replayed synchronously before this call
-    /// returns. Future notifications run synchronously inside the UI operation
-    /// that publishes new damage. The dirty state is recorded before callback
-    /// invocation, so a throwing/reentrant callback cannot erase the invalidation
-    /// it was told about; exceptions propagate and the newly installed callback
-    /// remains installed.
-    ///
-    /// The Rect argument is passed by value and uses root-logical UI pixels.
-    /// Callback captures follow normal C++ ownership. This API is UI-thread work
-    /// and is not a cross-thread or audio/DSP real-time notification mechanism.
     void set_invalidation_callback(std::function<void(Rect)> callback) {
         tree_.set_invalidation_callback(std::move(callback));
     }
-
-    /// Install an owned region-agnostic invalidation callback.
-    ///
-    /// This overload has the same synchronous replay, ownership, reentrancy and
-    /// exception semantics as the Rect overload, but intentionally discards the
-    /// damage geometry before invoking the application callable.
     void set_invalidation_callback(std::function<void()> callback) {
         tree_.set_invalidation_callback(std::move(callback));
     }
-
-    /// Remove the presentation invalidation callback without clearing dirty state.
-    ///
-    /// Pending layout/paint work remains pending; only future application
-    /// notification is detached. No callback is invoked by the clear itself.
     void clear_invalidation_callback() {
         tree_.set_invalidation_callback(std::function<void(Rect)>{});
     }
-
-    /// Mark the complete current logical viewport for repaint.
-    ///
-    /// Dirty state is published before any installed callback is invoked.
-    /// Notification is synchronous, may re-enter UI work, and may throw.
     void invalidate() { tree_.invalidate(); }
-
-    /// Mark one root-logical rectangle for repaint.
-    ///
-    /// @param rect Damage expressed in root-logical UI pixels. Tree damage
-    /// policy may clip/coalesce it against the current viewport. The operation
-    /// can synchronously invoke the installed invalidation callback; the damage
-    /// remains recorded if that callback throws.
     void invalidate(Rect rect) { tree_.invalidate(rect); }
-
-    /// Mark retained geometry dirty for recomputation at a later safe checkpoint.
-    ///
-    /// Layout invalidation also conservatively publishes paint damage because
-    /// component bounds may move. Any installed presentation callback is invoked
-    /// synchronously through the normal invalidation path and may re-enter/throw.
     void invalidate_layout() { tree_.invalidate_layout(); }
-    /// Paint the retained UI into a host-owned Skia canvas.
-    ///
-    /// @param canvas Borrowed destination canvas, valid only for this call.
-    /// @param platform Host-view services borrowed for this paint/layout checkpoint.
-    ///
-    /// Deferred resize and overlay placement are reconciled before drawing.
-    /// Lifecycle-transition painting is suppressed. Successful paint consumes
-    /// only damage present at transaction start; invalidation raised reentrantly
-    /// by paint callbacks survives for the next frame. Failure restores consumed
-    /// damage before propagating. Painting is UI-thread work, may allocate/invoke
-    /// application code and is not audio/DSP real-time safe.
     void paint(SkCanvas& canvas, PlatformServices& platform) {
         paint_with_resources(canvas, platform, nullptr);
     }
 
-    /// Publish one retained in-view overlay owned by this UI.
+    /// Queue one in-view overlay through the same T058 structural checkpoint
+    /// used by explicit dynamic containers. show/close never splice retained
+    /// nodes synchronously on the caller's callback stack.
     ///
-    /// The request is consumed in the UI/main-thread domain and never creates a
-    /// native popup window. Opening an application/widget overlay first dismisses
-    /// transient presentations such as pending/visible tooltips. A valid handle
-    /// identifies the exact per-UI entry; `Modal + Ignore` is rejected and
-    /// returns an invalid handle. Allocation or structural-invalidation failures
-    /// may throw; provisional publication is rolled back before propagation.
-    ///
-    /// Anchored geometry and `OverlayEntryInfo::bounds` use logical coordinates.
-    /// Anchorless overlays are centered; an anchored overlay is dismissed if its
-    /// retained anchor can no longer be resolved.
+    /// Opening a T061 overlay is a global dismissal event for transient
+    /// presentations (pending/visible Tooltip) in the same UI. The Tooltip's
+    /// own non-hit-test presentation uses OverlayService directly and is
+    /// therefore not self-dismissing.
     [[nodiscard]] OverlayHandle show_overlay(OverlaySpec overlay) {
         tree_.dismiss_transient_presentations();
         return overlay_state_->show(std::move(overlay));
     }
 
-    /// Close one live overlay owned by this UI.
-    ///
-    /// Returns true only when the exact handle was accepted for close. Empty,
-    /// stale, already-closing/already-closed and cross-UI handles return false.
-    /// Retained teardown is scheduled through the structural checkpoint; if
-    /// structural invalidation throws, the logical entry and handle remain live
-    /// so the caller can retry rather than observing a half-committed close.
+    /// Close an overlay handle owned by this UI. Stale, cross-UI and already
+    /// closed handles are deterministic no-ops; retained teardown is deferred
+    /// through T058 even though the handle becomes stale immediately.
     bool close_overlay(OverlayHandle handle) {
         return overlay_state_->close(std::move(handle));
     }
@@ -598,9 +423,13 @@ private:
         PlatformServices& platform,
         const detail::PainterPrivateHooks* private_hooks) {
         if (tree_.lifecycle_transition_active()) return;
+        const std::weak_ptr<void> alive = lifetime_;
+        if (!flush_quiet_overlay_refresh()) return;
         (void)apply_pending_viewport_resize();
+        if (alive.expired()) return;
         if (!overlay_state_->entries.empty()) {
             prepare_overlay_layout();
+            if (alive.expired()) return;
             enforce_new_modal_capture_barrier(platform);
         }
 #if defined(NATIVEUI_ENABLE_INSPECTOR)
@@ -639,7 +468,10 @@ private:
     [[nodiscard]] bool prepare_scene_paint(PlatformServices& platform,
                                            bool& requires_full_repaint) {
         if (!scene_partial_paint_supported() || scene_paint_blocked()) return false;
+        const std::weak_ptr<void> alive = lifetime_;
+        if (!flush_quiet_overlay_refresh()) return false;
         const bool resized = apply_pending_viewport_resize();
+        if (alive.expired()) return false;
         tree_.prepare_scene_paint(platform, requires_full_repaint);
         requires_full_repaint = requires_full_repaint || resized;
         return true;
@@ -648,6 +480,7 @@ private:
     bool apply_pending_viewport_resize() {
         if (!pending_viewport_resize_valid_) return false;
 
+        const std::weak_ptr<void> alive = lifetime_;
         const Size previous = viewport_;
         const Size requested = pending_viewport_resize_;
         pending_viewport_resize_valid_ = false;
@@ -655,9 +488,15 @@ private:
         try {
             prepare_overlay_layout();
         } catch (...) {
+            if (alive.expired()) throw;
             viewport_ = previous;
-            pending_viewport_resize_ = requested;
-            pending_viewport_resize_valid_ = true;
+            // A callback may have requested a newer viewport before throwing.
+            // Keep that request; restore the attempted one only when no newer
+            // work exists. Geometry remains rolled back until the next frame.
+            if (!pending_viewport_resize_valid_) {
+                pending_viewport_resize_ = requested;
+                pending_viewport_resize_valid_ = true;
+            }
             throw;
         }
         return true;
@@ -721,6 +560,27 @@ private:
     friend debug::InspectorSnapshot debug::inspector_snapshot(UI& ui);
 #endif
 
+    friend class Toast;
+    [[nodiscard]] bool toast_owner_active() const noexcept {
+        return tree_.active_ && !toast_deactivating_;
+    }
+    [[nodiscard]] bool toast_owner_available() const noexcept {
+        return toast_owner_active() && !tree_.lifecycle_transition_active();
+    }
+    void register_lifecycle_observer(std::weak_ptr<detail::UILifecycleObserver> observer) {
+        std::erase_if(lifecycle_observers_, [](const auto& weak) { return weak.expired(); });
+        lifecycle_observers_.push_back(std::move(observer));
+    }
+    [[nodiscard]] bool flush_quiet_overlay_refresh() {
+        const auto state = overlay_state_;
+        if (!state || !state->quiet_structure_refresh) return true;
+        const std::weak_ptr<void> alive = lifetime_;
+        state->quiet_structure_refresh = false;
+        try { state->invalidate_structure(); }
+        catch (...) { state->quiet_structure_refresh = true; throw; }
+        return !alive.expired();
+    }
+
     struct PendingOverlayCommand final {
         NodeId source_id{kInvalidNodeId};
         detail::OverlayComponentCommand command;
@@ -736,6 +596,30 @@ private:
             if (auto* found = find_node(*child, id)) return found;
         }
         return nullptr;
+    }
+
+    [[nodiscard]] bool anchor_session_valid(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return !policy || policy->overlay_session_valid();
+    }
+
+    [[nodiscard]] bool anchor_handles_escape(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->overlay_handles_escape();
+    }
+
+    [[nodiscard]] bool anchor_observes_user_close(NodeId id) const noexcept {
+        if (!tree_.root_) return false;
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return false;
+        auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get());
+        return policy && policy->overlay_observes_user_close();
     }
 
     [[nodiscard]] bool anchor_dismisses_on_tab(NodeId id) const noexcept {
@@ -767,10 +651,14 @@ private:
         // completed pointer press. Keeping the ordinary PointerMove/Right-key
         // path entirely free of component discovery preserves the T051 dispatch
         // budget while command ownership stays per-view and UI-thread confined.
-        if (event.type == InputType::PointerUp) return true;
+        if (event.type == InputType::Tick) return true;
+        if (event.type == InputType::PointerUp || event.type == InputType::TextInput ||
+            event.type == InputType::Composition || event.type == InputType::Command) return true;
         if (event.type == InputType::KeyUp) return event.key == Key::Space;
         if (event.type != InputType::KeyDown) return false;
-        return event.key == Key::Down || event.key == Key::Enter || event.key == Key::Space;
+        return event.key == Key::Left || event.key == Key::Right ||
+            event.key == Key::Down || event.key == Key::Up || event.key == Key::Enter ||
+            event.key == Key::Space || event.key == Key::Escape || event.key == Key::Tab;
     }
 
     [[nodiscard]] Node* focused_node() noexcept {
@@ -783,8 +671,47 @@ private:
 
     [[nodiscard]] NodeId overlay_command_source(const InputEvent& event) noexcept {
         if (!event_may_queue_overlay_command(event)) return kInvalidNodeId;
-        auto* node = focused_node();
-        return node ? node->id : kInvalidNodeId;
+        for (auto* node = focused_node(); node; node = node->parent) {
+            if (Tree::overlay_commands_for(*node)) return node->id;
+        }
+        return kInvalidNodeId;
+    }
+
+    [[nodiscard]] bool process_context_overlay_command(
+        const std::vector<NodeId>& sources, PlatformServices& platform) {
+        if (overlay_command_retry_) {
+            return process_component_overlay_command(kInvalidNodeId, platform, true, true);
+        }
+        const std::weak_ptr<int> owner_lifetime = lifetime_;
+        for (const auto id : sources) {
+            if (!tree_.root_) break;
+            auto* node = find_node(*tree_.root_, id);
+            if (!node) continue;
+            auto* source = Tree::overlay_commands_for(*node);
+            if (!source || !source->has_pending_overlay_command()) continue;
+            auto command = source->take_overlay_command();
+            if (owner_lifetime.expired()) return false;
+            // Legacy sources conservatively report pending. An empty child
+            // must not hide the contextual ancestor that accepted this event.
+            if (!command) continue;
+            return process_component_overlay_command(
+                id, platform, true, true, std::move(command));
+        }
+        return true;
+    }
+    [[nodiscard]] std::optional<Rect> component_overlay_anchor_bounds(NodeId id) const noexcept {
+        if (!tree_.root_) return {};
+        auto* node = find_node(*tree_.root_, id);
+        if (!node) return {};
+        if (auto* policy = dynamic_cast<detail::OverlayAnchorPolicy*>(node->component.get())) {
+            if (const auto bounds = policy->overlay_anchor_bounds()) {
+                if (!std::isfinite(bounds->x) || !std::isfinite(bounds->y) ||
+                    !std::isfinite(bounds->w) || !std::isfinite(bounds->h) ||
+                    bounds->w < 0 || bounds->h < 0) return {};
+                return bounds;
+            }
+        }
+        return tree_.overlay_anchor_bounds(id);
     }
 
     [[nodiscard]] std::optional<detail::OverlayComponentCommand>
@@ -792,7 +719,7 @@ private:
         if (source_id == kInvalidNodeId || !tree_.root_) return std::nullopt;
         auto* node = find_node(*tree_.root_, source_id);
         if (!node) return std::nullopt;
-        auto* source = dynamic_cast<detail::OverlayCommandSource*>(node->component.get());
+        auto* source = Tree::overlay_commands_for(*node);
         if (!source) return std::nullopt;
         return source->take_overlay_command();
     }
@@ -800,6 +727,13 @@ private:
     [[nodiscard]] bool node_is_focused(NodeId id) noexcept {
         const auto* node = focused_node();
         return node && node->id == id;
+    }
+
+    [[nodiscard]] bool node_contains_focus(NodeId id) noexcept {
+        for (const auto* node = focused_node(); node; node = node->parent) {
+            if (node->id == id) return true;
+        }
+        return false;
     }
 
     [[nodiscard]] bool guarded_anchor_allows_commit(
@@ -814,18 +748,23 @@ private:
     }
 
     [[nodiscard]] bool process_component_overlay_command(
-        NodeId source_id, PlatformServices& platform) {
+        NodeId source_id, PlatformServices& platform, bool checkpoint_prepared = false,
+        bool context_request = false,
+        std::optional<detail::OverlayComponentCommand> captured_command = std::nullopt) {
         // This control block is independent of the UI object's storage. Any
         // callback below may synchronously delete this UI; after expiration the
         // only legal continuation is to return to dispatch using local values.
         std::weak_ptr<int> owner_lifetime = lifetime_;
+        const auto overlay_state = overlay_state_;
 
         std::optional<PendingOverlayCommand> pending;
         if (overlay_command_retry_) {
             pending.emplace(std::move(*overlay_command_retry_));
             overlay_command_retry_.reset();
         } else {
-            auto command = take_overlay_command(source_id);
+            auto command = captured_command
+                ? std::move(captured_command) : take_overlay_command(source_id);
+            if (owner_lifetime.expired()) return false;
             if (!command) return true;
             pending.emplace(PendingOverlayCommand{source_id, std::move(*command)});
         }
@@ -836,7 +775,8 @@ private:
         if (command.kind == detail::OverlayComponentCommandKind::Show) {
             auto on_shown = std::move(command.on_shown);
             const bool suppress_when_read_only = anchor_dismisses_when_read_only(source_id);
-            const bool source_still_valid = node_is_focused(source_id) &&
+            const bool source_still_valid = (context_request || node_contains_focus(source_id)) &&
+                anchor_session_valid(source_id) &&
                 guarded_anchor_allows_commit(source_id, suppress_when_read_only);
             if (!source_still_valid) {
                 // Application-supplied option/item providers may mutate retained
@@ -858,11 +798,12 @@ private:
                 // exception.
                 auto failure = std::current_exception();
                 try {
-                    if (on_shown) on_shown({});
+                    if (!owner_lifetime.expired() && on_shown) on_shown({});
                 } catch (...) {
                 }
                 std::rethrow_exception(failure);
             }
+            if (owner_lifetime.expired()) return false;
 
             // Preserve the T035 publication point before retained focus
             // reconciliation. ComboBox/PopupMenu opener suppression depends on
@@ -874,19 +815,20 @@ private:
                 // Retained preparation is still fallible after publication. On
                 // failure, revoke this exact popup and acknowledge an invalid
                 // handle below so opener/session state returns to retryable.
-                prepare_overlay_layout();
+                prepare_overlay_layout(checkpoint_prepared);
             } catch (...) {
                 auto failure = std::current_exception();
-                (void)overlay_state_->close_noexcept(handle);
+                (void)overlay_state->close_noexcept(handle);
                 try {
-                    if (on_shown) on_shown({});
+                    if (!owner_lifetime.expired() && on_shown) on_shown({});
                 } catch (...) {
                 }
                 std::rethrow_exception(failure);
             }
+            if (owner_lifetime.expired()) return false;
 
             enforce_new_modal_capture_barrier(platform);
-            return true;
+            return !owner_lifetime.expired();
         }
 
         const auto guard_anchor = command.guard_anchor;
@@ -898,12 +840,15 @@ private:
         // step fails, a later outer dispatch retries the same command; the
         // application callback has not begun and therefore cannot run twice.
         try {
-            (void)overlay_state_->close_reconciled(
-                command.handle, [this] { prepare_overlay_layout(); });
+            (void)overlay_state->close_reconciled(
+                command.handle, [this, owner_lifetime, checkpoint_prepared] {
+                    if (!owner_lifetime.expired()) prepare_overlay_layout(checkpoint_prepared);
+                });
         } catch (...) {
-            overlay_command_retry_.emplace(std::move(*pending));
+            if (!owner_lifetime.expired()) overlay_command_retry_.emplace(std::move(*pending));
             throw;
         }
+        if (owner_lifetime.expired()) return false;
 
         const bool allowed = guarded_anchor_allows_commit(
             guard_anchor, suppress_when_read_only);
@@ -916,16 +861,24 @@ private:
         // The application callback may invalidate dynamic composition, remove
         // its anchor or open another T061 overlay directly. Failures from this
         // point must not requeue the callback because it may already have run.
-        prepare_overlay_layout();
+        prepare_overlay_layout(checkpoint_prepared);
+        if (owner_lifetime.expired()) return false;
         enforce_new_modal_capture_barrier(platform);
-        return true;
+        return !owner_lifetime.expired();
     }
 
     EventResult dispatch_tree_dialog_safe(
-        const InputEvent& event, PlatformServices& platform) {
+        const InputEvent& event, PlatformServices& platform, std::vector<NodeId>* context_route = nullptr) {
+        struct RouteScope {
+            Tree& tree;
+            std::vector<NodeId>* previous;
+            bool installed;
+            ~RouteScope() noexcept { if (installed) tree.context_overlay_route_ = previous; }
+        } route_scope{tree_, tree_.context_overlay_route_, context_route != nullptr};
+        if (context_route) tree_.context_overlay_route_ = context_route;
         const auto depth_before = tree_.dispatch_depth_;
         try {
-            return tree_.dispatch(event, platform);
+            return tree_.dispatch_prepared(event, platform, true);
         } catch (...) {
             // T131 must not let a propagated Dialog close failure poison future
             // completion by leaving Tree's dispatch-depth bookkeeping elevated.
@@ -1049,8 +1002,8 @@ private:
             if (!entry.spec.anchor) continue;
 
             const auto availability = tree_.component_availability(*entry.spec.anchor);
-            const auto bounds = tree_.overlay_anchor_bounds(*entry.spec.anchor);
-            if (!availability || !bounds ||
+            const auto bounds = component_overlay_anchor_bounds(*entry.spec.anchor);
+            if (!availability || !bounds || !anchor_session_valid(*entry.spec.anchor) ||
                 availability->visibility != VisibilityMode::Visible ||
                 (!availability->enabled &&
                  anchor_dismisses_when_disabled(*entry.spec.anchor)) ||
@@ -1067,15 +1020,16 @@ private:
         }
 
         for (const auto id : stale) {
-            changed = overlay_state_->close_id(id) || changed;
+            changed = overlay_state_->close_id(id, OverlayCloseReason::AnchorUnavailable) || changed;
         }
 
         if (changed) tree_.invalidate_layout();
         return changed;
     }
 
-    void prepare_overlay_layout() {
+    void prepare_overlay_layout(bool checkpoint_prepared = false) {
         if (tree_.lifecycle_transition_active()) return;
+        if (!flush_quiet_overlay_refresh()) return;
         // First pass makes root/anchor geometry authoritative for this viewport
         // and flushes pending T058 structural mutations. The overlay-specific
         // layout path deliberately skips a redundant recursive measurement of
@@ -1083,8 +1037,9 @@ private:
         // size. A changed/missing anchor then invalidates overlay placement or
         // closes the overlay; the second pass consumes that update before input
         // or paint observes it.
-        tree_.layout_overlay_viewport(viewport_);
-        if (synchronize_overlay_anchors()) tree_.layout_overlay_viewport(viewport_);
+        if (!checkpoint_prepared || !tree_.input_geometry_is_rolled_back())
+            tree_.layout_overlay_viewport(viewport_, checkpoint_prepared);
+        if (synchronize_overlay_anchors()) tree_.layout_overlay_viewport(viewport_, true);
     }
 
     void close_anchored_overlays() {
@@ -1125,6 +1080,8 @@ private:
     std::shared_ptr<detail::OverlayState> overlay_state_;
     OverlayPresenter overlay_presenter_;
     Tree tree_;
+    std::vector<std::weak_ptr<detail::UILifecycleObserver>> lifecycle_observers_;
+    bool toast_deactivating_{};
     Size viewport_{};
     Size pending_viewport_resize_{};
     bool pending_viewport_resize_valid_{};
@@ -1166,11 +1123,6 @@ inline InspectorSnapshot inspector_snapshot(UI& ui) {
 } // namespace debug
 #endif
 
-/// Backward-compatibility alias for UI.
-///
-/// PluginUI has exactly UI's ownership, UI-thread, callback/reentrancy and
-/// non-real-time contracts. It does not add plug-in SDK, parameter-automation,
-/// audio-thread, host-lifetime or synchronization semantics.
-using PluginUI = UI;
+using PluginUI = UI; // compatibility alias for the original POC
 
 } // namespace ui

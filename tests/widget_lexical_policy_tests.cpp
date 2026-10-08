@@ -1,0 +1,5 @@
+#include <nativeui/component.hpp>
+#include <stdexcept>
+struct Leaf final : ui::Component { bool interactive{}; bool focusable() const noexcept override { return interactive; } ui::Size measure(const std::vector<ui::ChildMetrics>&) const override { return {}; } void paint(ui::PaintContext&) const override {} };
+struct Scope final : ui::Component { bool allows_child_interaction() const noexcept override { return false; } ui::Size measure(const std::vector<ui::ChildMetrics>&) const override { return {}; } void paint(ui::PaintContext&) const override {} private: void bind_descendant_context(ui::Component& child) const override { if (auto* leaf=dynamic_cast<Leaf*>(&child)) leaf->interactive=true; } };
+int main() { int children_factories{}; ui::Spec child{[] { return std::make_unique<Leaf>(); },{}}; child.children_factory=[&](ui::Component&) { ++children_factories; return std::vector<ui::Spec>{}; }; ui::Spec root{[] { return std::make_unique<Scope>(); },{child}}; bool rejected{}; try { auto tree=ui::compile(root); } catch(const std::invalid_argument&) { rejected=true; } return rejected && children_factories == 0 ? 0 : 1; }

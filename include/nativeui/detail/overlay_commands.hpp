@@ -53,6 +53,7 @@ struct OverlayComponentCommand final {
 class OverlayCommandSource {
 public:
     virtual ~OverlayCommandSource() = default;
+    [[nodiscard]] virtual bool has_pending_overlay_command() const noexcept { return true; }
     [[nodiscard]] virtual std::optional<OverlayComponentCommand>
     take_overlay_command() = 0;
 };
@@ -63,6 +64,12 @@ public:
 class OverlayAnchorPolicy {
 public:
     virtual ~OverlayAnchorPolicy() = default;
+    // Owned logical viewport coordinates; no provider or retained lookup.
+    [[nodiscard]] virtual std::optional<Rect> overlay_anchor_bounds() const noexcept { return {}; }
+    // Read only owned session memory, without model/provider callbacks.
+    [[nodiscard]] virtual bool overlay_session_valid() const noexcept { return true; }
+    [[nodiscard]] virtual bool overlay_handles_escape() const noexcept { return false; }
+    [[nodiscard]] virtual bool overlay_observes_user_close() const noexcept { return false; }
     [[nodiscard]] virtual bool dismiss_overlay_on_tab() const noexcept { return false; }
     [[nodiscard]] virtual bool dismiss_overlay_when_disabled() const noexcept { return true; }
     [[nodiscard]] virtual bool dismiss_overlay_when_read_only() const noexcept { return false; }

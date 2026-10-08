@@ -200,7 +200,17 @@ void visibility_preserves_identity_and_lifecycle() {
     NUI_CHECK(probe->paints == visible_paints);
 
     visibility.set(ui::VisibilityMode::Visible);
-    NUI_CHECK(tree.layout_dirty());
+    // Restoring focus consumes layout before notifying the component, so its
+    // text-input geometry must already describe the visible, expanded view.
+    NUI_CHECK(!tree.layout_dirty());
+    NUI_CHECK(tree.paint_dirty());
+    NUI_CHECK(probe->focus_in == 2);
+    NUI_CHECK(probe->focus_out == 1);
+    NUI_CHECK(platform.text_input_active);
+    NUI_CHECK_NEAR(platform.text_input_area.x, 0.0f, 0.001f);
+    NUI_CHECK_NEAR(platform.text_input_area.y, 0.0f, 0.001f);
+    NUI_CHECK_NEAR(platform.text_input_area.w, 100.0f, 0.001f);
+    NUI_CHECK_NEAR(platform.text_input_area.h, 40.0f, 0.001f);
     metrics = tree.measure();
     NUI_CHECK_NEAR(metrics.preferred.w, 100.0f, 0.001f);
     NUI_CHECK_NEAR(metrics.preferred.h, 40.0f, 0.001f);

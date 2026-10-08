@@ -17,89 +17,58 @@
 
 namespace ui {
 
-/// Controls whether an overlay participates in modal focus/input policy.
-///
-/// The mode is interpreted inside one owning `UI`; it never establishes
-/// process-global modal state. Overlay focus and pointer routing are UI/main-
-/// thread concerns and are not synchronization primitives.
 enum class OverlayMode {
-    /// Keep ordinary root keyboard focus active. The overlay remains above root
-    /// content and may receive pointer input according to its pointer policy.
     NonModal,
-    /// Create an active trapping focus scope and block pointer input from
-    /// reaching lower retained content in the same UI.
     Modal,
 };
 
-/// Controls pointer hit testing for an overlay and its retained descendants.
-///
-/// This policy affects retained routing only; it does not install a native
-/// platform hit-test region.
 enum class OverlayPointerPolicy {
-    /// The overlay and descendants participate normally in retained hit testing.
     Normal,
-    /// Make both the overlay wrapper and all descendants pointer-transparent so
-    /// pointer events may reach lower retained content. `Modal + Ignore` is an
-    /// invalid specification and publication returns an invalid handle.
     Ignore,
 };
 
 // X11/Xlib exposes process-wide preprocessor macros named `Above` and `Below`.
 // NativeUI public headers must remain consumable after Xlib headers, so the
 // anchor-relative names deliberately avoid those unqualifiable macro tokens.
-///
-/// Placement is resolved in logical UI coordinates. Anchor-relative modes first
-/// try the requested side, may flip to the opposite side when it fits better,
-/// and finally clamp only the origin to the viewport; the measured natural size
-/// is not shrunk. `Auto` uses Below/Above/Right/Left as deterministic priority.
 enum class OverlayPlacement {
-    /// Place the overlay at the anchor's left edge immediately below it.
     AnchorBelow,
-    /// Place the overlay at the anchor's left edge immediately above it.
     AnchorAbove,
-    /// Place the overlay at the anchor's top edge immediately to its right.
     AnchorRight,
-    /// Place the overlay at the anchor's top edge immediately to its left.
     AnchorLeft,
-    /// Center inside the owning UI viewport. This is also the effective
-    /// placement for every anchorless overlay.
     Center,
-    /// Select an anchor-relative side from available viewport space. The first
-    /// full fit in Below/Above/Right/Left order wins; otherwise the side with
-    /// greatest viewport intersection wins, with the same order breaking ties.
     Auto,
+    ViewportBottomCenter,
+};
+
+enum class OverlayCloseReason {
+    Explicit,
+    UserOutside,
+    UserEscape,
+    AnchorUnavailable,
+    OwnerTeardown,
 };
 
 namespace detail {
+struct OverlayClosureToken final { std::optional<OverlayCloseReason> reason; };
 struct OverlayOwnerToken final {};
 struct OverlayLifetimeToken final {};
 struct OverlayState;
 } // namespace detail
 
-/// Non-owning identity for one overlay entry in one `UI`.
-///
-/// A handle does not own the overlay or extend its lifetime. It is valid only
-/// while the exact entry remains published by its owning UI; close, policy
-/// dismissal, anchor loss and UI teardown make it stale. Handles from another
-/// UI are never accepted by `UI::close_overlay()`.
-///
-/// Overlay mutation is UI/main-thread confined. A handle is an identity token,
-/// not a cross-thread synchronization primitive.
 class OverlayHandle {
 public:
-    /// Construct an empty/stale handle.
     OverlayHandle() = default;
 
-    /// Return whether the owning UI and exact overlay lifetime are still live.
-    /// This does not imply that layout has already resolved final bounds.
     [[nodiscard]] bool valid() const noexcept {
         return id_ != 0 && !owner_.expired() && !lifetime_.expired();
     }
 
-    /// Equivalent to `valid()`.
     explicit operator bool() const noexcept { return valid(); }
 
-    /// Compare overlay identity. Equality does not imply current validity.
+    [[nodiscard]] std::optional<OverlayCloseReason> close_reason() const noexcept {
+        return closure_ ? closure_->reason : std::nullopt;
+    }
+
     [[nodiscard]] bool operator==(const OverlayHandle& other) const noexcept {
         return id_ == other.id_ && !owner_.owner_before(other.owner_) &&
                !other.owner_.owner_before(owner_);
@@ -110,96 +79,39 @@ private:
 
     OverlayHandle(std::weak_ptr<const detail::OverlayOwnerToken> owner,
                   std::weak_ptr<const detail::OverlayLifetimeToken> lifetime,
-                  std::uint64_t id) noexcept
-        : owner_(std::move(owner)), lifetime_(std::move(lifetime)), id_(id) {}
+                  std::uint64_t id,
+                  std::shared_ptr<const detail::OverlayClosureToken> closure) noexcept
+        : owner_(std::move(owner)), lifetime_(std::move(lifetime)), id_(id),
+          closure_(std::move(closure)) {}
 
     std::weak_ptr<const detail::OverlayOwnerToken> owner_;
     std::weak_ptr<const detail::OverlayLifetimeToken> lifetime_;
     std::uint64_t id_{};
+    std::shared_ptr<const detail::OverlayClosureToken> closure_;
 };
 
-/// Declarative owned request for one retained in-view overlay.
-///
-/// `UI::show_overlay()` consumes this value into one UI-owned overlay entry on
-/// successful publication. The entry owns `content` and the policy values but
-/// does not own an anchor node: `anchor` is retained identity that must resolve
-/// in the same UI. Any application objects borrowed by factories/callbacks
-/// captured inside `content` remain subject to those captures' own lifetimes.
-///
-/// Overlay content stays inside the owning UI; this does not create a native
-/// popup window. All geometry is expressed in logical UI pixels. Publication,
-/// retained layout, dismissal and close are UI/main-thread operations, may
-/// allocate or propagate retained structural-invalidation failures, and are not
-/// suitable for audio/DSP real-time callbacks.
 struct OverlaySpec {
-    /// Presentation/focus mode. Non-modal by default; modal entries trap focus
-    /// and block pointer input to lower retained content in the same UI.
     OverlayMode mode{OverlayMode::NonModal};
-
-    /// Retained pointer-routing policy. `Modal + Ignore` is invalid and
-    /// `show_overlay()` returns an invalid handle without publishing an entry.
     OverlayPointerPolicy pointer_policy{OverlayPointerPolicy::Normal};
-
-    /// Optional non-owning retained identity for an anchor in the same UI.
-    ///
-    /// Without an anchor, the overlay is centered regardless of `placement`.
-    /// If an anchored node later disappears or cannot resolve geometry, the UI
-    /// dismisses the overlay instead of retaining stale anchor coordinates.
     std::optional<NodeId> anchor;
-
-    /// Requested placement in logical UI coordinates.
-    ///
-    /// Side placements may flip to their opposite side according to available
-    /// space and then clamp the origin. `Auto` is deterministic; content keeps
-    /// its measured natural size even when larger than the viewport.
     OverlayPlacement placement{OverlayPlacement::Auto};
-
-    /// Opt in to Escape-key dismissal according to the active overlay/modal
-    /// stack policy. False means Escape alone does not dismiss this entry.
     bool dismiss_on_escape{};
-
-    /// Opt in to dismissal on a pointer-down outside the resolved overlay bounds.
-    /// This policy is meaningful after retained layout has resolved geometry.
     bool dismiss_on_outside_pointer_down{};
-
-    /// Owned retained content specification stored by the live overlay entry.
-    ///
-    /// A valid component factory is expected when the retained subtree is
-    /// materialized. Captured external borrows are not lifetime-extended.
     Spec content;
+    bool match_anchor_width{};
 };
 
-/// Owned read-only diagnostic snapshot of one overlay entry.
-///
-/// `UI::overlay_entries()` copies these values in creation order. The snapshot
-/// neither owns nor extends the lifetime of the overlay, anchor, retained
-/// content, platform objects or mutable overlay state. Inspection is UI/main-
-/// thread work and the returned vector may allocate.
+/// Read-only diagnostic view of one T061 overlay entry. It exposes only the
+/// generic policy/placement metadata needed to verify retained overlay
+/// behavior; content components, platform objects and overlay state ownership
+/// never leave the owning UI.
 struct OverlayEntryInfo {
-    /// Monotonic per-UI diagnostic identifier for the published entry.
-    ///
-    /// Use `OverlayHandle`, not this number, for close/lifetime operations.
     std::uint64_t id{};
-
-    /// Snapshot of the entry's modal/focus policy.
     OverlayMode mode{OverlayMode::NonModal};
-
-    /// Snapshot of the entry's retained pointer-routing policy.
     OverlayPointerPolicy pointer_policy{OverlayPointerPolicy::Normal};
-
-    /// Non-owning anchor identity requested by the specification, when present.
     std::optional<NodeId> anchor;
-
-    /// Requested placement policy; this is not rewritten when placement flips.
     OverlayPlacement placement{OverlayPlacement::Auto};
-
-    /// False until retained layout has produced usable resolved geometry.
     bool resolved{};
-
-    /// Resolved bounds in logical UI coordinates of the owning viewport.
-    ///
-    /// Do not interpret this value when `resolved == false`. The rectangle is a
-    /// value snapshot and does not track later layout or viewport changes.
     Rect bounds{};
 };
 
@@ -277,6 +189,7 @@ namespace detail {
             return {anchor.x - content.w, anchor.y, content.w, content.h};
         case OverlayPlacement::Center:
         case OverlayPlacement::Auto:
+        case OverlayPlacement::ViewportBottomCenter:
             break;
     }
     return {anchor.x, anchor.y, content.w, content.h};
@@ -290,6 +203,7 @@ namespace detail {
         case OverlayPlacement::AnchorLeft: return OverlayPlacement::AnchorRight;
         case OverlayPlacement::Center:
         case OverlayPlacement::Auto:
+        case OverlayPlacement::ViewportBottomCenter:
             return placement;
     }
     return placement;
@@ -317,6 +231,12 @@ namespace detail {
                 viewport.y + (viewport.h - content.h) * 0.5f,
                 content.w,
                 content.h});
+    }
+
+    if (placement == OverlayPlacement::ViewportBottomCenter) {
+        return overlay_clamp_origin(viewport, {
+            viewport.x + (viewport.w - content.w) * 0.5f,
+            viewport.y + viewport.h - content.h, content.w, content.h});
     }
 
     if (placement == OverlayPlacement::Auto) {
@@ -368,6 +288,7 @@ struct OverlayEntry {
     Rect resolved_bounds{};
     bool resolved{};
     bool closing{};
+    std::shared_ptr<OverlayClosureToken> closure;
 };
 
 // One OverlayState belongs to one UI. It stores only logical overlay state and
@@ -379,6 +300,16 @@ struct OverlayState {
     std::uint64_t next_id{1};
     std::vector<OverlayEntry> entries;
     std::function<void()> structural_invalidator;
+    bool quiet_structure_refresh{};
+
+    ~OverlayState() noexcept { begin_owner_teardown(); }
+
+    void begin_owner_teardown() noexcept {
+        for (auto& entry : entries) {
+            if (entry.closure && !entry.closure->reason)
+                entry.closure->reason = OverlayCloseReason::OwnerTeardown;
+        }
+    }
 
     void invalidate_structure() const {
         if (structural_invalidator) structural_invalidator();
@@ -398,7 +329,9 @@ struct OverlayState {
         // Prepare all allocation-capable state before publication. IDs remain
         // monotonic even when the subsequent structural notification fails.
         auto lifetime = std::make_shared<const OverlayLifetimeToken>();
-        entries.push_back(OverlayEntry{id, std::move(overlay), lifetime, std::nullopt, {}});
+        auto closure = std::make_shared<OverlayClosureToken>();
+        entries.push_back(OverlayEntry{id, std::move(overlay), lifetime,
+                                      std::nullopt, {}, false, false, closure});
         try {
             invalidate_structure();
         } catch (...) {
@@ -411,7 +344,7 @@ struct OverlayState {
             if (it != entries.end()) erase_entry_noexcept(it);
             throw;
         }
-        return OverlayHandle{owner, lifetime, id};
+        return OverlayHandle{owner, lifetime, id, std::move(closure)};
     }
 
     bool close(OverlayHandle handle) {
@@ -479,7 +412,7 @@ struct OverlayState {
         return true;
     }
 
-    bool close_id(std::uint64_t id) {
+    bool close_id(std::uint64_t id, OverlayCloseReason reason = OverlayCloseReason::Explicit) {
         auto it = std::find_if(entries.begin(), entries.end(), [id](const OverlayEntry& entry) {
             return entry.id == id;
         });
@@ -490,7 +423,22 @@ struct OverlayState {
             return entry.id == id;
         });
         if (it == entries.end() || it->closing) return false;
+        erase_entry_noexcept(it, reason);
+        return true;
+    }
+
+    // UI service cancellation cannot execute an application invalidator from
+    // a noexcept lifecycle hook. The next UI checkpoint publishes structure.
+    bool close_quiet_noexcept(OverlayHandle handle) noexcept {
+        const auto handle_owner = handle.owner_.lock();
+        const auto lifetime = handle.lifetime_.lock();
+        if (!handle_owner || handle_owner != owner || !lifetime || handle.id_ == 0) return false;
+        auto it = std::find_if(entries.begin(), entries.end(), [&](const OverlayEntry& entry) {
+            return entry.id == handle.id_ && entry.lifetime == lifetime;
+        });
+        if (it == entries.end()) return false;
         erase_entry_noexcept(it);
+        quiet_structure_refresh = true;
         return true;
     }
 
@@ -534,7 +482,9 @@ struct OverlayState {
 private:
     using EntryIterator = std::vector<OverlayEntry>::iterator;
 
-    void erase_entry_noexcept(EntryIterator it) noexcept {
+    void erase_entry_noexcept(EntryIterator it,
+        OverlayCloseReason reason = OverlayCloseReason::Explicit) noexcept {
+        if (it->closure && !it->closure->reason) it->closure->reason = reason;
         static_assert(std::is_nothrow_move_assignable_v<OverlayEntry>);
         for (auto current = it; std::next(current) != entries.end(); ++current) {
             *current = std::move(*std::next(current));
@@ -600,6 +550,7 @@ public:
                                    event.type == InputType::PointerMove ||
                                    event.type == InputType::PointerUp ||
                                    event.type == InputType::PointerCancel ||
+                                   event.type == InputType::Magnify ||
                                    event.type == InputType::PointerWheel;
         if (pointer_event && pointer_policy_ == OverlayPointerPolicy::Normal) {
             return EventResult::Handled;
@@ -639,6 +590,7 @@ public:
                                    event.type == InputType::PointerMove ||
                                    event.type == InputType::PointerUp ||
                                    event.type == InputType::PointerCancel ||
+                                   event.type == InputType::Magnify ||
                                    event.type == InputType::PointerWheel;
         return pointer_event ? EventResult::Handled : EventResult::Ignored;
     }
@@ -663,7 +615,22 @@ public:
         const Constraints& constraints,
         std::size_t child_index,
         std::size_t) const override {
-        return child_index == 0 ? constraints : constraints.loosen();
+        if (child_index == 0) return constraints;
+        auto result = constraints.loosen();
+        std::size_t index = 1;
+        for (const auto& entry : state_->entries) {
+            if (entry.closing) continue;
+            if (entry.spec.mode == OverlayMode::Modal) {
+                if (index++ == child_index) return result;
+            }
+            if (index++ != child_index) continue;
+            if (entry.spec.match_anchor_width && entry.anchor_bounds) {
+                result.min.w = std::min(overlay_finite_extent(entry.anchor_bounds->w),
+                                       result.max.w);
+            }
+            return result;
+        }
+        return result;
     }
 
     void layout_children(Rect bounds,
@@ -685,9 +652,9 @@ public:
             const auto size = children[child_index].preferred;
             const bool has_anchor = entry.spec.anchor.has_value() && entry.anchor_bounds.has_value();
             const Rect anchor = has_anchor ? *entry.anchor_bounds : bounds;
-            const OverlayPlacement placement = has_anchor
-                ? entry.spec.placement
-                : OverlayPlacement::Center;
+            const OverlayPlacement placement = has_anchor ||
+                    entry.spec.placement == OverlayPlacement::ViewportBottomCenter
+                ? entry.spec.placement : OverlayPlacement::Center;
             entry.resolved_bounds = overlay_placement_bounds(bounds, anchor, size, placement);
             entry.resolved = true;
             placements[child_index].bounds = entry.resolved_bounds;
