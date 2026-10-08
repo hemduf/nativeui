@@ -80,6 +80,9 @@ private:
 
 public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    [[nodiscard]] static bool register_root_raster_cache_boundary(UI& ui);
+    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(UI& ui);
+
     void inject_fault(SceneFaultStage stage) noexcept;
 
     [[nodiscard]] SceneDiagnostics diagnostics() const noexcept;
@@ -141,6 +144,8 @@ private:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     SceneFaultStage fault_stage_{SceneFaultStage::None};
     std::uint64_t scene_allocations_{};
+    std::uint64_t raster_cache_hits_{};
+    std::uint64_t raster_cache_updates_{};
     std::uint64_t scene_builds_{};
     std::uint64_t partial_scene_updates_{};
     std::uint64_t presentations_{};

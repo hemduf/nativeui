@@ -47,6 +47,14 @@
         return found != raster_cache_epochs_.end() && found->second.reusable(token);
     }
 
+    [[nodiscard]] bool committable_raster_cache_content(
+        NodeId id, const detail::RasterCacheEpoch::Token& token) const noexcept {
+        if (!raster_cache_snapshot_ready()) return false;
+        const auto found = raster_cache_epochs_.find(id);
+        return found != raster_cache_epochs_.end() &&
+               found->second.committable(token);
+    }
+
     [[nodiscard]] bool commit_raster_cache_content(
         NodeId id, const detail::RasterCacheEpoch::Token& token) noexcept {
         if (!raster_cache_snapshot_ready()) return false;

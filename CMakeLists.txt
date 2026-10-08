@@ -134,6 +134,7 @@ add_library(nativeui_core STATIC
   src/skia_image.cpp
   src/skia_shader.cpp
   src/skia_painter.cpp
+  src/raster_cache_canvas.cpp
   src/skia_noise.cpp
   src/skia_svg.cpp
   src/headless.cpp
@@ -232,6 +233,15 @@ add_library(nativeui_core STATIC
   src/outline_table_view.cpp
 )
 add_library(NativeUI::Core ALIAS nativeui_core)
+# Pinned Skia does not emit RTTI for SkPaintFilterCanvas. Isolate the derived
+# private adapter instead of disabling RTTI needed by retained components.
+if(MSVC)
+  set_source_files_properties(src/raster_cache_canvas.cpp PROPERTIES
+    COMPILE_OPTIONS /GR-)
+else()
+  set_source_files_properties(src/raster_cache_canvas.cpp PROPERTIES
+    COMPILE_OPTIONS -fno-rtti)
+endif()
 if(WIN32)
   set_property(TARGET nativeui_core PROPERTY
     NATIVEUI_SKIA_ICU_DATA "${NATIVEUI_SKIA_ICU_DATA}")

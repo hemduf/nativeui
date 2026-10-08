@@ -304,6 +304,36 @@ An allocation or paint/submission failure keeps full repaint pending; a failure 
 
 Scene validation rejects zero, non-finite, unrepresentable or over-budget physical extents before narrowing or allocation. One RGBA8 scene is capped at 128 MiB; a replacement transaction may temporarily hold two scenes (256 MiB total scene storage), excluding Skia's internal cache and Pugl's owned buffers. A live context releases owned GPU resources at `PUGL_UNREALIZE`; a confirmed lost context is abandoned without calling stale GL resources.
 
+T184 adds renderer-private isolated subtree rasters for explicitly registered T183
+boundaries. The Ganesh path and display-less raster fixtures share one private
+transaction: clear a temporary RGBA8888 target to transparent, paint the complete
+visible conservative visual extent, check backend submission, snapshot, validate
+the captured boundary token, retain the complete image, then commit that token.
+The scene damage transaction remains independent. Failure preserves stale work
+for retry and never composites an old-generation image as current; invalidation
+during paint or after snapshot prevents current-generation publication.
+
+Raster keys contain weak boundary lifetime identity, content generation, local
+extent, scene placement and backing scale. Context generation is represented by
+the owning view's cache lifetime: live reset releases cached handles before the
+context, while confirmed loss abandons the context before clearing its handles.
+Rasters compete with shaders and effects in the single T097 LRU
+budget of 512 entries / 128 MiB of accounted retained storage. RGBA8 accounting
+uses checked width × height × 4 arithmetic; oversize or frame-pinned pressure
+produces transient images, while active frame handles preserve evicted resources.
+A warm hit creates no NativeUI resource or heap allocation and skips descendant
+paint callbacks. Conservative eligibility/bounds scans still inspect descendants;
+T186 owns further performance qualification and transform/effect/nesting policy.
+
+Until T186 qualifies those signatures, ambient transforms and nested boundaries
+bypass raster caching; internal transforms and effects rerasterize without
+retention. A cold-only canvas observer detects transforms even when component
+code restores them before returning, without changing the public Painter API.
+Only its source-private adapter is compiled without RTTI to match pinned Skia;
+the retained component runtime keeps its existing RTTI and exception behavior.
+T184 exposes no public cache component; T185 owns the public `CachedLayer` API
+and its public headless-renderer integration.
+
 ### 6.2 Headless renderer
 
 Headless tests use Skia raster surfaces:

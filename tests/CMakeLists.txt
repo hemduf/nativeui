@@ -269,9 +269,23 @@ if(NATIVEUI_BUILD_TESTS)
   nativeui_add_core_test(nativeui_render_resource_allocation_tests
     ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_tests.cpp)
   target_sources(nativeui_render_resource_allocation_tests PRIVATE
-    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_probe.cpp)
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_probe.cpp
+    ${PROJECT_SOURCE_DIR}/tests/render_resource_allocation_canvas.cpp)
+  # Match pinned Skia's RTTI setting only for the forwarding adapter; retained
+  # Tree/component code in the allocation test still requires RTTI.
+  if(MSVC)
+    set_source_files_properties(render_resource_allocation_canvas.cpp PROPERTIES
+      COMPILE_OPTIONS /GR-)
+  else()
+    set_source_files_properties(render_resource_allocation_canvas.cpp PROPERTIES
+      COMPILE_OPTIONS -fno-rtti)
+  endif()
   target_include_directories(nativeui_render_resource_allocation_tests PRIVATE
     ${PROJECT_SOURCE_DIR})
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Resolve optional fixed-buffer allocation traces from this test executable.
+    target_link_options(nativeui_render_resource_allocation_tests PRIVATE -rdynamic)
+  endif()
 
   # Exact warm-hit counters require existing image/shader test seams. Keep
   # those seams out of NativeUI::Core by compiling an isolated executable.

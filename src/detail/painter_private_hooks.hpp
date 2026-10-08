@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/paint_style.hpp>
+#include <nativeui/detail/raster_cache_paint.hpp>
 
 #include "include/core/SkImageFilter.h"
 #include "include/core/SkShader.h"
@@ -10,7 +11,6 @@
 namespace ui::detail {
 
 struct ShaderBrushSnapshot;
-
 struct PainterPrivateHooks final {
     void* state{};
     sk_sp<SkShader> (*materialize_image_texture)(
@@ -24,6 +24,14 @@ struct PainterPrivateHooks final {
         void* state, const LinearGradient& gradient){};
     sk_sp<SkShader> (*materialize_radial_gradient)(
         void* state, const RadialGradient& gradient){};
+    bool (*paint_raster_cache_boundary)(
+        void* state,
+        const RasterCachePaintRequest& request,
+        SkCanvas& destination,
+        void* callback_state,
+        RasterCachePaintCallback paint_callback,
+        RasterCacheValidateCallback validate_callback,
+        RasterCacheCommitCallback commit_callback){};
 };
 
 } // namespace ui::detail
