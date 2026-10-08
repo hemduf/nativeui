@@ -1,4 +1,5 @@
 #include <nativeui/nativeui.hpp>
+#include <nativeui/detail/raster_cache_access.hpp>
 
 #include "view_geometry.hpp"
 #include "scene_extent.hpp"
@@ -21,6 +22,7 @@
 
 #include "painter_private_hooks.hpp"
 #include "render_resource_materialization.hpp"
+#include "raster_cache_renderer.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
 #endif
@@ -56,6 +58,17 @@ constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 constexpr GrGLenum kGlFramebuffer = 0x8D40u;
 
+struct PainterHookState final {
+    detail::RenderResourceMaterializationContext* resources{};
+    GrDirectContext* context{};
+    float device_scale{1.0f};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    std::uint64_t* raster_cache_hits{};
+    std::uint64_t* raster_cache_updates{};
+    detail::SceneFaultStage* fault_stage{};
+#endif
+};
+
 template <class Callback>
 class ScopeExit final {
 public:
@@ -71,8 +84,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_image_texture(
     void* state,
     const ImageTexture& texture) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::materialize_image_texture(texture);
 
     auto acquisition = resources->acquire_image_texture(
@@ -84,8 +97,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_runtime_shader(
     void* state,
     const std::shared_ptr<const detail::ShaderBrushSnapshot>& snapshot) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::materialize_shader_brush(snapshot);
 
     auto acquisition = resources->acquire_runtime_shader(
@@ -97,8 +110,8 @@ private:
 [[nodiscard]] sk_sp<SkImageFilter> materialize_cached_effect(
     void* state,
     const Effect& effect) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::EffectCacheAccess::materialize(effect);
 
     auto acquisition = resources->acquire_effect(
@@ -111,8 +124,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_linear_gradient(
     void* state,
     const LinearGradient& gradient) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::GradientCacheAccess::materialize(gradient);
 
     auto acquisition = resources->acquire_linear_gradient(
@@ -126,8 +139,8 @@ private:
 [[nodiscard]] sk_sp<SkShader> materialize_cached_radial_gradient(
     void* state,
     const RadialGradient& gradient) {
-    auto* resources =
-        static_cast<detail::RenderResourceMaterializationContext*>(state);
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    auto* resources = hook_state ? hook_state->resources : nullptr;
     if (!resources) return detail::GradientCacheAccess::materialize(gradient);
 
     auto acquisition = resources->acquire_radial_gradient(
@@ -136,6 +149,82 @@ private:
             return detail::GradientCacheAccess::materialize(gradient);
         });
     return acquisition ? std::move(acquisition.shader) : sk_sp<SkShader>{};
+}
+
+[[nodiscard]] bool paint_cached_raster_boundary(
+    void* state,
+    const detail::RasterCachePaintRequest& request,
+    SkCanvas& destination,
+    void* callback_state,
+    detail::RasterCachePaintCallback paint_callback,
+    detail::RasterCacheValidateCallback validate_callback,
+    detail::RasterCacheCommitCallback commit_callback) {
+    auto* hook_state = static_cast<PainterHookState*>(state);
+    if (!hook_state || !hook_state->resources || !hook_state->context) return false;
+    const detail::PainterPrivateHooks nested_hooks{
+        hook_state,
+        &materialize_cached_image_texture,
+        &materialize_cached_runtime_shader,
+        &materialize_cached_effect,
+        &materialize_cached_linear_gradient,
+        &materialize_cached_radial_gradient,
+        &paint_cached_raster_boundary};
+    const detail::RasterCacheBackend backend{
+        .state = hook_state,
+        .device_scale = hook_state->device_scale,
+        .max_surface_size = hook_state->context->maxRenderTargetSize(),
+        .painter_hooks = &nested_hooks,
+        .create_surface = [](void* raw, const SkImageInfo& info) -> sk_sp<SkSurface> {
+            auto& hook = *static_cast<PainterHookState*>(raw);
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (hook.fault_stage &&
+                *hook.fault_stage == detail::SceneFaultStage::RasterSurfaceAllocation) {
+                *hook.fault_stage = detail::SceneFaultStage::None;
+                throw std::bad_alloc{};
+            }
+#endif
+            return SkSurfaces::RenderTarget(
+                hook.context, skgpu::Budgeted::kYes, info, 0,
+                kBottomLeft_GrSurfaceOrigin, nullptr);
+        },
+        .submit_surface = [](void* raw, SkSurface& surface) {
+            auto& hook = *static_cast<PainterHookState*>(raw);
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (hook.fault_stage &&
+                *hook.fault_stage == detail::SceneFaultStage::RasterSubmission) {
+                *hook.fault_stage = detail::SceneFaultStage::None;
+                throw std::runtime_error("injected subtree raster submission failure");
+            }
+#endif
+            if (!hook.context->flushAndSubmit(&surface).fSuccess) {
+                throw std::runtime_error("subtree raster cache submission failed");
+            }
+        },
+        .snapshot_surface = [](void* raw, SkSurface& surface) -> sk_sp<SkImage> {
+            [[maybe_unused]] auto& hook = *static_cast<PainterHookState*>(raw);
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (hook.fault_stage &&
+                *hook.fault_stage == detail::SceneFaultStage::RasterSnapshot) {
+                *hook.fault_stage = detail::SceneFaultStage::None;
+                throw std::runtime_error("injected subtree raster snapshot failure");
+            }
+#endif
+            auto image = surface.makeImageSnapshot();
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (image && hook.raster_cache_updates) ++*hook.raster_cache_updates;
+#endif
+            return image;
+        },
+        .before_retention = nullptr,
+        .did_hit = [](void* raw) noexcept {
+            [[maybe_unused]] auto& hook = *static_cast<PainterHookState*>(raw);
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            if (hook.raster_cache_hits) ++*hook.raster_cache_hits;
+#endif
+        }};
+    return detail::paint_raster_cache_boundary(
+        *hook_state->resources, backend, request, destination, callback_state,
+        paint_callback, validate_callback, commit_callback);
 }
 
 PuglSpan to_pugl_span(float physical) {
@@ -342,11 +431,21 @@ private:
 
 public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    [[nodiscard]] static bool register_root_raster_cache_boundary(UI& ui) {
+        return RasterCacheAccess::register_root(ui.tree_);
+    }
+
+    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(UI& ui) {
+        return RasterCacheAccess::invalidate_root(ui.tree_);
+    }
+
     void inject_fault(SceneFaultStage stage) noexcept { fault_stage_ = stage; }
 
     [[nodiscard]] SceneDiagnostics diagnostics() const noexcept {
         return SceneDiagnostics{
             .scene_allocations = scene_allocations_,
+            .raster_cache_hits = raster_cache_hits_,
+            .raster_cache_updates = raster_cache_updates_,
             .scene_builds = scene_builds_,
             .partial_scene_updates = partial_scene_updates_,
             .presentations = presentations_,
@@ -549,13 +648,21 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            PainterHookState painter_hook_state{
+                &render_resources_, context_.get(), scale_factor};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            painter_hook_state.raster_cache_hits = &raster_cache_hits_;
+            painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+            painter_hook_state.fault_stage = &fault_stage_;
+#endif
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_,
+                &painter_hook_state,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
                 &materialize_cached_effect,
                 &materialize_cached_linear_gradient,
-                &materialize_cached_radial_gradient};
+                &materialize_cached_radial_gradient,
+                &paint_cached_raster_boundary};
             try {
                 full_repaint_required_ = false;
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
@@ -658,13 +765,21 @@ public:
             render_resources_.begin_frame();
             const ScopeExit finish_resources{
                 [this]() noexcept { render_resources_.end_frame(); }};
+            PainterHookState painter_hook_state{
+                &render_resources_, context_.get(), scale_factor};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+            painter_hook_state.raster_cache_hits = &raster_cache_hits_;
+            painter_hook_state.raster_cache_updates = &raster_cache_updates_;
+            painter_hook_state.fault_stage = &fault_stage_;
+#endif
             const detail::PainterPrivateHooks painter_hooks{
-                &render_resources_,
+                &painter_hook_state,
                 &materialize_cached_image_texture,
                 &materialize_cached_runtime_shader,
                 &materialize_cached_effect,
                 &materialize_cached_linear_gradient,
-                &materialize_cached_radial_gradient};
+                &materialize_cached_radial_gradient,
+                &paint_cached_raster_boundary};
             try {
                 const SkAutoCanvasRestore restore_canvas{canvas, true};
                 if (full_update) {
@@ -924,6 +1039,8 @@ private:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
     SceneFaultStage fault_stage_{SceneFaultStage::None};
     std::uint64_t scene_allocations_{};
+    std::uint64_t raster_cache_hits_{};
+    std::uint64_t raster_cache_updates_{};
     std::uint64_t scene_builds_{};
     std::uint64_t partial_scene_updates_{};
     std::uint64_t presentations_{};

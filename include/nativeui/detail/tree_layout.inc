@@ -447,16 +447,39 @@
         return nullptr;
     }
 
-    void paint_node(
+    [[nodiscard]] bool raster_cache_has_nested_boundary(
+        const Node& node) const noexcept {
+        for (const auto& child : node.children) {
+            if (raster_cache_epochs_.find(child->id) != raster_cache_epochs_.end() ||
+                raster_cache_has_nested_boundary(*child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] std::optional<Rect> raster_cache_subtree_visual_bounds(
+        const Node& node) const noexcept {
+        if (!node.visual_bounds_published) return std::nullopt;
+        Rect bounds = node.published_visual_bounds;
+        for (const auto& child : node.children) {
+            const auto child_bounds = raster_cache_subtree_visual_bounds(*child);
+            if (!child_bounds) return std::nullopt;
+            bounds = unite(bounds, *child_bounds);
+        }
+        if (!std::isfinite(bounds.x) || !std::isfinite(bounds.y) ||
+            !std::isfinite(bounds.w) || !std::isfinite(bounds.h) ||
+            !(bounds.w > 0.0f) || !(bounds.h > 0.0f)) {
+            return std::nullopt;
+        }
+        return bounds;
+    }
+
+    void paint_node_contents(
         const Node& node,
         Painter& painter,
         PlatformServices& platform,
-        Rect inherited_clip) const {
-        if (inherited_clip.empty() ||
-            node.component->effective_visibility() != VisibilityMode::Visible) {
-            return;
-        }
-
+        Rect inherited_clip) {
         const bool focused =
             focus_active_ && !focusables_.empty() && focusables_[focused_index_] == &node;
 
@@ -479,6 +502,29 @@
         visit_paint_children(node, [&](const Node& child) {
             paint_node(child, painter, platform, inherited_clip);
         });
+    }
+
+    [[nodiscard]] bool try_paint_raster_cache_boundary(
+        const Node& node,
+        Painter& painter,
+        PlatformServices& platform,
+        Rect inherited_clip);
+
+    void paint_node(
+        const Node& node,
+        Painter& painter,
+        PlatformServices& platform,
+        Rect inherited_clip) {
+        if (inherited_clip.empty() ||
+            node.component->effective_visibility() != VisibilityMode::Visible) {
+            return;
+        }
+
+        if (try_paint_raster_cache_boundary(
+                node, painter, platform, inherited_clip)) {
+            return;
+        }
+        paint_node_contents(node, painter, platform, inherited_clip);
     }
 
     static Node* hit_test_focusable(Node& node, Point p, Rect inherited_clip) {

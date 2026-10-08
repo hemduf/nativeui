@@ -19,6 +19,19 @@ public:
         Token() noexcept = default;
         [[nodiscard]] bool expired() const noexcept { return identity_.expired(); }
 
+        [[nodiscard]] std::uint64_t generation() const noexcept {
+            return generation_;
+        }
+
+        [[nodiscard]] bool same_lifetime(const Token& other) const noexcept {
+            return !identity_.owner_before(other.identity_) &&
+                   !other.identity_.owner_before(identity_);
+        }
+
+        [[nodiscard]] bool same_content(const Token& other) const noexcept {
+            return generation_ == other.generation_ && same_lifetime(other);
+        }
+
     private:
         friend class RasterCacheEpoch;
         Token(const std::shared_ptr<const Identity>& identity,
@@ -67,12 +80,15 @@ public:
 
     [[nodiscard]] bool same_lifetime(const Token& token) const noexcept {
         // Control-block identity, not the reusable address of a destroyed node.
-        return !identity_.owner_before(token.identity_) &&
-               !token.identity_.owner_before(identity_);
+        return token.same_lifetime(Token{identity_, generation_});
     }
 
     [[nodiscard]] bool reusable(const Token& token) const noexcept {
         return !stale_ && current(token);
+    }
+
+    [[nodiscard]] bool committable(const Token& token) const noexcept {
+        return captured_ && current(token);
     }
 
     [[nodiscard]] bool commit(const Token& token) noexcept {

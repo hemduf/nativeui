@@ -613,6 +613,14 @@ struct StandaloneWindow::Impl final : PlatformServices, DispatcherProvider {
 };
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool detail::PlatformTestAccess::register_root_raster_cache_boundary(UI& ui) {
+    return detail::SkiaGlRenderer::register_root_raster_cache_boundary(ui);
+}
+
+bool detail::PlatformTestAccess::invalidate_root_raster_cache_boundary(UI& ui) {
+    return detail::SkiaGlRenderer::invalidate_root_raster_cache_boundary(ui);
+}
+
 bool detail::PlatformTestAccess::request_gpu_readback(
     StandaloneWindow& window,
     Point logical_point) noexcept {

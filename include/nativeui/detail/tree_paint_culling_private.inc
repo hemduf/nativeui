@@ -161,6 +161,11 @@
             return;
         }
 
+        if (try_paint_raster_cache_boundary(
+                node, painter, platform, inherited_clip)) {
+            return;
+        }
+
         const bool paint_own = !entry || !entry->own_valid ||
             !intersect(entry->own_visual_bounds, repaint_region).empty();
         if (paint_own) {

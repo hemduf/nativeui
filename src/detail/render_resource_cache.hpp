@@ -83,6 +83,14 @@ public:
             std::forward<Factory>(factory));
     }
 
+    [[nodiscard]] Acquisition find(const Key& key) {
+        if (auto found = index_.find(key); found != index_.end()) {
+            entries_.splice(entries_.end(), entries_, found->second);
+            return {found->second->resource, true, true};
+        }
+        return {};
+    }
+
     [[nodiscard]] std::size_t retained_entries() const noexcept {
         return entries_.size();
     }
