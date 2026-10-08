@@ -154,7 +154,7 @@ ViewCore::ViewCore(UI& ui,
         // so no redundant whole-view redraw request is needed here.
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
-            if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
+            if (ui_.layout_dirty()) preferred_size_.mark_dirty();
             if (renderer_.invalidate_from_ui(rect)) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
@@ -430,9 +430,9 @@ bool ViewCore::close_native_view() noexcept {
                     "NativeUI component deactivation failed");
         best_effort([this] { set_text_input(false, {}, 0.0f); },
                     "NativeUI text-input teardown failed");
-        best_effort([this] { preferred_size_callback_ = {}; },
+        best_effort([this] { preferred_size_.clear_callback(); },
                     "NativeUI preferred-size callback teardown failed");
-        best_effort([this] { preferred_size_state_.reset(); },
+        best_effort([this] { preferred_size_.reset_state(); },
                     "NativeUI preferred-size state teardown failed");
         best_effort([this] { ui_.clear_invalidation_callback(); },
                     "NativeUI invalidation callback teardown failed");
@@ -455,11 +455,8 @@ bool ViewCore::close_native_view() noexcept {
     }
 
 void ViewCore::set_preferred_size_callback(PreferredSizeCallback callback) {
-        preferred_size_callback_ = std::move(callback);
-        preferred_size_state_.reset();
-        preferred_measure_dirty_ = static_cast<bool>(preferred_size_callback_);
-        flush_preferred_size_notification();
-    }
+    preferred_size_.set_callback(std::move(callback), ui_);
+}
 
 void ViewCore::request_redraw(Rect logical_rect) {
         if (!view_ || logical_rect.empty()) return;
@@ -479,46 +476,25 @@ void ViewCore::request_redraw(Rect logical_rect) {
     }
 
 void ViewCore::set_text_input(bool active, Rect logical_area, float logical_cursor_offset) {
-        if (!view_ || !ime_bridge_) return;
+    if (!view_ || !ime_bridge_) return;
+    const auto change = text_input_.update(
+        active, logical_area, logical_cursor_offset, geometry_.last_valid_scale());
+    if (!change) return;
 
-        const float scale = geometry_.last_valid_scale();
-        if (!detail::text_input_boundary_needs_update(
-                text_input_active_,
-                text_input_physical_area_,
-                text_input_physical_cursor_offset_,
-                active,
-                logical_area,
-                logical_cursor_offset,
-                scale)) {
-            return;
+    if (change->active_changed) {
+        if (change->active) {
+            (void)puglStartTimer(view_, kCaretTimerId, kCaretBlinkSeconds);
+        } else {
+            (void)puglStopTimer(view_, kCaretTimerId);
         }
-
-        const bool active_changed = active != text_input_active_;
-        text_input_active_ = active;
-        text_input_logical_area_ = active ? logical_area : Rect{};
-        text_input_logical_cursor_offset_ = active ? logical_cursor_offset : 0.0f;
-
-        const auto scaled = detail::scale_text_input_geometry(
-            text_input_logical_area_, text_input_logical_cursor_offset_, scale);
-        text_input_physical_area_ = scaled.first;
-        text_input_physical_cursor_offset_ = scaled.second;
-
-        if (active_changed) {
-            if (active) {
-                (void)puglStartTimer(view_, kCaretTimerId, kCaretBlinkSeconds);
-            } else {
-                (void)puglStopTimer(view_, kCaretTimerId);
-            }
-        }
-
-        nativeuiImeUpdate(ime_bridge_,
-                          active,
-                          text_input_physical_area_.x,
-                          text_input_physical_area_.y,
-                          text_input_physical_area_.w,
-                          text_input_physical_area_.h,
-                          text_input_physical_cursor_offset_);
     }
+    nativeuiImeUpdate(ime_bridge_, change->active,
+                      change->physical_area.x,
+                      change->physical_area.y,
+                      change->physical_area.w,
+                      change->physical_area.h,
+                      change->physical_cursor_offset);
+}
 
 void ViewCore::set_clipboard_text(std::string_view text) {
         if (!view_) return;
@@ -538,40 +514,13 @@ void ViewCore::request_clipboard_text() {
     }
 
 bool ViewCore::accept_drop(std::string_view type, Rect logical_region) {
-        if (!view_ || !active_drop_offer_ || active_drop_offer_->clipboard != PUGL_CLIPBOARD_DRAG) {
-            return false;
-        }
-
-        const auto count = puglGetNumClipboardTypes(view_, PUGL_CLIPBOARD_DRAG);
-        for (uint32_t i = 0; i < count; ++i) {
-            const char* offered = puglGetClipboardType(view_, PUGL_CLIPBOARD_DRAG, i);
-            if (!offered || type != offered) continue;
-
-            const auto physical = detail::logical_to_physical_covering_rect(
-                logical_region, geometry_.last_valid_scale());
-            const auto status = puglAcceptOffer(
-                view_, active_drop_offer_, i, PUGL_DATA_ACTION_COPY,
-                static_cast<int>(physical.x),
-                static_cast<int>(physical.y),
-                static_cast<unsigned>(std::max(1.0f, physical.w)),
-                static_cast<unsigned>(std::max(1.0f, physical.h)));
-            drop_offer_decided_ = status == PUGL_SUCCESS;
-            return drop_offer_decided_;
-        }
-        return false;
-    }
+    return drop_offer_.accept(
+        view_, type, logical_region, geometry_.last_valid_scale());
+}
 
 void ViewCore::reject_drop(Rect logical_region) {
-        if (!view_ || !active_drop_offer_ || active_drop_offer_->clipboard != PUGL_CLIPBOARD_DRAG) return;
-        const auto physical = detail::logical_to_physical_covering_rect(
-            logical_region, geometry_.last_valid_scale());
-        (void)puglRejectOffer(view_, active_drop_offer_,
-                              static_cast<int>(physical.x),
-                              static_cast<int>(physical.y),
-                              static_cast<unsigned>(std::max(1.0f, physical.w)),
-                              static_cast<unsigned>(std::max(1.0f, physical.h)));
-        drop_offer_decided_ = true;
-    }
+    drop_offer_.reject(view_, logical_region, geometry_.last_valid_scale());
+}
 
 Size ViewCore::validated_initial_size(const WindowDesc& desc) {
         detail::WindowSizeConstraints constraints;
@@ -648,22 +597,11 @@ void ViewCore::clear_scene_error() noexcept {
         scene_error_active_ = false;
     }
 
-void ViewCore::queue_preferred_size() {
-        if (!preferred_size_callback_) return;
-        preferred_size_state_.queue(ui_.measure().preferred);
-    }
+
 
 void ViewCore::flush_preferred_size_notification() {
-        if (!preferred_size_callback_) return;
-        if (preferred_measure_dirty_) {
-            preferred_measure_dirty_ = false;
-            queue_preferred_size();
-        }
-        (void)preferred_size_state_.dispatch_once([this](Size preferred) {
-            auto callback = preferred_size_callback_;
-            if (callback) callback(preferred);
-        });
-    }
+    preferred_size_.flush(ui_);
+}
 
 void ViewCore::remember_teardown_error(const char* message) noexcept {
         if (!last_error_.empty()) return;

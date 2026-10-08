@@ -240,7 +240,8 @@ The Pugl/Skia platform implementation is split into cohesive source-private
 C++ translation units, compiled with an identical source manifest for both
 source-tree and installed-package consumers. Complete internal modules under `src/detail/platform/` own Skia/GL
 rendering, event translation and dispatch, explicit native platform adapters,
-view lifecycle, dispatcher/application ownership, standalone and embedded views,
+view lifecycle with instance-owned text-input, preferred-size and drop-offer
+collaborators, dispatcher/application ownership, standalone and embedded views,
 and desktop services. View input trackers have bounded, per-instance state.
 Native handles and event callbacks use explicit functions instead of preprocessor
 rebinding of Pugl APIs or `PlatformServices`.

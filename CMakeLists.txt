@@ -268,6 +268,7 @@ if(NATIVEUI_BUILD_PLATFORM)
     src/detail/platform/gl_renderer.cpp
     src/detail/platform/view_core.cpp
     src/detail/platform/view_events.cpp
+    src/detail/platform/drop_offer_state.cpp
     src/detail/platform/dispatcher_backend.cpp
     src/detail/platform/application.cpp
     src/detail/platform/standalone_window.cpp

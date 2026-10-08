@@ -47,7 +47,7 @@ PuglStatus ViewCore::on_event(const PuglEvent* event) {
 #else
             ui_.refresh_focus(services_);
 #endif
-            preferred_measure_dirty_ = true;
+            preferred_size_.mark_dirty();
             flush_preferred_size_notification();
             return PUGL_SUCCESS;
         }
@@ -316,9 +316,9 @@ PuglStatus ViewCore::on_event(const PuglEvent* event) {
                 }
 
                 detail::ScopedBorrowState offer_borrow{
-                    active_drop_offer_, drop_offer_decided_, &event->offer};
+                    drop_offer_.offer_slot(), drop_offer_.decision_slot(), &event->offer};
                 (void)ui_.dispatch(input, services_);
-                if (!drop_offer_decided_) {
+                if (!drop_offer_.offer_decided()) {
                     (void)puglRejectOffer(view_,
                                           &event->offer,
                                           0,

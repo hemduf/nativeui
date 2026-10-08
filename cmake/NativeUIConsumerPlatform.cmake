@@ -331,6 +331,7 @@ function(_nativeui_prepare_package_platform out_var)
     "${_nativeui_root}/src/detail/platform/gl_renderer.cpp"
     "${_nativeui_root}/src/detail/platform/view_core.cpp"
     "${_nativeui_root}/src/detail/platform/view_events.cpp"
+    "${_nativeui_root}/src/detail/platform/drop_offer_state.cpp"
     "${_nativeui_root}/src/detail/platform/dispatcher_backend.cpp"
     "${_nativeui_root}/src/detail/platform/application.cpp"
     "${_nativeui_root}/src/detail/platform/standalone_window.cpp"

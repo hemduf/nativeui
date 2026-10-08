@@ -3,6 +3,9 @@
 // View lifecycle and resource ownership, independent from event implementations.
 #include "gl_renderer.hpp"
 #include "platform_common.hpp"
+#include "text_input_state.hpp"
+#include "preferred_size_notifier.hpp"
+#include "drop_offer_state.hpp"
 #include <array>
 #include <functional>
 #include <memory>
@@ -141,7 +144,6 @@ private:
 
     void clear_scene_error() noexcept;
 
-    void queue_preferred_size();
 
     void flush_preferred_size_notification();
 
@@ -176,9 +178,7 @@ private:
     SkiaGlRenderer renderer_;
     detail::ViewGeometryState geometry_;
     detail::WindowSizeConstraints size_constraints_;
-    detail::PreferredSizeState preferred_size_state_;
-    PreferredSizeCallback preferred_size_callback_;
-    bool preferred_measure_dirty_{};
+    PreferredSizeNotifier preferred_size_;
     bool should_close_{};
     detail::WindowVisibilityState visibility_;
     bool embedded_{};
@@ -194,17 +194,12 @@ private:
     bool reject_deferred_redraw_once_{};
     bool suppress_platform_focus_{};
 #endif
-    bool text_input_active_{};
-    Rect text_input_logical_area_{};
-    float text_input_logical_cursor_offset_{};
-    Rect text_input_physical_area_{};
-    float text_input_physical_cursor_offset_{};
+    ViewTextInputState text_input_;
     bool have_pointer_position_{};
     Point last_pointer_position_{};
     RawPointerTracker pointer_positions_{};
     MultiClickTracker click_sequence_{};
-    const PuglDataOfferEvent* active_drop_offer_{};
-    bool drop_offer_decided_{};
+    ViewDropOffer drop_offer_;
     std::string last_error_;
     bool scene_error_active_{};
     std::function<void()> close_callback_;
