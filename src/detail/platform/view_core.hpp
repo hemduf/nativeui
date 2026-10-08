@@ -103,7 +103,9 @@ public:
         puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
         set_view_handle(view_, this, services_);
-        set_view_event_func(view_, &ViewCore::event_thunk);
+        if (const auto status = set_view_event_func(view_, &ViewCore::event_thunk)) {
+            throw_pugl(status, "puglSetEventFunc failed");
+        }
         puglRegisterDropType(view_, "text/plain");
         puglRegisterDropType(view_, "text/uri-list");
 

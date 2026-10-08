@@ -14,8 +14,8 @@ struct StandaloneWindow::Impl final : detail::WindowPlatformServices, Dispatcher
               std::make_shared<detail::DispatcherOwner>(std::move(wake_backend))),
           lifetime_token(std::make_shared<int>(0)) {}
 
-    // Declared before `core` so reverse member destruction tears detail::ViewCore down
-    // while the T065 dispatcher remains available to component deactivation.
+    // Declared before `core` so reverse member destruction tears the native
+    // view down while its dispatcher is still available for deactivation.
     std::shared_ptr<detail::DispatcherOwner> dispatcher_owner;
     std::unique_ptr<detail::ViewCore> core;
     Application* application{};
