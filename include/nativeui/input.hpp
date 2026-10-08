@@ -63,7 +63,20 @@ enum class Key {
     PageUp,
     PageDown,
     Menu,
-    F10
+    F10,
+    // Appended to preserve every previously published Key value.
+    // Symbols represent native keys, not committed Unicode/IME text.
+    F1, F4, F5, F6, F7, F8, F9, F11, F12,
+    Insert, PrintScreen, Pause, NumLock, ScrollLock, CapsLock,
+    ShiftLeft, ShiftRight, ControlLeft, ControlRight,
+    AltLeft, AltRight, SuperLeft, SuperRight,
+    // Main keyboard digits remain distinct from keypad digits.
+    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+    Exclamation, DoubleQuote, Hash, Dollar, Percent, Ampersand, Apostrophe, LeftParen, RightParen, Asterisk, Plus, Comma, Minus, Period, Slash, Colon, Semicolon, LessThan, Equal, GreaterThan, Question, At, LeftBracket, Backslash, RightBracket, Caret, Underscore, Grave, LeftBrace, Pipe, RightBrace, Tilde,
+    Pad0, Pad1, Pad2, Pad3, Pad4, Pad5, Pad6, Pad7, Pad8, Pad9,
+    PadEnter, PadPageUp, PadPageDown, PadEnd, PadHome,
+    PadLeft, PadUp, PadRight, PadDown, PadClear, PadInsert, PadDelete,
+    PadEqual, PadMultiply, PadAdd, PadSeparator, PadSubtract, PadDecimal, PadDivide
 };
 
 enum class Command {
@@ -243,10 +256,12 @@ inline constexpr std::array<Key, 26> kAsciiLetterKeys{
     Key::O, Key::P, Key::Q, Key::R, Key::S, Key::T, Key::U,
     Key::V, Key::W, Key::X, Key::Y, Key::Z};
 
-/// Translate the ASCII portion of a native key event after platform-specific
-/// special keys have been handled. `primary` preserves NativeUI's existing
-/// Primary+Q window-close shortcut; otherwise every ASCII letter A-Z maps to
-/// its public Key value regardless of case. Text/IME input remains separate.
+inline constexpr std::array<Key, 10> kAsciiDigitKeys{
+    Key::Digit0, Key::Digit1, Key::Digit2, Key::Digit3, Key::Digit4, Key::Digit5, Key::Digit6, Key::Digit7, Key::Digit8, Key::Digit9};
+
+/// Map the Pugl unshifted printable-key identity to a symbolic Key. Pugl
+/// uses the character corresponding to the key on the active layout; never
+/// assume a US layout. Committed Unicode/IME text uses TextInput instead.
 [[nodiscard]] constexpr Key translate_ascii_key(std::uint32_t key, bool primary) noexcept {
     if (key == static_cast<std::uint32_t>(' ')) return Key::Space;
     if (primary &&
@@ -254,18 +269,55 @@ inline constexpr std::array<Key, 26> kAsciiLetterKeys{
          key == static_cast<std::uint32_t>('Q'))) {
         return Key::Quit;
     }
-
     if (key >= static_cast<std::uint32_t>('A') &&
         key <= static_cast<std::uint32_t>('Z')) {
         key += static_cast<std::uint32_t>('a' - 'A');
     }
-    if (key < static_cast<std::uint32_t>('a') ||
-        key > static_cast<std::uint32_t>('z')) {
-        return Key::None;
+    if (key >= static_cast<std::uint32_t>('a') &&
+        key <= static_cast<std::uint32_t>('z')) {
+        return kAsciiLetterKeys[static_cast<std::size_t>(
+            key - static_cast<std::uint32_t>('a'))];
     }
-
-    return kAsciiLetterKeys[static_cast<std::size_t>(
-        key - static_cast<std::uint32_t>('a'))];
+    if (key >= static_cast<std::uint32_t>('0') &&
+        key <= static_cast<std::uint32_t>('9')) {
+        return kAsciiDigitKeys[static_cast<std::size_t>(
+            key - static_cast<std::uint32_t>('0'))];
+    }
+    switch (key) {
+    case static_cast<std::uint32_t>('!'): return Key::Exclamation;
+    case static_cast<std::uint32_t>('"'): return Key::DoubleQuote;
+    case static_cast<std::uint32_t>('#'): return Key::Hash;
+    case static_cast<std::uint32_t>('$'): return Key::Dollar;
+    case static_cast<std::uint32_t>('%'): return Key::Percent;
+    case static_cast<std::uint32_t>('&'): return Key::Ampersand;
+    case static_cast<std::uint32_t>('\''): return Key::Apostrophe;
+    case static_cast<std::uint32_t>('('): return Key::LeftParen;
+    case static_cast<std::uint32_t>(')'): return Key::RightParen;
+    case static_cast<std::uint32_t>('*'): return Key::Asterisk;
+    case static_cast<std::uint32_t>('+'): return Key::Plus;
+    case static_cast<std::uint32_t>(','): return Key::Comma;
+    case static_cast<std::uint32_t>('-'): return Key::Minus;
+    case static_cast<std::uint32_t>('.'): return Key::Period;
+    case static_cast<std::uint32_t>('/'): return Key::Slash;
+    case static_cast<std::uint32_t>(':'): return Key::Colon;
+    case static_cast<std::uint32_t>(';'): return Key::Semicolon;
+    case static_cast<std::uint32_t>('<'): return Key::LessThan;
+    case static_cast<std::uint32_t>('='): return Key::Equal;
+    case static_cast<std::uint32_t>('>'): return Key::GreaterThan;
+    case static_cast<std::uint32_t>('?'): return Key::Question;
+    case static_cast<std::uint32_t>('@'): return Key::At;
+    case static_cast<std::uint32_t>('['): return Key::LeftBracket;
+    case static_cast<std::uint32_t>('\\'): return Key::Backslash;
+    case static_cast<std::uint32_t>(']'): return Key::RightBracket;
+    case static_cast<std::uint32_t>('^'): return Key::Caret;
+    case static_cast<std::uint32_t>('_'): return Key::Underscore;
+    case static_cast<std::uint32_t>('`'): return Key::Grave;
+    case static_cast<std::uint32_t>('{'): return Key::LeftBrace;
+    case static_cast<std::uint32_t>('|'): return Key::Pipe;
+    case static_cast<std::uint32_t>('}'): return Key::RightBrace;
+    case static_cast<std::uint32_t>('~'): return Key::Tilde;
+    default: return Key::None;
+    }
 }
 
 [[nodiscard]] constexpr std::pair<Rect, float> scale_text_input_geometry(

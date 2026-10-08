@@ -559,6 +559,12 @@ if(NATIVEUI_BUILD_TESTS)
   )
 
   if(NATIVEUI_BUILD_PLATFORM)
+    nativeui_add_core_test(nativeui_pugl_key_translation_tests
+      ${PROJECT_SOURCE_DIR}/tests/pugl_key_translation_tests.cpp)
+    target_include_directories(nativeui_pugl_key_translation_tests PRIVATE
+      ${PROJECT_SOURCE_DIR}/src
+      ${NATIVEUI_PUGL_SOURCE_DIR}/include
+    )
     nativeui_add_core_test(nativeui_pugl_pointer_tests ${PROJECT_SOURCE_DIR}/tests/pugl_pointer_tests.cpp)
     target_include_directories(nativeui_pugl_pointer_tests PRIVATE
       ${PROJECT_SOURCE_DIR}/src

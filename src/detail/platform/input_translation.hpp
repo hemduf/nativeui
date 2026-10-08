@@ -6,6 +6,7 @@
 #include "../pugl_button_translation.hpp"
 #include "../pugl_pointer_translation.hpp"
 #include "../pugl_scroll_translation.hpp"
+#include "../pugl_key_translation.hpp"
 namespace ui {
 namespace {
 
@@ -18,28 +19,7 @@ namespace {
 }
 
 Key translate_key(uint32_t key, PuglMods mods) {
-    const bool primary = platform_primary_modifier(mods);
-    switch (key) {
-    case PUGL_KEY_LEFT: return Key::Left;
-    case PUGL_KEY_RIGHT: return Key::Right;
-    case PUGL_KEY_UP: return Key::Up;
-    case PUGL_KEY_DOWN: return Key::Down;
-    case PUGL_KEY_F2: return Key::F2;
-    case PUGL_KEY_PAGE_UP: return Key::PageUp;
-    case PUGL_KEY_PAGE_DOWN: return Key::PageDown;
-    case PUGL_KEY_F3: return Key::F3;
-    case PUGL_KEY_MENU: return Key::Menu;
-    case PUGL_KEY_F10: return Key::F10;
-    case PUGL_KEY_HOME: return Key::Home;
-    case PUGL_KEY_END: return Key::End;
-    case PUGL_KEY_BACKSPACE: return Key::Backspace;
-    case PUGL_KEY_DELETE: return Key::Delete;
-    case PUGL_KEY_ENTER: return Key::Enter;
-    case PUGL_KEY_ESCAPE: return Key::Escape;
-    default: break;
-    }
-
-    return detail::translate_ascii_key(key, primary);
+    return detail::translate_pugl_key(key, platform_primary_modifier(mods));
 }
 
 void apply_modifiers(InputEvent& out, PuglMods state) {

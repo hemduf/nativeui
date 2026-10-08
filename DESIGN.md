@@ -658,6 +658,15 @@ Reusable standard controls should eventually become first-class components rathe
 
 ---
 
+### Keyboard symbol coverage
+
+The pinned Pugl symbolic key enumeration (F1-F12, navigation, modifier side,
+lock and all keypad variants) and all printable ASCII keys map to individual
+NativeUI `Key` values. Existing `Key` numeric values are unchanged.
+Pugl provides unshifted, layout-relative codes for shortcuts; actual Unicode
+text and IME composition are handled separately. Primary+Q preserves the
+existing standalone close shortcut.
+
 ## 14. Event mapping from Pugl
 
 The internal bridge follows this conceptual mapping:
