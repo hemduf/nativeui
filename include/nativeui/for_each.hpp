@@ -58,11 +58,20 @@ private:
 };
 } // namespace detail
 
+/// Keyed retained composition over an observable std::vector<T>.
+/// Keys must be unique and encode from supported string-like/integral/enum
+/// values. Reorders with stable keys reuse the same retained subtrees.
+/// Equal key sequences reuse cached child recipes: changes to other item
+/// fields do not automatically reconstruct Specs. Bind mutable content
+/// to State/Binding. Key/child callbacks may allocate, throw and be retried.
 template <class T>
 class ForEach {
 public:
     using Items = std::vector<T>;
     template <class KeyFunction,class ChildFunction>
+/// Own the source Binding and callback objects. A const T& callback argument
+/// is borrowed only for that invocation. Key computation should be pure and
+/// deterministic; duplicate snapshots are rejected without partial publication.
     ForEach(Binding<Items> source,KeyFunction key,ChildFunction child)
         : state_(std::move(source)),
           key_function_([function=std::move(key)](const T& item) mutable {
@@ -71,8 +80,11 @@ public:
               return detail::dynamic_make_spec(std::invoke(function,item));
           }) {}
     template <class KeyFunction,class ChildFunction>
+/// Convert a borrowed State to its Binding; do not retain a raw reference.
     ForEach(State<Items>& source,KeyFunction key,ChildFunction child)
         : ForEach(source.binding(),std::move(key),std::move(child)) {}
+/// Consume the source/callbacks into a dynamic retained Spec; reconciliation
+/// is UI-thread-only and not an audio-thread synchronization facility.
     Spec spec() && {
         auto source = state_;
         auto key = std::move(key_function_);

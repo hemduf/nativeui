@@ -134,7 +134,7 @@ private:
 Factories stored in `Spec` own their captures according to ordinary C++ rules. If a factory or callback captures a reference/pointer to application state, NativeUI does not extend that referenced object's lifetime.
 ### Dynamic composition
 
-[`include/nativeui/dynamic.hpp`](../include/nativeui/dynamic.hpp) provides three UI-thread-confined dynamic composition families:
+The canonical public builders are [`If`](../include/nativeui/if.hpp), [`Switch<T>`](../include/nativeui/switch.hpp) and [`ForEach<T>`](../include/nativeui/for_each.hpp). The older [`dynamic.hpp`](../include/nativeui/dynamic.hpp) remains a compatibility include for these three headers. They provide UI-thread-confined dynamic composition:
 
 - `If` conditionally retains one child while a boolean `Binding` is true;
 - `Switch<T>` selects the first equality-matching branch, with an optional fallback;
@@ -167,7 +167,9 @@ auto content = ui::Column{
 
 Keys must be **unique within each snapshot**. Reordering items while preserving keys preserves the corresponding retained children. Removing a key tears down that child, and changing an item's key is removal plus insertion. Duplicate-key snapshots are rejected atomically: an already-valid retained structure is left intact rather than partially updated; an initially duplicated snapshot does not publish a partial initial list.
 
-The key callback is not a one-shot callback. NativeUI may evaluate it more than once while preparing one reconciliation, so it should be deterministic and should not use call count as state. The child callback may also run while preparing a changed snapshot for items whose retained nodes are ultimately reused. Both callbacks may allocate or throw, run in the UI/main-thread domain, and can be invoked again when a recoverable reconciliation is retried.
+The key callback is not a one-shot callback. NativeUI may evaluate it more than once while preparing one reconciliation, so it should be deterministic and should not use call count as state.
+
+**Updating non-key item data does not rebuild a cached child Spec if the key sequence remains unchanged.** Bind changing child values explicitly to UI State/Binding or change the stable key when replacement is intended; do not assume every item-value update reruns the child factory. The child callback may also run while preparing a changed snapshot for items whose retained nodes are ultimately reused. Both callbacks may allocate or throw, run in the UI/main-thread domain, and can be invoked again when a recoverable reconciliation is retried.
 
 ```cpp
 struct Item {

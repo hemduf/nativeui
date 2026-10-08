@@ -1,6 +1,6 @@
 # NativeUI 1.0 input, focus and commands
 
-This chapter documents NativeUI's public retained interaction surface: normalized input events, pointer metadata/capture, keyboard focus scopes, IME composition and portable editing commands. The primary public headers are [`input.hpp`](../include/nativeui/input.hpp), [`component_base.hpp`](../include/nativeui/component_base.hpp), [`focus.hpp`](../include/nativeui/focus.hpp) and [`command.hpp`](../include/nativeui/command.hpp).
+This chapter documents NativeUI's public retained interaction surface: normalized input events, pointer metadata/capture, keyboard focus scopes, IME composition and portable editing commands. The primary public headers are [`input.hpp`](../include/nativeui/input.hpp), [`component_base.hpp`](../include/nativeui/component_base.hpp), [`focus_scope.hpp`](../include/nativeui/focus_scope.hpp) and [`command_scope.hpp`](../include/nativeui/command_scope.hpp).
 
 ## Event model
 
@@ -127,7 +127,7 @@ Effectively hidden/collapsed/disabled content is excluded from normal interactiv
 
 ## Focus scopes
 
-[`FocusScope`](../include/nativeui/focus.hpp) creates a focus-only boundary around one child subtree.
+[`FocusScope`](../include/nativeui/focus_scope.hpp) creates a focus-only boundary around one child subtree.
 
 Important distinctions:
 
@@ -171,7 +171,7 @@ When NativeUI sees a supported primary-modifier shortcut, it converts the key ev
 
 1. routes the command from the focused leaf through retained ancestors;
 2. gives focused widgets first opportunity to handle their own editing command;
-3. lets [`CommandScope`](../include/nativeui/command.hpp) handlers on the ancestor route handle or ignore it;
+3. lets [`CommandScope`](../include/nativeui/command_scope.hpp) handlers on the ancestor route handle or ignore it;
 4. if still ignored, invokes the tree/UI global command handler.
 
 A `CommandScope` does not take focus and does not intercept raw pointer/key/text events. It owns its `std::function` callback and one child Spec. The callback receives `Command` by value, so there is no argument lifetime to extend; captured objects follow normal `std::function` ownership rules.
