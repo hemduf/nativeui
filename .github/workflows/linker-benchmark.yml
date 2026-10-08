@@ -4,6 +4,7 @@ name: Linux Linker Benchmark
 # Run it when the benchmark changes, or dispatch it manually after merging.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/linker-benchmark.yml'
       - 'tests/linker_benchmark.py'
