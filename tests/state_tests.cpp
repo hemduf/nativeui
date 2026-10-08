@@ -3,6 +3,7 @@
 #include <nativeui/component_state.hpp>
 
 #include <concepts>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -50,6 +51,8 @@ struct FallibleStateValue {
     struct Faults {
         bool reject_assignment{};
         int moves_until_throw{-1};
+        int moves_until_retire{-1};
+        std::function<void()> retire_owner;
         int assignment_calls{};
     };
 
@@ -64,6 +67,11 @@ struct FallibleStateValue {
         if (faults && faults->moves_until_throw >= 0 &&
             faults->moves_until_throw-- == 0) {
             throw std::runtime_error("injected move construction failure");
+        }
+        if (faults && faults->moves_until_retire >= 0 &&
+            faults->moves_until_retire-- == 0) {
+            auto retire = std::move(faults->retire_owner);
+            if (retire) retire();
         }
     }
     FallibleStateValue& operator=(const FallibleStateValue&) = default;
@@ -121,8 +129,35 @@ void fallible_value_commit_is_transactional() {
     NUI_CHECK(faults->assignment_calls == 0);
 }
 
+void retirement_during_staged_commit_does_not_publish() {
+    auto faults = std::make_shared<FallibleStateValue::Faults>();
+    auto owner = std::make_unique<ui::State<FallibleStateValue>>(
+        FallibleStateValue{10, faults});
+    auto binding = owner->binding();
+    std::size_t notifications{};
+    auto observer = owner->observe([&](const FallibleStateValue&) {
+        ++notifications;
+    });
+
+    // The fourth move constructs the staged replacement after the initial
+    // parameter, pending-value and prepared-value moves. It destroys the
+    // source owner synchronously, without deleting the retained control.
+    faults->moves_until_retire = 3;
+    faults->retire_owner = [&] { owner.reset(); };
+    auto* const borrowed_owner = owner.get();
+    borrowed_owner->set(FallibleStateValue{11, faults});
+
+    NUI_CHECK(!owner);
+    NUI_CHECK(!binding.valid());
+    NUI_CHECK(binding.get().number == 10);
+    NUI_CHECK(binding.revision() == 0);
+    NUI_CHECK(!observer.active());
+    NUI_CHECK(notifications == 0);
+}
+
 void suite() {
     fallible_value_commit_is_transactional();
+    retirement_during_staged_commit_does_not_publish();
     ui::State<int> state{1};
     int observed = 0;
     int callback_count = 0;

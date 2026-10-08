@@ -107,15 +107,20 @@ class State {
             }
         }
 
-        [[nodiscard]] std::unique_ptr<T> commit_value(T&& prepared) {
+        // A missing optional means the owner was retired reentrantly while T
+        // was preparing its replacement. An engaged null pointer means the
+        // nothrow in-place path committed without displaced storage.
+        [[nodiscard]] std::optional<std::unique_ptr<T>> commit_value(T&& prepared) {
             if constexpr (std::is_nothrow_move_assignable_v<T>) {
                 value = std::move(prepared);
-                return {};
+                return std::unique_ptr<T>{};
             } else {
                 auto replacement = std::make_unique<T>(std::move(prepared));
+                // User-controlled move construction may synchronously destroy
+                // State. Do not commit or advance its revision after teardown.
+                if (!owner_alive) return std::nullopt;
                 value.swap(replacement);
-                // Retire the displaced object only after revision advances.
-                // A destructor may synchronously call application code.
+                // Retire displaced storage only after the revision advances.
                 return replacement;
             }
         }
@@ -338,8 +343,9 @@ private:
                     throw std::overflow_error("NativeUI State revision exhausted");
                 }
                 auto displaced = control->commit_value(std::move(next_value));
+                if (!displaced) break;
                 ++control->revision;
-                displaced.reset();
+                displaced->reset();
 
                 // Heap-stable listener slots avoid copying callback objects on
                 // each set(). Capturing the pass size prevents observers added

@@ -302,8 +302,49 @@ void edge_step_normalizes_invalid_draft_without_changing_source() {
   tree.deactivate_focus(platform);
 }
 
+void committed_step_recovers_after_second_invalidation_fails() {
+  ui::State<double> value{10.0};
+  ui::Tree tree{ui::compile(ui::make_spec(
+      ui::NumberInput{"Quantity", value}.range(0, 100).step(1).precision(0)))};
+  test::MockPlatform platform;
+  tree.mount();
+  tree.layout({450, 82});
+  tree.activate_focus(platform);
+  ui::TreeTestAccess::clear_pending_paint_for_test(tree);
+
+  bool fail = true;
+  int invalidations = 0;
+  tree.set_invalidation_callback([&](ui::Rect) {
+    ++invalidations;
+    ui::TreeTestAccess::clear_pending_paint_for_test(tree);
+    // The pre-commit invalidation is safe; fail only after the numeric State
+    // has committed and NumberInput's source subscriber is reconciling.
+    if (fail && value.get() == 11.0) {
+      throw std::runtime_error("injected post-commit invalidation failure");
+    }
+  });
+
+  bool caught = false;
+  try {
+    (void)tree.dispatch(test::key(ui::Key::Up), platform);
+  } catch (const std::runtime_error&) {
+    caught = true;
+  }
+  NUI_CHECK(caught);
+  NUI_CHECK(value.get() == 11.0);
+  NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "11");
+  NUI_CHECK(invalidations >= 2);
+
+  fail = false;
+  (void)tree.dispatch(test::key(ui::Key::Up), platform);
+  NUI_CHECK(value.get() == 12.0);
+  NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "12");
+  tree.deactivate_focus(platform);
+}
+
 void suite() {
   throwing_invalidation_does_not_publish_speculative_step();
+  committed_step_recovers_after_second_invalidation_fails();
   edge_step_normalizes_invalid_draft_without_changing_source();
   stepper_aligns_with_the_numeric_field();
   stepper_follows_focused_field_geometry();
