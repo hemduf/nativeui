@@ -324,9 +324,11 @@ The remaining v1 sequence is:
   newer invalidation after snapshot, whole-path warm allocations, mixed resource
   pressure, scale pixel equivalence, context loss and independent views. The PR
   records exact-head local, platform, sanitizer, performance and mandatory review
-  evidence. T184 remains Doing until qualification and the human merge gate are
-  complete; T185's public `CachedLayer` API and T186's extended signatures and
-  performance qualification remain separate dependent tickets under T182/#469.
+  evidence. T184 is Done via squash-merged PR #490 (commit `dd7cb071`);
+  final PR CI passed 14/14 checks including Windows, macOS, Linux and ASan/UBSan,
+  with source review at Blocking 0 / Important 0. T185/#472 is now Ready
+  for the public `CachedLayer` and State dependency API. T186/#473 remains
+  blocked on T185's implementation and qualification, under T182/#469.
 
 ## Release policy
 
