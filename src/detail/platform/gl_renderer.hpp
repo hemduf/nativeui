@@ -6,6 +6,7 @@
 #include "../view_geometry.hpp"
 #include "../scene_extent.hpp"
 #include "../scene_damage.hpp"
+#include "scene_damage_state.hpp"
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
 #  include "../platform_test_access.hpp"
 #endif
@@ -224,7 +225,7 @@ public:
     }
 
     [[nodiscard]] bool invalidate_from_ui(Rect rect) noexcept {
-        if (!retain_pending_damage(rect)) full_repaint_required_ = true;
+        if (!pending_damage_.retain(rect)) full_repaint_required_ = true;
         present_pending_ = true;
         if (rendering_ && scene_frame_captured_) {
             deferred_redraw_pending_ = true;
@@ -245,83 +246,6 @@ public:
     }
 
 private:
-    [[nodiscard]] bool retain_pending_damage(Rect rect) noexcept {
-        if (!std::isfinite(rect.x) || !std::isfinite(rect.y) ||
-            !std::isfinite(rect.w) || !std::isfinite(rect.h) ||
-            !(rect.w > 0.0f) || !(rect.h > 0.0f)) {
-            return false;
-        }
-        const double right = static_cast<double>(rect.x) + rect.w;
-        const double bottom = static_cast<double>(rect.y) + rect.h;
-        if (!std::isfinite(right) || !std::isfinite(bottom)) return false;
-
-        if (!pending_damage_valid_) {
-            pending_damage_ = rect;
-            pending_damage_valid_ = true;
-            return true;
-        }
-
-        const double left_union = (std::min)(
-            static_cast<double>(pending_damage_.x), static_cast<double>(rect.x));
-        const double top_union = (std::min)(
-            static_cast<double>(pending_damage_.y), static_cast<double>(rect.y));
-        const double right_union = (std::max)(
-            static_cast<double>(pending_damage_.x) + pending_damage_.w, right);
-        const double bottom_union = (std::max)(
-            static_cast<double>(pending_damage_.y) + pending_damage_.h, bottom);
-        constexpr double max_float =
-            static_cast<double>(std::numeric_limits<float>::max());
-        if (left_union < -max_float || top_union < -max_float ||
-            right_union > max_float || bottom_union > max_float ||
-            right_union - left_union > max_float ||
-            bottom_union - top_union > max_float) {
-            return false;
-        }
-        const auto lower = [](double value) noexcept {
-            float result = static_cast<float>(value);
-            if (static_cast<double>(result) > value) {
-                result = std::nextafter(result,
-                                        -std::numeric_limits<float>::infinity());
-            }
-            return result;
-        };
-        const auto upper = [](double value) noexcept {
-            float result = static_cast<float>(value);
-            if (static_cast<double>(result) < value) {
-                result = std::nextafter(result,
-                                        std::numeric_limits<float>::infinity());
-            }
-            return result;
-        };
-        const float x = lower(left_union);
-        const float y = lower(top_union);
-        const float right_edge = upper(right_union);
-        const float bottom_edge = upper(bottom_union);
-        const double width_extent = static_cast<double>(right_edge) - x;
-        const double height_extent = static_cast<double>(bottom_edge) - y;
-        if (width_extent > max_float || height_extent > max_float) return false;
-        const float width = upper(width_extent);
-        const float height = upper(height_extent);
-        if (!std::isfinite(x) || !std::isfinite(y) ||
-            !std::isfinite(width) || !std::isfinite(height)) {
-            return false;
-        }
-        pending_damage_ = Rect{x, y, width, height};
-        return true;
-    }
-
-    [[nodiscard]] static bool covers(Rect outer, Rect inner) noexcept {
-        const double outer_right = static_cast<double>(outer.x) + outer.w;
-        const double outer_bottom = static_cast<double>(outer.y) + outer.h;
-        const double inner_right = static_cast<double>(inner.x) + inner.w;
-        const double inner_bottom = static_cast<double>(inner.y) + inner.h;
-        return std::isfinite(outer_right) && std::isfinite(outer_bottom) &&
-               std::isfinite(inner_right) && std::isfinite(inner_bottom) &&
-               outer.x <= inner.x && outer.y <= inner.y &&
-               outer_right >= inner_right && outer_bottom >= inner_bottom;
-    }
-
-
     void clear_identity() noexcept {
         width_ = height_ = 0;
         scene_scale_ = 0.0f;
@@ -334,8 +258,7 @@ private:
         rendering_ = false;
         deferred_redraw_pending_ = false;
         scene_frame_captured_ = false;
-        pending_damage_ = {};
-        pending_damage_valid_ = false;
+        pending_damage_.clear();
         scene_uses_effects_ = false;
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         readback_pending_ = false;
@@ -592,7 +515,7 @@ public:
             scene_uses_effects_ = true; // conservative for the legacy paths
             full_repaint_required_ = ui.dirty();
             deferred_redraw_pending_ |= full_repaint_required_;
-            if (!full_repaint_required_) clear_pending_damage();
+            if (!full_repaint_required_) pending_damage_.clear();
             remember_scene_update(SkIRect::MakeWH(physical_width, physical_height), false);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             ++scene_builds_;
@@ -620,13 +543,13 @@ public:
             if (!full_update) {
                 if (!ui.scene_paint_transaction_has_damage(transaction) ||
                     !ui.scene_paint_transaction_damage_valid(transaction) ||
-                    !pending_damage_valid_ ||
-                    !covers(pending_damage_,
+                    !pending_damage_.valid() ||
+                    !pending_damage_.covers(
                             ui.scene_paint_transaction_damage(transaction))) {
                     full_update = true;
                 } else {
                     damage = ::ui::detail::map_device_damage(
-                        pending_damage_,
+                        pending_damage_.rect(),
                         scale_factor, physical_width, physical_height);
                     if (!damage || damage->covers_scene) full_update = true;
                 }
@@ -725,7 +648,7 @@ public:
                                                : scene_uses_effects_ || used_effects;
             full_repaint_required_ = ui.dirty();
             deferred_redraw_pending_ |= full_repaint_required_;
-            if (!full_repaint_required_) clear_pending_damage();
+            if (!full_repaint_required_) pending_damage_.clear();
             const auto updated = full_update
                 ? SkIRect::MakeWH(physical_width, physical_height)
                 : partial_clip;
@@ -734,7 +657,7 @@ public:
             ++scene_builds_;
 #endif
         } else if (!ui.dirty()) {
-            clear_pending_damage();
+            pending_damage_.clear();
         }
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
@@ -876,11 +799,6 @@ public:
     }
 
 private:
-    void clear_pending_damage() noexcept {
-        pending_damage_ = {};
-        pending_damage_valid_ = false;
-    }
-
     void remember_scene_update(const SkIRect& update, bool partial) noexcept {
         last_update_x_ = update.left();
         last_update_y_ = update.top();
@@ -910,8 +828,7 @@ private:
     int width_{};
     int height_{};
     float scene_scale_{};
-    Rect pending_damage_{};
-    bool pending_damage_valid_{};
+    PendingSceneDamage pending_damage_{};
     bool scene_uses_effects_{};
     bool scene_frame_captured_{};
     int last_update_x_{};
