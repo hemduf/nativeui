@@ -88,7 +88,9 @@ ViewCore::ViewCore(UI& ui,
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
         puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
-        set_view_handle(view_, this, services_);
+        // The constructor parameter retains the platform-specific capture
+        // service type; services_ is the generic UI-facing base reference.
+        set_view_handle(view_, this, services);
         // This seam simulates a failed native registration without changing
         // process-global Pugl state or installing a dangling callback.
         const bool reject_event_callback = fault_result &&
