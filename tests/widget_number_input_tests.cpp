@@ -11,6 +11,11 @@ struct TreeTestAccess {
   static bool numeric_invalid(Tree &tree) {
     return !tree.root_->component->semantics().description.empty();
   }
+  static void clear_pending_paint_for_test(Tree &tree) {
+    // Each newly exposed dirty region notifies once. Remove the initial
+    // activation damage so the following fault hits this step's invalidator.
+    tree.paint_dirty_.clear();
+  }
   static std::pair<Rect, Rect> input_and_stepper(Tree &tree) {
     return {tree.root_->children[0]->bounds,
             tree.root_->children[1]->bounds};
@@ -253,6 +258,7 @@ void throwing_invalidation_does_not_publish_speculative_step() {
       throw std::runtime_error("injected numeric step invalidation failure");
   });
   NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "12.5");
+  ui::TreeTestAccess::clear_pending_paint_for_test(tree);
 
   fail = true;
   bool caught = false;
