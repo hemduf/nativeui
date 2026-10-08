@@ -1,38 +1,23 @@
-enum class NativeViewConstructionFaultStage : std::uint8_t {
-    AfterViewCreation,
-    AfterRealize,
-    AfterImeCreate,
-    AfterSizeConstraints,
-    AfterInitialResize,
-    AfterShow,
-    AfterInvalidationCallback,
-};
+#pragma once
 
-struct NativeViewConstructionFaultResult {
-    bool injected_failure{};
-    bool unexpected_failure{};
-    bool unexpected_success{};
-    std::uint32_t world_acquired{};
-    std::uint32_t world_released{};
-    std::uint32_t view_acquired{};
-    std::uint32_t view_released{};
-    std::uint32_t realize_succeeded{};
-    std::uint32_t unrealize_released{};
-    std::uint32_t ime_acquired{};
-    std::uint32_t ime_released{};
-    std::uint32_t size_constraints_applied{};
-    std::uint32_t initial_resize_completed{};
-    std::uint32_t show_completed{};
-    std::uint32_t invalidation_attached{};
-    std::uint32_t invalidation_cleared{};
-};
+// View lifecycle and resource ownership, independent from event implementations.
+#include "gl_renderer.hpp"
+#include "input_translation.hpp"
+#include "native_platform.hpp"
+#include "pointer_state.hpp"
+#include "../native_view_fault_probe.hpp"
+#include "../native_ime_bridge.h"
+#include "../window_control_state.hpp"
+#include "../scoped_borrow_state.hpp"
+
+namespace ui::detail {
 
 class NativeViewConstructionFault final {};
 
 class ViewCore {
 public:
     ViewCore(UI& ui,
-             PlatformServices& services,
+             ViewPlatformServices& services,
              PuglWorldType world_type,
              WindowDesc desc,
              NativeParentHandle parent,
@@ -117,8 +102,8 @@ public:
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
         puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
-        puglSetHandle(view_, this);
-        puglSetEventFunc(view_, &ViewCore::event_thunk);
+        set_view_handle(view_, this, services_);
+        set_view_event_func(view_, &ViewCore::event_thunk);
         puglRegisterDropType(view_, "text/plain");
         puglRegisterDropType(view_, "text/uri-list");
 
@@ -161,7 +146,7 @@ public:
         maybe_inject(NativeViewConstructionFaultStage::AfterInitialResize);
 
         if (initially_visible) {
-            if (const auto status = puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
+            if (const auto status = show_pugl_view(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
                 throw_pugl(status, "puglShow failed");
             }
             visibility_.set_visible(true);
@@ -314,7 +299,7 @@ public:
 
         const auto generation = visibility_.begin_show();
         const auto status =
-            puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
+            show_pugl_view(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
         if (status != PUGL_SUCCESS) {
             visibility_.rollback_show(generation);
             return false;
@@ -443,7 +428,7 @@ public:
         // If Pugl could not enter the context, PUGL_UNREALIZE did not reach
         // the renderer. Abandon remaining Skia objects after native teardown.
         renderer_.abandon();
-        puglFreeView(view_);
+        free_view(view_);
         view_ = nullptr;
         visibility_.set_visible(false);
         should_close_ = true;
@@ -735,7 +720,7 @@ private:
                 cleanup.realized = false;
                 if (cleanup.fault_result) ++cleanup.fault_result->unrealize_released;
             }
-            puglFreeView(view_);
+            free_view(view_);
             view_ = nullptr;
             cleanup.view_acquired = false;
             if (cleanup.fault_result) ++cleanup.fault_result->view_released;
@@ -815,7 +800,7 @@ private:
     }
 
     static PuglStatus event_thunk(PuglView* view, const PuglEvent* event) noexcept {
-        auto* self = static_cast<ViewCore*>(puglGetHandle(view));
+        auto* self = static_cast<ViewCore*>(get_view_handle(view));
         if (!self) return PUGL_BAD_PARAMETER;
         try {
             return self->on_event(event);
@@ -832,9 +817,49 @@ private:
         }
     }
 
-    PuglStatus on_event(const PuglEvent* event) {
-        switch (event->type) {
-        case PUGL_REALIZE:
-            record_scale_observation(
-                geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
-            return PUGL_SUCCESS;
+    PuglStatus on_event(const PuglEvent* event);
+
+    UI& ui_;
+    PlatformServices& services_;
+    PuglWorld* world_{};
+    bool owns_world_{};
+    PuglView* view_{};
+    NativeUIImeBridge* ime_bridge_{};
+    SkiaGlRenderer renderer_;
+    detail::ViewGeometryState geometry_;
+    detail::WindowSizeConstraints size_constraints_;
+    detail::PreferredSizeState preferred_size_state_;
+    PreferredSizeCallback preferred_size_callback_;
+    bool preferred_measure_dirty_{};
+    bool should_close_{};
+    detail::WindowVisibilityState visibility_;
+    bool embedded_{};
+    bool suppress_embedded_focus_cleanup_{};
+    bool deferred_scene_redraw_{};
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+    std::uint64_t failed_scene_exposes_{};
+    std::uint64_t deferred_redraw_attempts_{};
+    std::uint64_t deferred_redraw_rejections_{};
+    std::uint64_t redraw_requests_during_render_{};
+    bool recreate_renderer_on_expose_{};
+    std::optional<float> scene_scale_override_;
+    bool reject_deferred_redraw_once_{};
+    bool suppress_platform_focus_{};
+#endif
+    bool text_input_active_{};
+    Rect text_input_logical_area_{};
+    float text_input_logical_cursor_offset_{};
+    Rect text_input_physical_area_{};
+    float text_input_physical_cursor_offset_{};
+    bool have_pointer_position_{};
+    Point last_pointer_position_{};
+    RawPointerTracker pointer_positions_{};
+    MultiClickTracker click_sequence_{};
+    const PuglDataOfferEvent* active_drop_offer_{};
+    bool drop_offer_decided_{};
+    std::string last_error_;
+    bool scene_error_active_{};
+    std::function<void()> close_callback_;
+};
+
+} // namespace ui::detail

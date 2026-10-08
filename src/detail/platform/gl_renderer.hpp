@@ -1,7 +1,14 @@
+#pragma once
+
+// Scene rendering, GPU resources, and presentation in the consumer GL context.
 #include <nativeui/nativeui.hpp>
 
-#include "view_geometry.hpp"
-#include "scene_extent.hpp"
+#include "../view_geometry.hpp"
+#include "../scene_extent.hpp"
+#include "../scene_damage.hpp"
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+#  include "../platform_test_access.hpp"
+#endif
 
 #include <pugl/gl.h>
 #include <pugl/pugl.h>
@@ -19,8 +26,8 @@
 #include "include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLInterface.h"
 
-#include "painter_private_hooks.hpp"
-#include "render_resource_materialization.hpp"
+#include "../painter_private_hooks.hpp"
+#include "../render_resource_materialization.hpp"
 #if defined(__EMSCRIPTEN__)
 #  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
 #endif
@@ -51,8 +58,6 @@ namespace {
 
 constexpr uintptr_t kCaretTimerId = 0x4E554943u; // "NUIC"
 constexpr double kCaretBlinkSeconds = 0.5;
-constexpr double kMultiClickSeconds = 0.35;
-constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 constexpr GrGLenum kGlFramebuffer = 0x8D40u;
 
@@ -943,45 +948,4 @@ private:
 
 } // namespace detail
 
-namespace {
-
-[[nodiscard]] bool platform_primary_modifier(PuglMods mods) noexcept {
-#if defined(__APPLE__)
-    return (mods & PUGL_MOD_SUPER) != 0;
-#else
-    return (mods & PUGL_MOD_CTRL) != 0;
-#endif
-}
-
-Key translate_key(uint32_t key, PuglMods mods) {
-    const bool primary = platform_primary_modifier(mods);
-    switch (key) {
-    case PUGL_KEY_LEFT: return Key::Left;
-    case PUGL_KEY_RIGHT: return Key::Right;
-    case PUGL_KEY_UP: return Key::Up;
-    case PUGL_KEY_DOWN: return Key::Down;
-    case PUGL_KEY_F2: return Key::F2;
-    case PUGL_KEY_PAGE_UP: return Key::PageUp;
-    case PUGL_KEY_PAGE_DOWN: return Key::PageDown;
-    case PUGL_KEY_F3: return Key::F3;
-    case PUGL_KEY_MENU: return Key::Menu;
-    case PUGL_KEY_F10: return Key::F10;
-    case PUGL_KEY_HOME: return Key::Home;
-    case PUGL_KEY_END: return Key::End;
-    case PUGL_KEY_BACKSPACE: return Key::Backspace;
-    case PUGL_KEY_DELETE: return Key::Delete;
-    case PUGL_KEY_ENTER: return Key::Enter;
-    case PUGL_KEY_ESCAPE: return Key::Escape;
-    default: break;
-    }
-
-    return detail::translate_ascii_key(key, primary);
-}
-
-void apply_modifiers(InputEvent& out, PuglMods state) {
-    out.shift = (state & PUGL_MOD_SHIFT) != 0;
-    out.ctrl = (state & PUGL_MOD_CTRL) != 0;
-    out.alt = (state & PUGL_MOD_ALT) != 0;
-    out.gui = (state & PUGL_MOD_SUPER) != 0;
-    out.primary = platform_primary_modifier(state);
-}
+} // namespace ui
