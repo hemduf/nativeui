@@ -11,6 +11,7 @@ For broad application code, [`<nativeui/nativeui.hpp>`](../include/nativeui/nati
 | Understand the toolkit, supported platforms and ownership model | [NativeUI 1.0 overview and application lifetime](v1-overview-and-application-lifetime.md) | Retained architecture, `Application`/`UI`/window ownership, standalone vs embedded lifetime, UI-thread boundary |
 | Understand logical geometry and box constraints | [Core geometry and constraints](v1-core-geometry-and-constraints.md) | `Size`, `Point`, `Rect`, affine transforms, colors and normalized `Constraints` |
 | Build retained interfaces and use standard controls | [Composition, layout and widgets](v1-composition-layout-and-widgets.md) | Static/dynamic composition, layout, widgets, overlays and virtualization |
+| Work with keyed collections and controlled selection | [Collections and selection](v1-collections-and-selection.md) | `Selection<Key>`, collection models, current List/Grid/Tree view distinctions and deferred-write semantics |
 | Drive the retained runtime directly | [Low-level retained Tree runtime](v1-low-level-tree-runtime.md) | Advanced Tree construction, lifecycle, layout, invalidation, input/focus and painting |
 | Handle input, pointer capture, focus and editing commands | [Input, focus and commands](v1-input-focus-and-commands.md) | Normalized events, bubbling, IME, pointer metadata/capture, focus scopes and semantic command routing |
 | Understand observable state and UI bindings | [State and binding](v1-state-and-binding.md) | `State<T>`, `Binding<T>`, notification/lifetime rules, reentrancy and widget binding boundaries |
@@ -23,6 +24,10 @@ For broad application code, [`<nativeui/nativeui.hpp>`](../include/nativeui/nati
 | Understand performance gates | [Performance benchmarks](performance-benchmarks.md) | Benchmark workloads, allocation/timing expectations and CI performance evidence |
 | Publish semantic/accessibility data | [Semantic and accessibility data model](v1-semantics-and-accessibility.md) | `SemanticInfo`, roles/actions, stable IDs, immutable snapshots and virtualized collection semantics |
 | Understand platform accessibility mapping | [Accessibility](accessibility.md) | Platform mapping, focus/availability semantics and native bridge boundaries |
+
+## Current widget catalog versus release-baseline contracts
+
+The [component catalog](widgets.md) and [implementation inventory](widgets_implementation.md) cover the expanded widget families integrated on current `main`. Their individual pages also contain **target enhancements**, which are not promises that every target API or behavior is shipped. For exact signatures, consult the current public headers and implemented examples; use the v1 chapters above for stable cross-cutting lifetime, layout, state, input and platform contracts.
 
 ## Public/private boundary
 
