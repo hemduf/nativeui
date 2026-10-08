@@ -1,7 +1,9 @@
-#pragma once
 
 // Full native event dispatch is no longer split across a class definition.
 #include "view_core.hpp"
+#include "../pugl_button_translation.hpp"
+#include "../pugl_pointer_translation.hpp"
+#include "../pugl_scroll_translation.hpp"
 
 namespace ui::detail {
 

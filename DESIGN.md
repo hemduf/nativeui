@@ -236,18 +236,19 @@ A second platform backend should be introduced only if a real second implementat
 
 ### Source-private Pugl/Skia implementation modules
 
-The Pugl/Skia platform implementation is intentionally built as one consumer-
-scoped translation unit (`src/pugl_skia.cpp`), including installed-package
-consumers. Complete internal modules under `src/detail/platform/` own Skia/GL
+The Pugl/Skia platform implementation is split into cohesive source-private
+C++ translation units, compiled with an identical source manifest for both
+source-tree and installed-package consumers. Complete internal modules under `src/detail/platform/` own Skia/GL
 rendering, event translation and dispatch, explicit native platform adapters,
 view lifecycle, dispatcher/application ownership, standalone and embedded views,
 and desktop services. View input trackers have bounded, per-instance state.
 Native handles and event callbacks use explicit functions instead of preprocessor
 rebinding of Pugl APIs or `PlatformServices`.
 
-These are source-private, single-inclusion implementation headers rather than
-new public or downstream-reusable headers. The single compilation unit preserves
-existing Objective-C bridge identity and plug-in multi-instance isolation.
+These types are source-private and are not part of the public API. The Pugl
+Objective-C bridge remains compiled separately for each final consumer, with
+consumer-specific runtime naming. Native resources and scene state remain
+owned by the associated application or view instance.
 
 ## 6. Rendering: Skia
 
