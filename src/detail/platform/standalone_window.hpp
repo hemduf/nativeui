@@ -2,6 +2,7 @@
 
 // Standalone window close lifecycle, UI-facing delegation and tests.
 #include "application.hpp"
+#include "view_events.hpp"
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
 #  include "../platform_test_access.hpp"
 #endif

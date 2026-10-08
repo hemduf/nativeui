@@ -48,6 +48,8 @@
 // Pugl/Skia remains consumer-scoped and is compiled once per final target.
 // The internal implementation modules are complete and scoped, not fragments
 // of a class definition or switch statement.
+#include "detail/platform/standalone_window.hpp"
+#include "detail/platform/embedded_view.hpp"
 #include "detail/platform/desktop_services.hpp"
 
 namespace ui {

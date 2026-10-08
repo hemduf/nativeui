@@ -1,7 +1,9 @@
 #pragma once
 
 // Pugl event-loop wake backend and dispatcher checkpoints.
-#include "view_events.hpp"
+#include <nativeui/nativeui.hpp>
+#include <pugl/gl.h>
+#include <pugl/pugl.h>
 #include <nativeui/detail/dispatcher_owner.hpp>
 #include "../application_platform_state.hpp"
 #if defined(__APPLE__)

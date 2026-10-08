@@ -1,7 +1,8 @@
 #pragma once
 
 // Embedded/plugin view ownership and UI-facing delegation.
-#include "standalone_window.hpp"
+#include "view_events.hpp"
+#include <nativeui/detail/dispatcher_owner.hpp>
 
 namespace ui {
 

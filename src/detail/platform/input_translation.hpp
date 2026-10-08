@@ -1,7 +1,8 @@
 #pragma once
 
 // Native Pugl key and modifier translation.
-#include "gl_renderer.hpp"
+#include <nativeui/input.hpp>
+#include <pugl/pugl.h>
 #include "../pugl_button_translation.hpp"
 #include "../pugl_pointer_translation.hpp"
 #include "../pugl_scroll_translation.hpp"
