@@ -1,6 +1,7 @@
 # Workflow ownership
 
-- `ci.yml` is the **single broad pull-request qualification**: five OS/architecture builds and CTest suites, Linux ASan/UBSan, and Linux D-Bus contracts. The complete matrix is deferred on Draft PRs and starts when a PR is ready for review; the lightweight workflow-policy job also runs on Draft PRs.
+- `ci.yml` is the **single broad pull-request qualification**: four OS/architecture builds and CTest suites, Linux ASan/UBSan, and Linux D-Bus contracts. The complete matrix is deferred on Draft PRs and starts when a PR is ready for review; the lightweight workflow-policy job also runs on Draft PRs.
+- macOS ARM64 remains qualified. No macOS Intel runner is scheduled in any CI workflow; this does not claim that Intel binaries stop working, only that Intel CI coverage is intentionally retired.
 - `scalar-source-validation.yml` retains exact-head feature-branch and manual qualification, but does **not** automatically repeat a full build matrix for every unrelated PR. The generic CI matrix already exercises ScalarSource in its ordinary CTest selection.
 - `pugl-integration.yml` qualifies focused Pugl/native-view lifecycle changes on macOS PRs.
 - `advanced-rendering-docs-validation.yml` compiles focused rendering documentation contracts on relevant changes.

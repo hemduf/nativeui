@@ -44,9 +44,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS Intel
-            os: macos-15-intel
-            timeout: 180
           - name: macOS ARM64
             os: macos-15
           - name: Windows x64

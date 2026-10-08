@@ -64,13 +64,22 @@ def verify() -> None:
 
     ci = read_workflow("ci.yml")
     for platform in (
-        "macOS Intel",
         "macOS ARM64",
         "Windows x64",
         "Linux x64",
         "Linux ARM64",
     ):
         require(f"- name: {platform}" in ci, f"Canonical matrix is missing {platform}")
+    require(
+        "macOS Intel" not in ci and "macos-15-intel" not in ci,
+        "Retired macOS Intel job must not return to canonical CI",
+    )
+    for workflow in WORKFLOWS.glob("*.yml"):
+        source = workflow.read_text(encoding="utf-8")
+        require(
+            "macos-15-intel" not in source,
+            f"{workflow.name} must not schedule the retired macOS Intel runner",
+        )
     require("name: Linux ASan + UBSan" in ci, "Sanitizers must remain in canonical CI")
     require("name: Linux D-Bus contract" in ci, "Linux D-Bus must remain in canonical CI")
     require(
