@@ -17,11 +17,22 @@
 
 namespace ui {
 
+/// Controls whether an overlay participates in modal focus/input policy.
+///
+/// The mode is interpreted inside one owning `UI`; it never establishes
+/// process-global modal state. Overlay focus and pointer routing are UI/main-
+/// thread concerns and are not synchronization primitives.
 enum class OverlayMode {
+    /// Keep ordinary root keyboard focus active. The overlay remains above root
+    /// content and may receive pointer input according to its pointer policy.
     NonModal,
     Modal,
 };
 
+/// Controls pointer hit testing for an overlay and its retained descendants.
+///
+/// This policy affects retained routing only; it does not install a native
+/// platform hit-test region.
 enum class OverlayPointerPolicy {
     Normal,
     Ignore,
@@ -30,10 +41,19 @@ enum class OverlayPointerPolicy {
 // X11/Xlib exposes process-wide preprocessor macros named `Above` and `Below`.
 // NativeUI public headers must remain consumable after Xlib headers, so the
 // anchor-relative names deliberately avoid those unqualifiable macro tokens.
+///
+/// Placement is resolved in logical UI coordinates. Anchor-relative modes first
+/// try the requested side, may flip to the opposite side when it fits better,
+/// and finally clamp only the origin to the viewport; the measured natural size
+/// is not shrunk. `Auto` uses Below/Above/Right/Left as deterministic priority.
 enum class OverlayPlacement {
+    /// Place the overlay at the anchor's left edge immediately below it.
     AnchorBelow,
+    /// Place the overlay at the anchor's left edge immediately above it.
     AnchorAbove,
+    /// Place the overlay at the anchor's top edge immediately to its right.
     AnchorRight,
+    /// Place the overlay at the anchor's top edge immediately to its left.
     AnchorLeft,
     Center,
     Auto,
@@ -55,20 +75,34 @@ struct OverlayLifetimeToken final {};
 struct OverlayState;
 } // namespace detail
 
+/// Non-owning identity for one overlay entry in one `UI`.
+///
+/// A handle does not own the overlay or extend its lifetime. It is valid only
+/// while the exact entry remains published by its owning UI; close, policy
+/// dismissal, anchor loss and UI teardown make it stale. Handles from another
+/// UI are never accepted by `UI::close_overlay()`.
+///
+/// Overlay mutation is UI/main-thread confined. A handle is an identity token,
+/// not a cross-thread synchronization primitive.
 class OverlayHandle {
 public:
+    /// Construct an empty/stale handle.
     OverlayHandle() = default;
 
+    /// Return whether the owning UI and exact overlay lifetime are still live.
+    /// This does not imply that layout has already resolved final bounds.
     [[nodiscard]] bool valid() const noexcept {
         return id_ != 0 && !owner_.expired() && !lifetime_.expired();
     }
 
+    /// Equivalent to `valid()`.
     explicit operator bool() const noexcept { return valid(); }
 
     [[nodiscard]] std::optional<OverlayCloseReason> close_reason() const noexcept {
         return closure_ ? closure_->reason : std::nullopt;
     }
 
+    /// Compare overlay identity. Equality does not imply current validity.
     [[nodiscard]] bool operator==(const OverlayHandle& other) const noexcept {
         return id_ == other.id_ && !owner_.owner_before(other.owner_) &&
                !other.owner_.owner_before(owner_);
@@ -90,13 +124,44 @@ private:
     std::shared_ptr<const detail::OverlayClosureToken> closure_;
 };
 
+/// Declarative owned request for one retained in-view overlay.
+///
+/// `UI::show_overlay()` consumes this value into one UI-owned overlay entry on
+/// successful publication. The entry owns `content` and the policy values but
+/// does not own an anchor node: `anchor` is retained identity that must resolve
+/// in the same UI. Any application objects borrowed by factories/callbacks
+/// captured inside `content` remain subject to those captures' own lifetimes.
+///
+/// Overlay content stays inside the owning UI; this does not create a native
+/// popup window. All geometry is expressed in logical UI pixels. Publication,
+/// retained layout, dismissal and close are UI/main-thread operations, may
+/// allocate or propagate retained structural-invalidation failures, and are not
+/// suitable for audio/DSP real-time callbacks.
 struct OverlaySpec {
     OverlayMode mode{OverlayMode::NonModal};
     OverlayPointerPolicy pointer_policy{OverlayPointerPolicy::Normal};
+    /// Optional non-owning retained identity for an anchor in the same UI.
+    ///
+    /// Without an anchor, the overlay is centered regardless of `placement`.
+    /// If an anchored node later disappears or cannot resolve geometry, the UI
+    /// dismisses the overlay instead of retaining stale anchor coordinates.
     std::optional<NodeId> anchor;
+    /// Requested placement in logical UI coordinates.
+    ///
+    /// Side placements may flip to their opposite side according to available
+    /// space and then clamp the origin. `Auto` is deterministic; content keeps
+    /// its measured natural size even when larger than the viewport.
     OverlayPlacement placement{OverlayPlacement::Auto};
+    /// Opt in to Escape-key dismissal according to the active overlay/modal
+    /// stack policy. False means Escape alone does not dismiss this entry.
     bool dismiss_on_escape{};
+    /// Opt in to dismissal on a pointer-down outside the resolved overlay bounds.
+    /// This policy is meaningful after retained layout has resolved geometry.
     bool dismiss_on_outside_pointer_down{};
+    /// Owned retained content specification stored by the live overlay entry.
+    ///
+    /// A valid component factory is expected when the retained subtree is
+    /// materialized. Captured external borrows are not lifetime-extended.
     Spec content;
     bool match_anchor_width{};
 };
@@ -106,12 +171,22 @@ struct OverlaySpec {
 /// behavior; content components, platform objects and overlay state ownership
 /// never leave the owning UI.
 struct OverlayEntryInfo {
+    /// Monotonic per-UI diagnostic identifier for the published entry.
+    ///
+    /// Use `OverlayHandle`, not this number, for close/lifetime operations.
     std::uint64_t id{};
     OverlayMode mode{OverlayMode::NonModal};
     OverlayPointerPolicy pointer_policy{OverlayPointerPolicy::Normal};
+    /// Non-owning anchor identity requested by the specification, when present.
     std::optional<NodeId> anchor;
+    /// Requested placement policy; this is not rewritten when placement flips.
     OverlayPlacement placement{OverlayPlacement::Auto};
+    /// False until retained layout has produced usable resolved geometry.
     bool resolved{};
+    /// Resolved bounds in logical UI coordinates of the owning viewport.
+    ///
+    /// Do not interpret this value when `resolved == false`. The rectangle is a
+    /// value snapshot and does not track later layout or viewport changes.
     Rect bounds{};
 };
 
