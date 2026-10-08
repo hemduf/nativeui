@@ -1,5 +1,14 @@
 #pragma once
 
+/// \file
+/// Convenience umbrella for the normal NativeUI public consumer surface.
+///
+/// Include this header when compile-time granularity is not important. It
+/// aggregates public geometry/state/input/rendering/component/widget/UI/window
+/// APIs. Headers under `nativeui/detail/` remain implementation-only even when
+/// included transitively by public headers. Optional debug-only facilities such
+/// as the inspector may still require their dedicated header/configuration.
+
 #include <nativeui/geometry.hpp>
 #include <nativeui/constraints.hpp>
 #include <nativeui/invalidation.hpp>

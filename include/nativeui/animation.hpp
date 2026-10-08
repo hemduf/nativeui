@@ -14,43 +14,83 @@
 
 namespace ui {
 
+/// Easing curve used by a finite-duration tween.
+///
+/// The easing function maps normalized elapsed time in [0, 1] to interpolation
+/// progress. All non-linear variants are cubic and are evaluated from elapsed
+/// Dispatcher time; they do not depend on the number of wake callbacks.
 enum class Easing {
+    /// Constant-rate interpolation: f(t) = t.
     Linear,
+    /// Cubic acceleration from rest: f(t) = t^3.
     EaseIn,
+    /// Cubic deceleration into the target.
     EaseOut,
+    /// Symmetric cubic ease-in/ease-out around t = 0.5.
     EaseInOut,
 };
 
+/// Retained invalidation class requested after an animation writes a value.
 enum class AnimationInvalidation {
+    /// Repaint the target without declaring layout geometry dirty.
     Paint,
+    /// Re-run retained layout before repainting the target.
     Layout,
 };
 
+/// Parameters for the scalar spring integrator used by start_spring().
+///
+/// The animated scalar is unit-agnostic. If its unit is U, velocity is U/s,
+/// stiffness acts as s^-2 and damping as s^-1 in the implemented equation
+///     acceleration = stiffness * (target - value) - damping * velocity.
+///
+/// All fields must be finite. stiffness, damping and both epsilons must be
+/// non-negative; max_dt must be strictly positive. Invalid options cause
+/// start_spring() to return an empty handle without invoking callbacks.
 struct SpringOptions {
+    /// Restoring-force coefficient in s^-2. Zero is allowed.
     float stiffness{170.0f};
+    /// Velocity damping coefficient in s^-1. Zero is allowed.
     float damping{26.0f};
+    /// Initial scalar velocity in animated-units per second.
     float initial_velocity{0.0f};
+    /// Maximum |target - value| that can satisfy the rest condition, in U.
     float distance_epsilon{0.001f};
+    /// Maximum |velocity| that can satisfy the rest condition, in U/s.
     float velocity_epsilon{0.001f};
+    /// Maximum elapsed time consumed by one spring integration step.
+    ///
+    /// DispatcherDuration is seconds. A delayed wake performs one step clamped
+    /// to this duration; the solver does not replay hidden catch-up substeps.
     DispatcherDuration max_dt{1.0 / 30.0};
 };
 
-/// Lifetime-safe retained invalidation routes for one animation target.
+/// Owned retained invalidation routes for one animation target.
 ///
-/// Paint and Layout are supplied as distinct callbacks so AnimationContext owns
-/// the policy mapping and a caller cannot accidentally route Paint through a
-/// layout invalidator (or omit invalidation entirely). Component owners pass
-/// their retained node-bounded paint invalidator and ancestor layout invalidator
-/// as the two routes; no whole-window Paint fallback is introduced.
+/// The paint and layout callbacks are stored by value. NativeUI does not infer
+/// ownership from their captures: callers must ensure any borrowed state captured
+/// by custom callbacks remains safe for every animation step. Retained component
+/// owners should pass their lifetime-safe node-bounded paint invalidator and
+/// ancestor layout invalidator.
+///
+/// Both callbacks are required for a valid target even when one animation uses
+/// only one invalidation class. Invoking a route may run application/framework
+/// code and may throw; AnimationContext applies its normal step-failure recovery.
 class AnimationInvalidationTarget final {
 public:
+    /// Construct an invalid target with no routes.
     AnimationInvalidationTarget() = default;
 
+    /// Store the paint and layout invalidation routes.
+    ///
+    /// The std::function objects are owned by the target. Construction/copying
+    /// can allocate and is not an audio-real-time operation.
     AnimationInvalidationTarget(std::function<void()> paint_invalidator,
                                 std::function<void()> layout_invalidator)
         : paint_(std::move(paint_invalidator)),
           layout_(std::move(layout_invalidator)) {}
 
+    /// True only when both paint and layout routes are non-empty.
     [[nodiscard]] bool valid() const noexcept {
         return static_cast<bool>(paint_) && static_cast<bool>(layout_);
     }
@@ -70,13 +110,24 @@ private:
     friend class AnimationContext;
 };
 
+/// Opaque identity for one scheduled animation in one AnimationContext.
+///
+/// A handle retains only a small owner token, not the AnimationContext, its
+/// Dispatcher queue, target callbacks or animated object. Therefore keeping a
+/// handle never keeps an animation alive. valid() means "non-empty identity",
+/// not "currently active": a completed, cancelled or owner-destroyed handle can
+/// remain syntactically valid and cancel() will then return false.
 class AnimationHandle final {
 public:
+    /// Construct the canonical empty handle.
     AnimationHandle() = default;
 
+    /// Return whether this handle contains an owner identity and non-zero id.
     [[nodiscard]] bool valid() const noexcept { return owner_ && id_ != 0; }
+    /// Equivalent to valid(); does not query whether the animation is active.
     explicit operator bool() const noexcept { return valid(); }
 
+    /// Compare the complete owner-token/id identity.
     friend bool operator==(const AnimationHandle&, const AnimationHandle&) noexcept = default;
 
 private:
@@ -89,28 +140,47 @@ private:
     friend class AnimationContext;
 };
 
+/// Canonical empty animation handle.
 inline const AnimationHandle kInvalidAnimationHandle{};
 
-/// One instance-owned animation registry for one UI/view context.
+/// Instance-owned scalar animation registry for one UI/view domain.
 ///
-/// AnimationContext is UI-thread confined. It owns no thread or OS timer: while
-/// at least one animation is active it arms at most one one-shot T065 timer and
-/// rearms that timer at the fixed 16 ms wake cadence after each callback. Tween
-/// and spring math use the owning Dispatcher's injected monotonic clock, so
-/// delayed callbacks use real elapsed time without replaying hidden substeps.
+/// AnimationContext is UI/main-thread confined and is not internally
+/// synchronized. It owns no worker thread or independent event loop: while at
+/// least one animation is active it coalesces work onto at most one one-shot
+/// Dispatcher timer, normally rearmed at a 16 ms wake cadence. Elapsed-time math
+/// uses the owning Dispatcher's monotonic clock, so tween progress reflects real
+/// elapsed time even when event-loop checkpoints are delayed.
 ///
-/// Every animation also carries an AnimationInvalidationTarget. The animation
-/// layer itself dispatches Paint versus Layout after each write, so the declared
-/// invalidation kind is an enforced retained-tree behavior rather than optional
-/// caller convention.
+/// Value callbacks, invalidation callbacks and completion callbacks execute
+/// synchronously on the Dispatcher's owner/UI thread. They may re-enter the
+/// AnimationContext, cancel animations, start new animations, or destroy the
+/// context. Destruction is terminal and callback-silent.
+///
+/// All scheduling, callback storage and per-tick snapshotting may allocate;
+/// AnimationContext is never an audio/DSP real-time primitive.
 class AnimationContext final {
 public:
+    /// Receives the scalar value produced by one animation step.
+    ///
+    /// For a non-zero-duration tween, start_tween() does not synchronously emit
+    /// the initial `from` value; the first write occurs on a later wake.
     using ValueCallback = std::function<void(float)>;
+    /// Invoked once after the exact target write and retained invalidation commit.
+    ///
+    /// Cancellation never invokes completion.
     using CompletionCallback = std::function<void()>;
 
+    /// Bind this context to one Dispatcher owner.
+    ///
+    /// The Dispatcher is a weak owner handle; constructing the AnimationContext
+    /// does not keep its UI/event loop alive. An invalid Dispatcher is accepted,
+    /// but start operations then fail with an empty handle. State allocation may
+    /// throw. The context must subsequently be used from its owner/UI thread.
     explicit AnimationContext(Dispatcher dispatcher)
         : state_(std::make_shared<State>(std::move(dispatcher))) {}
 
+    /// Cancel the pending wake and discard all animations without user callbacks.
     ~AnimationContext() { shutdown(state_); }
 
     AnimationContext(const AnimationContext&) = delete;
@@ -118,6 +188,27 @@ public:
     AnimationContext(AnimationContext&&) = delete;
     AnimationContext& operator=(AnimationContext&&) = delete;
 
+    /// Start a finite-duration scalar tween.
+    ///
+    /// @param from Initial scalar used by interpolation. Must be finite.
+    /// @param to Exact target scalar written on successful completion. Must be finite.
+    /// @param duration Tween duration in seconds. Must be finite and >= 0.
+    /// @param easing Cubic/linear easing profile; unknown enum values are rejected.
+    /// @param invalidation Retained invalidation route applied after every write.
+    /// @param target Owned paint/layout invalidation routes; both must be valid.
+    /// @param write Required callback receiving each produced scalar value.
+    /// @param completion Optional callback after final write + invalidation.
+    /// @return A context-scoped active handle, or an empty handle on validation,
+    ///         dispatcher/scheduling, id-exhaustion, or immediate-completion paths.
+    ///
+    /// duration == 0 and reduced-motion mode are synchronous immediate paths:
+    /// `write(to)`, the selected invalidation route, then `completion()` run
+    /// before this function returns, and no active handle/timer is created.
+    ///
+    /// For a positive duration, interpolation is based on monotonic elapsed time;
+    /// the final successful step writes `to` exactly. Failure to obtain the
+    /// first Dispatcher wake removes the provisional entry. Allocation/scheduler
+    /// exceptions propagate after cleanup.
     [[nodiscard]] AnimationHandle start_tween(
         float from,
         float to,
@@ -172,6 +263,29 @@ public:
         return handle;
     }
 
+    /// Start a damped scalar spring toward `target`.
+    ///
+    /// @param value Initial scalar position, in application-defined units U.
+    /// @param target Exact target scalar used by the spring/rest test.
+    /// @param options Solver coefficients, initial velocity, rest epsilons and
+    ///                maximum per-wake integration duration.
+    /// @param invalidation Retained invalidation route applied after every write.
+    /// @param invalidation_target Owned paint/layout invalidation callbacks.
+    /// @param write Required callback receiving each produced scalar value.
+    /// @param completion Optional callback after an exact target snap.
+    /// @return A context-scoped active handle, or empty on invalid arguments,
+    ///         unavailable scheduling/id, or reduced-motion immediate completion.
+    ///
+    /// The solver uses one semi-implicit Euler update per Dispatcher wake:
+    /// velocity is updated from spring acceleration, then value from that new
+    /// velocity. Elapsed time is clamped to options.max_dt; no catch-up substeps
+    /// are replayed after a long stall. Completion requires both distance and
+    /// velocity to be within their epsilons, then writes the target exactly.
+    ///
+    /// A physically non-converging valid configuration (for example zero
+    /// stiffness away from the target with zero velocity) remains active until
+    /// cancelled. In reduced-motion mode the target is applied synchronously and
+    /// no handle is returned.
     [[nodiscard]] AnimationHandle start_spring(
         float value,
         float target,
@@ -225,6 +339,13 @@ public:
         return handle;
     }
 
+    /// Cancel one active animation owned by this context.
+    ///
+    /// Returns false for empty, stale, already-completed/already-cancelled and
+    /// cross-context handles, or while this context is closing. Cancellation is
+    /// noexcept, does not write another value and never invokes completion. If it
+    /// removes the final active entry, the shared wake timer is cancelled best
+    /// effort.
     [[nodiscard]] bool cancel(const AnimationHandle& handle) noexcept {
         const auto state = state_;
         if (!state || state->closing || !handle.valid() ||
@@ -236,6 +357,22 @@ public:
         return true;
     }
 
+    /// Enable or disable reduced-motion behavior for this context.
+    ///
+    /// Enabling reduced motion cancels the pending wake and synchronously drives
+    /// every currently active animation to its exact target in snapshot order:
+    /// write -> retained invalidation -> erase entry -> completion. Callbacks may
+    /// re-enter or destroy the context.
+    ///
+    /// If any allocation or user/invalidation/completion callback throws while
+    /// enabling, reduced motion remains enabled, all remaining entries are
+    /// discarded, the wake is cancelled, and the exception propagates. This
+    /// prevents partially scheduled animation work from surviving the failed
+    /// policy transition.
+    ///
+    /// While reduced motion is enabled, new tweens/springs take their synchronous
+    /// immediate path and return an empty handle. Disabling the flag does not
+    /// resurrect animations that already completed or were discarded.
     void set_reduced_motion(bool enabled) {
         const auto state = state_;
         if (!state || state->closing || state->reduced_motion == enabled) return;
@@ -296,11 +433,15 @@ public:
         }
     }
 
+    /// Return the current reduced-motion policy while the context is alive.
     [[nodiscard]] bool reduced_motion() const noexcept {
         const auto state = state_;
         return state && !state->closing && state->reduced_motion;
     }
 
+    /// Return the number of currently active tween/spring entries.
+    ///
+    /// Immediate reduced-motion/zero-duration transitions are never counted.
     [[nodiscard]] std::size_t active_count() const noexcept {
         const auto state = state_;
         return state && !state->closing ? state->entries.size() : 0;

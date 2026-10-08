@@ -37,12 +37,20 @@ private:
 };
 } // namespace detail
 
+/// Retained selection of one branch according to an observable value.
+/// T must support equality. First matching when() in declaration order wins.
+/// Stable identity derives from branch position; an unmounted subtree is
+/// recreated from the saved Spec when selected again. Optional otherwise()
+/// provides one unmatched fallback. Use only in the UI state domain.
 template <class T>
 class Switch {
 public:
+/// Own a Binding handle, not the State object.
     explicit Switch(Binding<T> state) : state_(std::move(state)) {}
+/// Use a Binding to the borrowed State.
     explicit Switch(State<T>& state) : Switch(state.binding()) {}
     template <class Child>
+/// Append one branch; comparisons run in declaration order and may throw.
     Switch& when(T value,Child&& child) & {
         const auto index = branches_.size();
         branches_.push_back({std::move(value),"switch:"+std::to_string(index),
@@ -50,17 +58,22 @@ public:
         return *this;
     }
     template <class Child>
+/// Fluent rvalue overload of branch append.
     Switch&& when(T value,Child&& child) && {
         when(std::move(value),std::forward<Child>(child)); return std::move(*this);
     }
     template <class Child>
+/// Set or replace the fallback child Spec.
     Switch& otherwise(Child&& child) & {
         fallback_ = std::make_shared<const Spec>(make_spec(std::forward<Child>(child))); return *this;
     }
     template <class Child>
+/// Fluent rvalue overload; latest fallback replaces the previous one.
     Switch&& otherwise(Child&& child) && {
         otherwise(std::forward<Child>(child)); return std::move(*this);
     }
+/// Consume the branches/fallback into a retained Spec. Changes reconcile
+/// later at a safe checkpoint, not directly inside State notification.
     Spec spec() && {
         auto source = state_;
         auto branches = std::move(branches_);

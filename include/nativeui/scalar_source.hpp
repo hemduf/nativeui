@@ -8,6 +8,7 @@
 
 namespace ui {
 
+/// Channel to extract from a Brush-backed scalar source (red, green, blue or alpha).
 enum class ScalarChannel {
     Red,
     Green,
@@ -19,15 +20,23 @@ namespace detail {
 struct ScalarSourceAccess;
 }
 
+/// Owned scalar value for numeric/material inputs, independent of Pugl/Skia public types.
+/// It stores either an exact float or an owned Brush plus channel.
+/// Construction from Brush and copying may allocate; do not use in real-time audio callbacks.
 class ScalarSource final {
 public:
+/// Default source is the constant zero and requires no renderer resource.
     ScalarSource() noexcept : value_(0.0f) {}
+/// Store value verbatim; NaN and infinity are not normalized by the scalar wrapper.
     explicit ScalarSource(float value) noexcept : value_(value) {}
 
+/// Construct an unclamped constant without allocating.
     [[nodiscard]] static ScalarSource constant(float value) noexcept {
         return ScalarSource{value};
     }
 
+/// Own the supplied Brush and sample the selected channel when consumed.
+/// An out-of-range ScalarChannel returns the default zero source.
     [[nodiscard]] static ScalarSource from_brush(
         Brush brush,
         ScalarChannel channel) {
@@ -35,6 +44,8 @@ public:
         return ScalarSource{BrushChannel{std::move(brush), channel}};
     }
 
+/// Adapt a NoiseSource through its opaque black-to-white Brush and red channel.
+/// Inspect NoiseCreateResult before passing a procedural source; no new compilation occurs here.
     [[nodiscard]] static ScalarSource from_noise(NoiseSource noise) {
         return from_brush(
             noise.as_brush({0.0f, 0.0f, 0.0f, 1.0f},
@@ -42,8 +53,10 @@ public:
             ScalarChannel::Red);
     }
 
+/// Copying retains independent value semantics; a Brush-backed copy can allocate.
     ScalarSource(const ScalarSource&) = default;
 
+/// Copy-assign via a prepared replacement; a failed copy leaves this source unchanged.
     ScalarSource& operator=(const ScalarSource& other) {
         if (this == &other) return *this;
         ScalarSource replacement{other};
@@ -51,11 +64,13 @@ public:
         return *this;
     }
 
+/// Move without throwing; the moved-from source becomes constant zero.
     ScalarSource(ScalarSource&& other) noexcept : value_(0.0f) {
         value_ = std::move(other.value_);
         other.reset_to_zero();
     }
 
+/// Move-assign without throwing. Self-move intentionally resets this source to zero.
     ScalarSource& operator=(ScalarSource&& other) noexcept {
         if (this == &other) {
             reset_to_zero();

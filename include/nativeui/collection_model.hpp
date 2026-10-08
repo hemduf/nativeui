@@ -13,13 +13,19 @@
 #include <vector>
 
 namespace ui {
+/// Collection widget selection policy. The Selection<T> value controller does not itself enforce this mode.
 enum class SelectionMode { Single, Multiple };
+/// Owned collection-selection value. Keys need equality and copy semantics; selected order is significant.
+/// The optional active/anchor keys are independent navigation metadata, not implicitly validated against selected.
 template <class Key> struct SelectionSnapshot {
+/// Selected keys in presentation order. Selection::set removes duplicate keys; direct State writes do not.
     std::vector<Key> selected;
     std::optional<Key> active;
     std::optional<Key> anchor;
     bool operator==(const SelectionSnapshot &) const = default;
 };
+/// Detached item descriptor for keyed collection views. The descriptor owns its label and key.
+/// Views interpret enabled and section_header; this value itself performs no validation.
 template <class Key> struct CollectionItem {
     Key key;
     std::string label;
@@ -27,6 +33,8 @@ template <class Key> struct CollectionItem {
     bool section_header{};
     bool operator==(const CollectionItem &) const = default;
 };
+/// Detached keyed tree-row descriptor. A missing parent denotes a root; branch is display/expansion metadata.
+/// The value does not itself validate parent references or guarantee an acyclic tree.
 template <class Key> struct TreeNode {
     Key key;
     std::optional<Key> parent;
@@ -35,21 +43,35 @@ template <class Key> struct TreeNode {
     bool branch{};
     bool operator==(const TreeNode &) const = default;
 };
+/// Virtualized-list row-height configuration in logical pixels. The defaults estimate 24 units
+/// and enable the variable-height policy; actual measurement belongs to the consuming view.
 struct ListRowHeights {
     double estimate{24.0};
     bool variable{true};
 };
 
+/// Reference-like, per-UI-domain controller around State<SelectionSnapshot<Key>>.
+/// The controller holds a Binding, not the State owner; check valid() before writes.
+/// A destroyed State invalidates writes but its last committed snapshot remains readable.
+/// Mutation, observation and retained-view use are UI-thread work, not audio-thread transport.
 template <class Key> class Selection {
   public:
     explicit Selection(Binding<SelectionSnapshot<Key>> source) : source_(std::move(source)) {}
     explicit Selection(State<SelectionSnapshot<Key>> &source) : Selection(source.binding()) {}
+/// Return another handle to the same source, not a copy of selection state.
     [[nodiscard]] Binding<SelectionSnapshot<Key>> binding() const { return source_; }
+/// Return an owned copy. Copy/conversion or deferred observer work can throw.
     [[nodiscard]] SelectionSnapshot<Key> snapshot() const {
         const auto source = source_;
         return source.snapshot();
     }
+/// Whether the underlying owning State still exists.
     [[nodiscard]] bool valid() const noexcept { return source_.valid(); }
+/// Request a conditional write against the source revision observed at entry.
+/// Repeated selected keys are removed before comparison (first occurrence retained).
+/// Return true only if the write was accepted synchronously; false can mean unchanged,
+/// expired/revised source or a recursive write that is pending at return.
+/// Callbacks may run synchronously and throw. active/anchor are not normalized here.
     bool set(SelectionSnapshot<Key> candidate) {
         auto source = source_;
         if (!source.valid())

@@ -8,6 +8,8 @@
 
 namespace ui {
 
+/// Retained vertical layout with main-axis gap, uniform inset padding,
+/// main-axis justification and cross-axis alignment in logical pixels.
 class ColumnComponent final : public Component {
 public:
     ColumnComponent(
@@ -37,6 +39,8 @@ private:
     Justify justify_{Justify::Start};
 };
 
+/// Detached vertical composition builder owning child Specs.
+/// Default gap is 16 and default padding is 24 logical UI units.
 class Column {
 public:
     template <class... Children>
@@ -44,14 +48,19 @@ public:
         (children_.push_back(make_spec(std::forward<Children>(children))), ...);
     }
 
+/// Set vertical gap in logical pixels.
     Column&& gap(float value) &&;
 
+/// Set uniform layout padding in logical pixels.
     Column&& padding(float value) &&;
 
+/// Set horizontal cross-axis child alignment.
     Column&& align(Align value) &&;
 
+/// Set vertical main-axis distribution.
     Column&& justify(Justify value) &&;
 
+/// Consume the owned child Specs and layout policy.
     Spec spec() &&;
 
 private:

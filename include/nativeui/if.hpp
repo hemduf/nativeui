@@ -23,12 +23,19 @@ private:
     bool mounted_{};
 };
 }
+/// Conditional one-child retained composition controlled by an observable bool.
+/// The child Spec is owned at construction; changes reconcile at a safe UI
+/// checkpoint rather than on the observer stack. Removing the subtree uses
+/// normal retained lifecycle, focus and pointer-capture teardown.
 class If {
 public:
     template <class Child>
+/// Keep a Binding handle and convert child to an owned Spec; may throw.
     If(Binding<bool> source,Child&& child) : state_(std::move(source)),child_(make_spec(std::forward<Child>(child))) {}
     template <class Child>
+/// State convenience overload; the resulting recipe stores its Binding.
     If(State<bool>& source,Child&& child) : If(source.binding(),std::forward<Child>(child)) {}
+/// Consume this builder into a retained dynamic composition recipe.
     Spec spec() &&;
 private:
     Binding<bool> state_;

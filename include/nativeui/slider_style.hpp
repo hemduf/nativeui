@@ -6,37 +6,72 @@
 
 namespace ui {
 
-/// Typed Slider/RangeSlider presentation overrides. Empty fields inherit from
-/// the already resolved Theme/T039/component layer. Interaction variants share
-/// the T038 VisualState precedence; read-only and focused are orthogonal.
+/// Partial Slider/RangeSlider presentation and geometry override.
+///
+/// Disengaged optionals inherit the value already selected by preceding layers.
+/// Scalar geometry uses logical UI pixels and is copied verbatim; this layer does
+/// not clamp negative or non-finite values. The patch owns no UI/tree/native
+/// resources and invokes no callbacks.
 struct SliderStylePatch {
+    /// Inactive track color.
     std::optional<Color> track;
+    /// Active/range-filled track color.
     std::optional<Color> active;
+    /// Thumb color.
     std::optional<Color> thumb;
+    /// Focus-ring color.
     std::optional<Color> focus_ring;
+    /// Formatter/readout text color.
     std::optional<Color> formatter_text;
+    /// Track thickness in logical UI pixels.
     std::optional<float> track_thickness;
+    /// Thumb diameter in logical UI pixels.
     std::optional<float> thumb_diameter;
+    /// Focus-ring width in logical UI pixels.
     std::optional<float> focus_ring_width;
 };
 
+/// Complete Slider/RangeSlider style recipe.
+///
+/// Resolution order is base -> interaction -> read_only -> focused. Interaction
+/// chooses one branch using disabled > pressed > hovered > normal precedence.
+/// Inherited values are applied before component-local values inside each layer.
 struct SliderStyle {
+    /// Normal-state baseline.
     SliderStylePatch base;
+    /// Overrides while hovered.
     SliderStylePatch hovered;
+    /// Overrides while actively pressed.
     SliderStylePatch pressed;
+    /// Overrides while disabled.
     SliderStylePatch disabled;
+    /// Orthogonal read-only overrides.
     SliderStylePatch read_only;
+    /// Orthogonal focus overrides applied last.
     SliderStylePatch focused;
 };
 
+/// Owned concrete Slider/RangeSlider style after recipe/state resolution.
+///
+/// Thumb diameter and focus-ring width currently contribute to intrinsic
+/// cross-axis measurement; track thickness is paint geometry inside those bounds.
+/// No field borrows from the recipes or Theme that produced this value.
 struct ResolvedSliderStyle {
+    /// Resolved inactive track color.
     Color track{};
+    /// Resolved active/range-filled track color.
     Color active{};
+    /// Resolved thumb color.
     Color thumb{};
+    /// Resolved focus-ring color.
     Color focus_ring{};
+    /// Resolved formatter/readout text color.
     Color formatter_text{};
+    /// Resolved track thickness in logical UI pixels.
     float track_thickness{};
+    /// Resolved thumb diameter in logical UI pixels.
     float thumb_diameter{};
+    /// Resolved focus-ring width in logical UI pixels.
     float focus_ring_width{};
 };
 
@@ -111,9 +146,14 @@ inline void apply_slider_interaction_patch(ResolvedSliderStyle& target,
 
 } // namespace detail
 
-/// T037-backed default Slider/RangeSlider recipe. Interaction variants change
-/// paint only; geometry stays stable across normal/hover/pressed/focus/read-only
-/// and disabled states.
+/// Builds the default Slider/RangeSlider recipe from a borrowed Theme.
+///
+/// The Theme is read synchronously and is not retained. The returned recipe is
+/// detached/owned. Default state variants change paint only; geometry remains
+/// stable unless a caller explicitly overrides geometry in a state patch.
+///
+/// No callback or retained-tree mutation occurs. NativeUI does not promise this
+/// style helper as an audio/DSP real-time-safe API.
 [[nodiscard]] inline SliderStyle default_slider_style(const Theme& theme) {
     SliderStyle style;
     style.base.track = theme.palette.control_background;
@@ -141,9 +181,16 @@ inline void apply_slider_interaction_patch(ResolvedSliderStyle& target,
     return style;
 }
 
-/// Resolve Slider/RangeSlider style from an already composed inherited recipe,
-/// a local explicit recipe and the shared T038 visual-state model. T039 may
-/// supply the inherited recipe without adding scope traversal here.
+/// Resolves inherited and local Slider/RangeSlider recipes for one visual state.
+///
+/// Inputs are synchronous borrows; the returned snapshot is independent of them.
+/// Resolution is base -> interaction -> read_only -> focused with local values
+/// winning inherited values within every layer. No Theme lookup, callback,
+/// retained mutation, or fallback path occurs. Fields omitted by both recipes
+/// remain default-constructed in the result.
+///
+/// Applying the resulting style to a live widget remains UI/main-thread work;
+/// this resolver carries no cross-thread synchronization or audio-RT guarantee.
 [[nodiscard]] inline ResolvedSliderStyle resolve_slider_style(
     const SliderStyle& inherited,
     const SliderStyle& explicit_style,

@@ -10,51 +10,102 @@ namespace ui {
 /// orthogonal VisualState flag; disabled/pressed/hovered use the common T038
 /// interaction precedence. Geometry fields are explicit so invalidation can be
 /// classified without string properties or backend state.
+/// Each engaged optional overrides the current resolution layer; an absent
+/// optional inherits the previous value. Float geometry uses logical UI
+/// pixels and is stored verbatim without clamping or finiteness checks.
+/// The patch is detached value data and owns no retained/native resources.
 struct ListViewStylePatch {
+    /// Background color of the ListView surface.
     std::optional<Color> surface_fill;
+    /// Border color of the ListView surface.
     std::optional<Color> surface_border;
+    /// Background color painted behind an individual row.
     std::optional<Color> row_fill;
+    /// Accent color used by row selection/indicator decoration.
     std::optional<Color> row_accent;
+    /// Header/tab separator color.
     std::optional<Color> separator;
+    /// Surface border thickness in logical pixels.
     std::optional<float> surface_border_width;
+    /// Surface corner radius in logical pixels.
     std::optional<float> surface_corner_radius;
+    /// Horizontal row-content inset in logical pixels.
     std::optional<float> row_horizontal_inset;
+    /// Vertical row-content inset in logical pixels.
     std::optional<float> row_vertical_inset;
+    /// Row background corner radius in logical pixels.
     std::optional<float> row_corner_radius;
+    /// Width of the row accent indicator in logical pixels.
     std::optional<float> row_accent_width;
+    /// Horizontal accent inset in logical pixels.
     std::optional<float> row_accent_horizontal_inset;
+    /// Vertical accent inset in logical pixels.
     std::optional<float> row_accent_vertical_inset;
+    /// Separator stroke width in logical pixels.
     std::optional<float> separator_width;
+    /// Separator inset in logical pixels.
     std::optional<float> separator_inset;
 };
 
+/// Complete ListView recipe. Selected/read-only/focused state remains
+/// orthogonal to the shared interaction branch.
+/// Resolution order is base -> selected -> interaction -> read_only -> focused.
+/// At every layer inherited fields are applied before explicit/local fields,
+/// so an explicit field wins when both recipes provide that same field.
 struct ListViewStyle {
+    /// Unconditional baseline patch.
     ListViewStylePatch base;
+    /// Orthogonal patch applied when VisualState::selected is true.
     ListViewStylePatch selected;
+    /// Interaction patch for hovered state.
     ListViewStylePatch hovered;
+    /// Interaction patch for pressed state.
     ListViewStylePatch pressed;
+    /// Interaction patch for disabled state; disabled wins interaction precedence.
     ListViewStylePatch disabled;
+    /// Orthogonal patch applied after interaction when read-only.
     ListViewStylePatch read_only;
+    /// Final orthogonal patch applied when focused.
     ListViewStylePatch focused;
 };
 
+/// Concrete ListView surface/row/separator presentation after resolution.
+/// Fully owned snapshot: no member borrows from either recipe or Theme.
+/// A default-constructed value is zero/default-valued and is not implicitly
+/// populated from a Theme.
 struct ResolvedListViewStyle {
+    /// Resolved ListView surface fill.
     Color surface_fill{};
+    /// Resolved ListView surface border color.
     Color surface_border{};
+    /// Resolved row fill.
     Color row_fill{};
+    /// Resolved row accent color.
     Color row_accent{};
+    /// Resolved separator color.
     Color separator{};
+    /// Resolved surface border thickness in logical pixels.
     float surface_border_width{};
+    /// Resolved surface corner radius in logical pixels.
     float surface_corner_radius{};
+    /// Resolved horizontal row inset in logical pixels.
     float row_horizontal_inset{};
+    /// Resolved vertical row inset in logical pixels.
     float row_vertical_inset{};
+    /// Resolved row corner radius in logical pixels.
     float row_corner_radius{};
+    /// Resolved row-accent width in logical pixels.
     float row_accent_width{};
+    /// Resolved horizontal row-accent inset in logical pixels.
     float row_accent_horizontal_inset{};
+    /// Resolved vertical row-accent inset in logical pixels.
     float row_accent_vertical_inset{};
+    /// Resolved separator width in logical pixels.
     float separator_width{};
+    /// Resolved separator inset in logical pixels.
     float separator_inset{};
 
+    /// Exact value comparison; no geometric tolerance is applied.
     [[nodiscard]] bool operator==(const ResolvedListViewStyle& other) const noexcept {
         return detail::theme_color_equal(surface_fill, other.surface_fill) &&
                detail::theme_color_equal(surface_border, other.surface_border) &&
@@ -77,63 +128,123 @@ struct ResolvedListViewStyle {
 /// Typed Tabs header/panel presentation. Selected is orthogonal to the common
 /// interaction branch; focus/read-only remain independent overlays. Default
 /// interaction patches intentionally preserve all geometry fields.
+/// Engaged optionals replace the matching field for one resolution layer;
+/// absent fields inherit. All float geometry and text sizes use logical UI
+/// pixels and are stored verbatim without implicit validation or clamping.
 struct TabsStylePatch {
+    /// Header background color.
     std::optional<Color> header_fill;
+    /// Header border color.
     std::optional<Color> header_border;
+    /// Content-panel background color.
     std::optional<Color> panel_fill;
+    /// Content-panel border color.
     std::optional<Color> panel_border;
+    /// Individual tab background color.
     std::optional<Color> tab_fill;
+    /// Tab label color.
     std::optional<Color> text;
+    /// Header/tab separator color.
     std::optional<Color> separator;
+    /// Selected-tab underline color.
     std::optional<Color> underline;
+    /// Header border thickness in logical pixels.
     std::optional<float> header_border_width;
+    /// Panel border thickness in logical pixels.
     std::optional<float> panel_border_width;
+    /// Preferred header height in logical pixels.
     std::optional<float> header_height;
+    /// Gap between header and panel in logical pixels.
     std::optional<float> panel_gap;
+    /// Header corner radius in logical pixels.
     std::optional<float> header_corner_radius;
+    /// Panel corner radius in logical pixels.
     std::optional<float> panel_corner_radius;
+    /// Inset around each tab within the header in logical pixels.
     std::optional<float> tab_inset;
+    /// Individual tab corner radius in logical pixels.
     std::optional<float> tab_corner_radius;
+    /// Selected underline thickness in logical pixels.
     std::optional<float> underline_height;
+    /// Selected underline inset from tab edges in logical pixels.
     std::optional<float> underline_inset;
+    /// Separator stroke width in logical pixels.
     std::optional<float> separator_width;
+    /// Separator inset in logical pixels.
     std::optional<float> separator_inset;
+    /// Tab-label text size in logical pixels.
     std::optional<float> text_size;
 };
 
+/// Complete Tabs recipe for header, tabs, selected underline and panel.
+/// Resolution order is base -> selected -> interaction -> read_only -> focused.
+/// Recipes are owned backend-neutral values and resolver calls invoke no
+/// callbacks or retained-tree mutation.
 struct TabsStyle {
+    /// Unconditional baseline patch.
     TabsStylePatch base;
+    /// Patch applied when the tab is selected.
     TabsStylePatch selected;
+    /// Interaction patch for hovered state.
     TabsStylePatch hovered;
+    /// Interaction patch for pressed state.
     TabsStylePatch pressed;
+    /// Interaction patch for disabled state.
     TabsStylePatch disabled;
+    /// Orthogonal read-only patch applied after interaction.
     TabsStylePatch read_only;
+    /// Final focus patch.
     TabsStylePatch focused;
 };
 
+/// Concrete Tabs presentation and measurement values after state resolution.
+/// Fully owned presentation/measurement snapshot. No member borrows from
+/// either recipe or the Theme used to create defaults.
 struct ResolvedTabsStyle {
+    /// Resolved header fill.
     Color header_fill{};
+    /// Resolved header border color.
     Color header_border{};
+    /// Resolved panel fill.
     Color panel_fill{};
+    /// Resolved panel border color.
     Color panel_border{};
+    /// Resolved tab fill.
     Color tab_fill{};
+    /// Resolved tab-label color.
     Color text{};
+    /// Resolved separator color.
     Color separator{};
+    /// Resolved selected-underline color.
     Color underline{};
+    /// Resolved header border thickness in logical pixels.
     float header_border_width{};
+    /// Resolved panel border thickness in logical pixels.
     float panel_border_width{};
+    /// Resolved preferred header height in logical pixels.
     float header_height{};
+    /// Resolved header-to-panel gap in logical pixels.
     float panel_gap{};
+    /// Resolved header corner radius in logical pixels.
     float header_corner_radius{};
+    /// Resolved panel corner radius in logical pixels.
     float panel_corner_radius{};
+    /// Resolved tab inset in logical pixels.
     float tab_inset{};
+    /// Resolved tab corner radius in logical pixels.
     float tab_corner_radius{};
+    /// Resolved selected-underline thickness in logical pixels.
     float underline_height{};
+    /// Resolved underline inset in logical pixels.
     float underline_inset{};
+    /// Resolved separator width in logical pixels.
     float separator_width{};
+    /// Resolved separator inset in logical pixels.
     float separator_inset{};
+    /// Resolved tab-label text size in logical pixels.
     float text_size{};
 
+    /// Exact value comparison; no geometric tolerance is applied.
     [[nodiscard]] bool operator==(const ResolvedTabsStyle& other) const noexcept {
         return detail::theme_color_equal(header_fill, other.header_fill) &&
                detail::theme_color_equal(header_border, other.header_border) &&
@@ -247,6 +358,10 @@ inline void apply_tabs_interaction_patch(ResolvedTabsStyle& target,
 
 } // namespace detail
 
+/// Builds a complete default ListView recipe from a Theme borrowed only for
+/// this call. The returned recipe is independent owned value data.
+/// This helper performs no callbacks or retained-tree mutation and is not
+/// intended for audio/DSP real-time use.
 [[nodiscard]] inline ListViewStyle default_list_view_style(const Theme& theme) {
     ListViewStyle style;
     style.base.surface_fill = theme.palette.surface;
@@ -272,6 +387,10 @@ inline void apply_tabs_interaction_patch(ResolvedTabsStyle& target,
     return style;
 }
 
+/// Resolves inherited and explicit/local ListView recipes for a VisualState.
+/// Inputs are borrowed only for this call; the result owns all values.
+/// Layering is base -> selected -> interaction -> read_only -> focused.
+/// No Theme lookup, callback, or numeric sanitization occurs here.
 [[nodiscard]] inline ResolvedListViewStyle resolve_list_view_style(
     const ListViewStyle& inherited,
     const ListViewStyle& explicit_style,
@@ -300,6 +419,9 @@ inline void apply_tabs_interaction_patch(ResolvedTabsStyle& target,
     return resolved;
 }
 
+/// Builds a complete default Tabs recipe from a Theme borrowed only for this
+/// call. The returned recipe owns its copied values and captures no UI/native
+/// resource.
 [[nodiscard]] inline TabsStyle default_tabs_style(const Theme& theme) {
     TabsStyle style;
     style.base.header_fill = theme.palette.surface;
@@ -333,6 +455,12 @@ inline void apply_tabs_interaction_patch(ResolvedTabsStyle& target,
     return style;
 }
 
+/// Resolves inherited and explicit/local Tabs recipes for a VisualState.
+/// Inputs are synchronous borrows; the returned snapshot is independent.
+/// Layering is base -> selected -> interaction -> read_only -> focused, with
+/// explicit/local fields winning over inherited fields at each layer.
+/// The resolver invokes no callbacks, performs no Theme lookup and does not
+/// clamp numeric values.
 [[nodiscard]] inline ResolvedTabsStyle resolve_tabs_style(
     const TabsStyle& inherited,
     const TabsStyle& explicit_style,

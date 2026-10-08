@@ -12,6 +12,7 @@
 
 namespace ui {
 
+/// Policy for bringing a descendant into the visible content rectangle.
 enum class ScrollAlignment { Nearest, Start, Center, End };
 
 namespace detail {
@@ -141,11 +142,15 @@ private:
 
 } // namespace detail
 
+/// Request a logical offset that exposes the specified descendant Rect.
+/// May synchronously notify ScrollState observers and propagate exceptions.
 [[nodiscard]] bool ensure_visible(
     ScrollState& state,
     Rect descendant_bounds,
     ScrollAlignment alignment = ScrollAlignment::Nearest);
 
+/// Retained wheel/panning input view. Pointer-targetable but excluded
+/// from ordinary keyboard Tab focus traversal.
 class ScrollViewComponent final : public Component {
 public:
     ScrollViewComponent(
@@ -198,19 +203,26 @@ private:
     Point offset_origin_{};
 };
 
+/// Declarative scroll content, scrollbar presentation and optional pointer pan.
+/// Owns child/style recipes, but borrows the external ScrollState through
+/// its lifetime token. All operations participate in UI/main-thread work.
 class ScrollView {
 public:
     template <class Child>
+/// Borrow the state lifetime token and convert child to an owned Spec.
     ScrollView(ScrollState& state, Child&& child)
         : state_(&state),
           axis_(state.axis()),
           lifetime_(state.lifetime_token()),
           content_(make_spec(std::forward<Child>(child))) {}
 
+/// Opt in/out of pointer-drag panning independently of wheel scrolling.
     ScrollView&& pointer_pan(bool enabled = true) &&;
 
+/// Assign a typed per-instance scrollbar presentation policy.
     ScrollView&& style(ScrollbarStyle value) &&;
 
+/// Consume the content, scrollbar overlay recipes and input policy.
     Spec spec() &&;
 
 private:

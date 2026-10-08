@@ -7,6 +7,8 @@
 
 namespace ui {
 
+/// One-child wrapper advertising dimensionless grow/shrink weights to its
+/// retained parent while forwarding measurement/layout to the child.
 class FlexComponent final : public Component {
 public:
     FlexComponent(float grow, float shrink);
@@ -31,6 +33,8 @@ private:
     FlexFactors factors_{};
 };
 
+/// Detached one-child flex builder. Weights influence parent free-space
+/// distribution; they do not cause an independent second layout system.
 class Flex {
 public:
     template <class Child>
@@ -38,10 +42,13 @@ public:
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+/// Set dimensionless positive free-space distribution weight.
     Flex&& grow(float value) &&;
 
+/// Set dimensionless shrink weight under constrained layout.
     Flex&& shrink(float value) &&;
 
+/// Consume the child and flex factors into a retained Spec.
     Spec spec() &&;
 
 private:

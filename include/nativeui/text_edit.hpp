@@ -1,3 +1,11 @@
+/// \file
+/// UTF-8 boundary helpers and the platform-independent mutable text-edit model.
+///
+/// Public positions are byte offsets unless stated otherwise. Boundary helpers
+/// recognize UTF-8 continuation bytes but do not validate Unicode or segment
+/// grapheme clusters. TextEditModel owns text, selection, composition and bounded
+/// history, has no internal synchronization or callbacks, and is UI/main-thread
+/// work rather than an audio/DSP real-time API.
 #pragma once
 
 #include <algorithm>
@@ -14,16 +22,21 @@ namespace ui {
 
 namespace text {
 
+/// Test the UTF-8 continuation-byte bit pattern. This classifies one byte only;
+/// it does not validate a complete UTF-8 sequence.
 [[nodiscard]] inline bool continuation(unsigned char c) noexcept {
     return (c & 0xC0u) == 0x80u;
 }
 
+/// Clamp a byte offset to the start of its containing UTF-8 code-point-like
+/// sequence; out-of-range offsets clamp to value.size().
 [[nodiscard]] inline std::size_t clamp_boundary(std::string_view value, std::size_t index) noexcept {
     if (index >= value.size()) return value.size();
     while (index > 0 && continuation(static_cast<unsigned char>(value[index]))) --index;
     return index;
 }
 
+/// Advance one UTF-8 boundary without performing full Unicode validation.
 [[nodiscard]] inline std::size_t next_codepoint(std::string_view value, std::size_t index) noexcept {
     if (index >= value.size()) return value.size();
     ++index;
@@ -31,6 +44,7 @@ namespace text {
     return index;
 }
 
+/// Move to the previous UTF-8 boundary.
 [[nodiscard]] inline std::size_t previous_codepoint(std::string_view value, std::size_t index) noexcept {
     if (index == 0) return 0;
     index = std::min(index, value.size());
@@ -39,12 +53,14 @@ namespace text {
     return index;
 }
 
+/// Count code-point-like UTF-8 units using boundary traversal.
 [[nodiscard]] inline std::size_t codepoint_count(std::string_view value) noexcept {
     std::size_t count = 0;
     for (std::size_t i = 0; i < value.size(); i = next_codepoint(value, i)) ++count;
     return count;
 }
 
+/// Copy at most `max_count` code points without splitting a boundary.
 [[nodiscard]] inline std::string truncate_codepoints(std::string_view value, std::size_t max_count) {
     std::size_t i = 0;
     std::size_t count = 0;
@@ -55,6 +71,8 @@ namespace text {
     return std::string{value.substr(0, i)};
 }
 
+/// Produce single-line text: CR/LF/TAB become at most one separating space,
+/// other ASCII control bytes are removed and remaining bytes are preserved.
 [[nodiscard]] inline std::string single_line(std::string_view input) {
     std::string out;
     out.reserve(input.size());
@@ -82,8 +100,11 @@ namespace text {
     return out;
 }
 
+/// Coarse navigation class. Non-ASCII leading bytes count as Word; ASCII
+/// alphanumeric/underscore are Word and other non-space ASCII is Punctuation.
 enum class CharClass { Space, Word, Punctuation };
 
+/// Classify the code point beginning at/containing one byte offset.
 [[nodiscard]] inline CharClass char_class_at(std::string_view value, std::size_t index) noexcept {
     index = clamp_boundary(value, index);
     if (index >= value.size()) return CharClass::Space;
@@ -94,6 +115,7 @@ enum class CharClass { Space, Word, Punctuation };
     return CharClass::Punctuation;
 }
 
+/// Return the byte boundary for one backward word-navigation step.
 [[nodiscard]] inline std::size_t previous_word(std::string_view value, std::size_t cursor) noexcept {
     std::size_t i = clamp_boundary(value, std::min(cursor, value.size()));
     while (i > 0) {
@@ -113,6 +135,7 @@ enum class CharClass { Space, Word, Punctuation };
     return i;
 }
 
+/// Return the byte boundary for one forward word-navigation step.
 [[nodiscard]] inline std::size_t next_word(std::string_view value, std::size_t cursor) noexcept {
     std::size_t i = clamp_boundary(value, std::min(cursor, value.size()));
     if (i >= value.size()) return value.size();
@@ -122,6 +145,7 @@ enum class CharClass { Space, Word, Punctuation };
     return i;
 }
 
+/// Return [begin,end) byte boundaries for the contiguous CharClass at index.
 [[nodiscard]] inline std::pair<std::size_t, std::size_t>
 word_bounds(std::string_view value, std::size_t index) noexcept {
     if (value.empty()) return {0, 0};
@@ -139,6 +163,7 @@ word_bounds(std::string_view value, std::size_t index) noexcept {
     return {begin, end};
 }
 
+/// Return the byte offset of the current newline-delimited line start.
 [[nodiscard]] inline std::size_t line_start(std::string_view value, std::size_t index) noexcept {
     std::size_t i = clamp_boundary(value, std::min(index, value.size()));
     while (i > 0) {
@@ -149,18 +174,21 @@ word_bounds(std::string_view value, std::size_t index) noexcept {
     return i;
 }
 
+/// Return the byte offset of the current line end (before newline when present).
 [[nodiscard]] inline std::size_t line_end(std::string_view value, std::size_t index) noexcept {
     std::size_t i = clamp_boundary(value, std::min(index, value.size()));
     while (i < value.size() && value[i] != '\n') i = next_codepoint(value, i);
     return i;
 }
 
+/// Return the code-point column within the current line.
 [[nodiscard]] inline std::size_t line_column(std::string_view value, std::size_t index) noexcept {
     const auto bounded = clamp_boundary(value, std::min(index, value.size()));
     const auto begin = line_start(value, bounded);
     return codepoint_count(value.substr(begin, bounded - begin));
 }
 
+/// Resolve a code-point column to a byte boundary inside [begin,end].
 [[nodiscard]] inline std::size_t index_at_line_column(
     std::string_view value,
     std::size_t begin,
@@ -179,48 +207,96 @@ word_bounds(std::string_view value, std::size_t index) noexcept {
 
 } // namespace text
 
+/// Granularity used by horizontal movement and deletion.
+///
+/// Cursor/anchor storage remains byte-based for every value.
 enum class TextMotion {
+    /// One continuation-boundary-delimited UTF-8 unit, not a grapheme cluster.
     Codepoint,
+    /// One coarse CharClass run as defined by char_class_at().
     Word,
+    /// The complete document boundary.
     Document,
 };
 
+/// Platform-independent mutable UTF-8 editing model.
+///
+/// Cursor, anchor and composition positions are byte offsets clamped to the
+/// continuation-byte boundaries recognized by this header. The model owns text,
+/// selection, pre-edit state and bounded undo/redo history and never retains
+/// caller string views after a mutating call returns.
+///
+/// The model owns no platform editor, clipboard, painter, Dispatcher or retained
+/// component. It invokes no application callbacks, adds no synchronization and
+/// should be mutated in the owning UI/main-thread domain. Methods that copy/grow
+/// strings or history may allocate and propagate ordinary C++ exceptions; bool
+/// results report editing outcomes rather than translating allocation failures.
+///
+/// Input bytes are not normalized or fully validated as Unicode. Navigation is
+/// defined by the helper rules in namespace ui::text, not grapheme segmentation.
 class TextEditModel {
 public:
+    /// Owned text/cursor/anchor checkpoint independent of the model lifetime.
+    ///
+    /// Transient composition state and undo/redo history are intentionally absent.
     struct Snapshot {
+        /// Complete owned byte string.
         std::string text;
+        /// Insertion endpoint as a byte offset in `text`.
         std::size_t cursor{};
+        /// Opposite selection endpoint as a byte offset in `text`.
         std::size_t anchor{};
 
+        /// Value equality across text and both offsets.
         [[nodiscard]] bool operator==(const Snapshot&) const = default;
     };
 
+    /// Take ownership of initial text and configure the future insertion limit.
+    ///
+    /// `max_length` counts code-point-like units traversed by next_codepoint();
+    /// zero means unlimited. Initial text is never truncated and both endpoints
+    /// start at its byte end.
     explicit TextEditModel(std::string value = {}, std::size_t max_length = 0)
         : text_(std::move(value)),
           max_length_(max_length == 0 ? std::numeric_limits<std::size_t>::max() : max_length),
           cursor_(text_.size()),
           anchor_(text_.size()) {}
 
+    /// Borrow current UTF-8 bytes; mutation may invalidate the reference.
     [[nodiscard]] const std::string& text() const noexcept { return text_; }
+    /// Current insertion endpoint as a byte offset.
     [[nodiscard]] std::size_t cursor() const noexcept { return cursor_; }
+    /// Opposite selection endpoint as a byte offset.
     [[nodiscard]] std::size_t anchor() const noexcept { return anchor_; }
+    /// Code-point limit applied to future insertion/composition commits.
     [[nodiscard]] std::size_t max_length() const noexcept { return max_length_; }
 
+    /// Whether cursor and anchor delimit a non-empty selection.
     [[nodiscard]] bool has_selection() const noexcept { return cursor_ != anchor_; }
+    /// Lower byte endpoint of the selection.
     [[nodiscard]] std::size_t selection_begin() const noexcept { return std::min(cursor_, anchor_); }
+    /// Upper byte endpoint of the selection.
     [[nodiscard]] std::size_t selection_end() const noexcept { return std::max(cursor_, anchor_); }
+    /// Borrow the selected UTF-8 byte slice.
     [[nodiscard]] std::string_view selected_text() const noexcept {
         return std::string_view{text_}.substr(selection_begin(), selection_end() - selection_begin());
     }
 
+    /// Whether an undo checkpoint exists.
     [[nodiscard]] bool can_undo() const noexcept { return !undo_.empty(); }
+    /// Whether a redo checkpoint exists.
     [[nodiscard]] bool can_redo() const noexcept { return !redo_.empty(); }
 
+    /// Whether an IME/pre-edit transaction is active.
     [[nodiscard]] bool composition_active() const noexcept { return composition_active_; }
+    /// Borrow current pre-edit UTF-8 text.
     [[nodiscard]] const std::string& composition_text() const noexcept { return composition_text_; }
+    /// Pre-edit cursor byte offset.
     [[nodiscard]] std::size_t composition_cursor_byte() const noexcept { return composition_cursor_byte_; }
+    /// Pre-edit selection byte count from composition_cursor_byte().
     [[nodiscard]] std::size_t composition_selection_bytes() const noexcept { return composition_selection_bytes_; }
 
+    /// Start/restart composition and snapshot base text/selection.
     void begin_composition() {
         composition_start_ = snapshot();
         composition_text_.clear();
@@ -229,6 +305,11 @@ public:
         composition_active_ = true;
     }
 
+    /// Replace owned pre-edit text and clamp its cursor/selection byte range.
+    ///
+    /// Starts composition automatically when inactive. `preedit` is consumed;
+    /// cursor/selection are byte-based and clamped to recognized boundaries. Base
+    /// text and undo history are unchanged. String assignment may allocate/throw.
     void update_composition(std::string preedit, std::size_t cursor_byte, std::size_t selection_bytes) {
         if (!composition_active_) begin_composition();
         composition_text_ = std::move(preedit);
@@ -242,6 +323,17 @@ public:
         composition_selection_bytes_ = selection_end - composition_cursor_byte_;
     }
 
+    /// End active pre-edit and replace the composition-start selection.
+    ///
+    /// `committed` is borrowed only for this call. An active attempt clears the
+    /// transient composition state, verifies that base text still matches the
+    /// start snapshot, then truncates to the remaining max-length code-point
+    /// budget without splitting a recognized boundary.
+    ///
+    /// Returns true only when bytes are inserted. False covers inactive/stale
+    /// composition, exhausted budget or an accepted empty prefix; for an active
+    /// attempt it may still mean composition state ended/restored. Allocation and
+    /// history failures propagate as exceptions rather than false.
     [[nodiscard]] bool commit_composition(std::string_view committed) {
         if (!composition_active_) return false;
 
@@ -274,6 +366,8 @@ public:
         return true;
     }
 
+    /// Cancel pre-edit state; when base text is unchanged, restore the
+    /// composition-start cursor/anchor.
     void cancel_composition() noexcept {
         if (!composition_active_) return;
         const auto start = composition_start_;
@@ -286,10 +380,18 @@ public:
         }
     }
 
+    /// Set the future insertion limit in code points; zero means unlimited.
+    /// Existing text is not truncated.
     void set_max_length(std::size_t max_length) noexcept {
         max_length_ = max_length == 0 ? std::numeric_limits<std::size_t>::max() : max_length;
     }
 
+    /// Replace all owned text without enforcing max_length.
+    ///
+    /// Existing endpoints are clamped when preserved, otherwise both move to the
+    /// new end. History clears by default. Active composition is not explicitly
+    /// cancelled: replacing base text makes its snapshot stale, so a later commit
+    /// is rejected instead of applying the old range to new text.
     void set_text(std::string value, bool preserve_selection = true, bool clear_history = true) {
         text_ = std::move(value);
         if (preserve_selection) {
@@ -303,27 +405,32 @@ public:
         if (clear_history) this->clear_history();
     }
 
+    /// Drop every undo and redo checkpoint.
     void clear_history() noexcept {
         undo_.clear();
         redo_.clear();
     }
 
+    /// Move to a clamped byte boundary; collapse selection unless extending.
     void move_to(std::size_t target, bool extend = false) noexcept {
         set_cursor(target, extend, true);
     }
 
+    /// Set explicit clamped anchor/cursor byte endpoints.
     void select_range(std::size_t anchor, std::size_t cursor) noexcept {
         anchor_ = text::clamp_boundary(text_, std::min(anchor, text_.size()));
         cursor_ = text::clamp_boundary(text_, std::min(cursor, text_.size()));
         vertical_column_.reset();
     }
 
+    /// Select the complete text.
     void select_all() noexcept {
         anchor_ = 0;
         cursor_ = text_.size();
         vertical_column_.reset();
     }
 
+    /// Select the contiguous CharClass at one byte position.
     void select_word_at(std::size_t byte_index) noexcept {
         const auto [begin, end] = text::word_bounds(text_, byte_index);
         anchor_ = begin;
@@ -331,9 +438,12 @@ public:
         vertical_column_.reset();
     }
 
+    /// Collapse selection to its lower byte endpoint.
     void collapse_to_begin() noexcept { move_to(selection_begin()); }
+    /// Collapse selection to its upper byte endpoint.
     void collapse_to_end() noexcept { move_to(selection_end()); }
 
+    /// Move left by code point, word class or document boundary.
     void move_left(TextMotion motion = TextMotion::Codepoint, bool extend = false) noexcept {
         if (!extend && motion == TextMotion::Codepoint && has_selection()) {
             collapse_to_begin();
@@ -349,6 +459,7 @@ public:
         move_to(target, extend);
     }
 
+    /// Move right by code point, word class or document boundary.
     void move_right(TextMotion motion = TextMotion::Codepoint, bool extend = false) noexcept {
         if (!extend && motion == TextMotion::Codepoint && has_selection()) {
             collapse_to_end();
@@ -364,22 +475,32 @@ public:
         move_to(target, extend);
     }
 
+    /// Move to current line start.
     void move_line_start(bool extend = false) noexcept {
         set_cursor(text::line_start(text_, cursor_), extend, true);
     }
 
+    /// Move to current line end.
     void move_line_end(bool extend = false) noexcept {
         set_cursor(text::line_end(text_, cursor_), extend, true);
     }
 
+    /// Move to previous line preserving a preferred code-point column.
     void move_up(bool extend = false) noexcept {
         move_vertical(false, extend);
     }
 
+    /// Move to next line preserving a preferred code-point column.
     void move_down(bool extend = false) noexcept {
         move_vertical(true, extend);
     }
 
+    /// Replace selection/insert at cursor within the max-length budget.
+    ///
+    /// `incoming` is borrowed only for the call. Non-empty normal insertion
+    /// cancels active composition, truncates on a recognized boundary, checkpoints
+    /// the pre-edit state and clears redo history. Returns true iff text changed;
+    /// allocation/history failures propagate instead of returning false.
     [[nodiscard]] bool insert(std::string_view incoming) {
         if (incoming.empty()) return false;
         if (composition_active_) cancel_composition();
@@ -402,6 +523,7 @@ public:
         return true;
     }
 
+    /// Erase a non-empty selection and create an undo checkpoint.
     [[nodiscard]] bool erase_selection() {
         if (!has_selection()) return false;
         if (composition_active_) cancel_composition();
@@ -410,6 +532,7 @@ public:
         return true;
     }
 
+    /// Delete selection or content before cursor at the requested granularity.
     [[nodiscard]] bool backspace(TextMotion motion = TextMotion::Codepoint) {
         if (composition_active_) cancel_composition();
         if (!has_selection() && cursor_ == 0) return false;
@@ -432,6 +555,7 @@ public:
         return true;
     }
 
+    /// Delete selection or content after cursor at the requested granularity.
     [[nodiscard]] bool delete_forward(TextMotion motion = TextMotion::Codepoint) {
         if (composition_active_) cancel_composition();
         if (!has_selection() && cursor_ >= text_.size()) return false;
@@ -453,6 +577,11 @@ public:
         return true;
     }
 
+    /// Restore the previous owned text/cursor/anchor checkpoint.
+    ///
+    /// Active composition is cancelled first. False means undo history is empty;
+    /// successful transfer copies the pre-undo state to redo history and may
+    /// allocate/throw.
     [[nodiscard]] bool undo() {
         if (composition_active_) cancel_composition();
         if (undo_.empty()) return false;
@@ -463,6 +592,11 @@ public:
         return true;
     }
 
+    /// Reapply one previously undone checkpoint.
+    ///
+    /// Active composition is cancelled first. False means redo history is empty;
+    /// successful transfer copies the pre-redo state to undo history and may
+    /// allocate/throw.
     [[nodiscard]] bool redo() {
         if (composition_active_) cancel_composition();
         if (redo_.empty()) return false;
@@ -473,6 +607,10 @@ public:
         return true;
     }
 
+    /// Return an owned text/cursor/anchor checkpoint.
+    ///
+    /// It is independent of later model mutation and omits transient composition
+    /// plus undo/redo history. Copying text may allocate/throw.
     [[nodiscard]] Snapshot snapshot() const { return Snapshot{text_, cursor_, anchor_}; }
 
 private:

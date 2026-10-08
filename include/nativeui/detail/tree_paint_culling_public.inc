@@ -1,6 +1,9 @@
-    // Keep the existing full retained traversal as the reference path and add
-    // one root-logical selective traversal entry point for renderer-owned damage
-    // reconstruction. This method never consumes Tree dirty state.
+    /// Paint retained content intersecting one root-logical repaint rectangle.
+    ///
+    /// `painter` and `platform` are borrowed for this synchronous renderer
+    /// operation. Traversal may prepare layout/structure and invoke application
+    /// paint callbacks. It never consumes/clears Tree dirty regions, so it is not
+    /// an acknowledgement that pending damage was presented.
     void paint_region(Painter& painter,
                       PlatformServices& platform,
                       Rect repaint_region) {

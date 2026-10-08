@@ -2,6 +2,11 @@
 
 NativeUI builds standalone applications and native views embedded by an external host or plug-in adapter. It provides declarative composition, layout, input and focus routing, generic state, widgets, text editing, and headless rendering. Pugl handles native windows and events; Skia handles drawing.
 
+## Documentation
+
+- [NativeUI 1.0 API and integration guide](docs/v1-documentation-index.md) — public ownership, layout, input, state, rendering, platform integration and validation.
+- [Component catalog and implementation status](docs/widgets.md) — distinguish shipped widget APIs from planned extensions on individual component pages.
+
 ## Architecture
 
 - **Pugl**: native windowing, parent/child embedding, input, clipboard and event pump.
