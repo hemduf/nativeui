@@ -10,10 +10,14 @@
 
 namespace ui {
 
+/// Scroll axis policy: Horizontal, Vertical or Both in logical UI units.
 enum class ScrollAxis { Horizontal, Vertical, Both };
 
 namespace detail { class RetainedScrollComponent; class ScrollMetricsAccess; }
 
+/// Application-owned scroll offset and viewport/content metrics controller.
+/// Retained views borrow this controller with weak lifetime tokens; its
+/// mutations/observers are UI-thread operations, not audio-thread transport.
 class ScrollState {
     struct Listener {
         std::size_t id{};
@@ -46,6 +50,7 @@ class ScrollState {
     };
 
 public:
+/// Weak liveness token for borrowers; does not extend owner lifetime.
     class LifetimeToken {
     public:
         LifetimeToken() = default;
@@ -59,6 +64,8 @@ public:
         std::weak_ptr<Control> control_;
     };
 
+/// Move-only RAII subscription for synchronous offset notifications.
+/// Reset/destruction disconnects without extending the controller lifetime.
     class Subscription {
     public:
         Subscription() = default;
@@ -69,6 +76,7 @@ public:
         Subscription& operator=(Subscription&& other) noexcept;
         ~Subscription();
 
+/// Unregister this observer idempotently.
         void reset() noexcept;
 
         [[nodiscard]] bool active() const noexcept;
@@ -78,6 +86,7 @@ public:
         std::size_t id_{};
     };
 
+/// Construct an offset controller for the permitted axes without a native view.
     explicit ScrollState(ScrollAxis axis = ScrollAxis::Vertical);
 
     ScrollState(const ScrollState&) = delete;
@@ -86,16 +95,27 @@ public:
     ~ScrollState();
 
     [[nodiscard]] ScrollAxis axis() const noexcept;
+/// Return the current committed logical offset.
     [[nodiscard]] Point offset() const noexcept;
+/// Return the last retained viewport Size in logical pixels.
     [[nodiscard]] Size viewport_size() const noexcept;
+/// Return the last retained scrollable content Size.
     [[nodiscard]] Size content_size() const noexcept;
+/// Return the clamped maximum offset for the current metrics.
     [[nodiscard]] Point max_offset() const noexcept;
+/// Make a weak per-controller liveness check for retained borrowers.
     [[nodiscard]] LifetimeToken lifetime_token() const noexcept;
 
+/// Normalize disallowed axes, repair invalid coordinates and clamp to metrics.
+/// Commit before synchronously notifying observers. Exceptions propagate;
+/// unstarted callbacks and recursive writes are not replayed implicitly.
     void set_offset(Point value);
 
+/// Adjust the current offset by a logical delta with the same normalization.
+/// Synchronous observers may run before this method returns.
     void scroll_by(Point delta);
 
+/// Register an offset observer; retain the returned Subscription.
     Subscription observe(std::function<void(Point)> callback);
 
 private:
@@ -117,6 +137,7 @@ private:
     std::shared_ptr<Control> control_;
 };
 
+/// Retained scroll viewport borrowing an external ScrollState with lifetime checks.
 class ScrollComponent final : public Component {
 public:
     explicit ScrollComponent(ScrollState& state);
@@ -196,14 +217,18 @@ private:
 
 } // namespace detail
 
+/// Declarative scroll content wrapper without wheel/scrollbar handling.
+/// Its retained child Spec is owned, while ScrollState remains application-owned.
 class Scroll {
 public:
     template <class Child>
+/// Borrow a lifetime token and convert the child into an owned Spec.
     Scroll(ScrollState& state, Child&& child)
         : state_(&state), axis_(state.axis()), lifetime_(state.lifetime_token()) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+/// Consume the recipe without transferring ownership of ScrollState.
     Spec spec() &&;
 
 private:

@@ -8,12 +8,19 @@
 
 namespace ui {
 
+/// Track sizing mode: fixed logical extent, content-dependent auto size or
+/// dimensionless flexible share of available space.
 enum class TrackType { Fixed, Auto, Flex };
 
+/// Value describing one grid row/column sizing policy.
+/// Invalid or negative requested extents/weights are normalized by factories.
 class Track {
 public:
+/// Use a fixed extent in logical UI units.
     [[nodiscard]] static Track fixed(float extent) noexcept;
+/// Size from the track's measured children.
     [[nodiscard]] static Track auto_size() noexcept;
+/// Assign a dimensionless share of remaining space.
     [[nodiscard]] static Track flex(float weight = 1.0f) noexcept;
     [[nodiscard]] TrackType type() const noexcept;
     [[nodiscard]] float value() const noexcept;
@@ -25,6 +32,7 @@ private:
     float value_{};
 };
 
+/// Owned row and column sizing vectors for a retained Grid.
 struct GridTracks {
     std::vector<Track> columns;
     std::vector<Track> rows;
@@ -39,6 +47,7 @@ struct GridCell {
     std::size_t column_span{1};
 };
 
+/// Retained grid measurement and placement using explicit or automatic cells.
 class GridComponent final : public Component {
 public:
     GridComponent(GridTracks tracks, float column_gap, float row_gap);
@@ -66,23 +75,33 @@ private:
     float row_gap_{};
 };
 
+/// Detached grid builder; owns Track vectors and child recipes.
+/// Constructor children receive automatic row-major positions; cell()
+/// appends an explicitly positioned child.
 class Grid {
 public:
     template <class... Children>
+/// Take ownership of track definitions and convert all children to Specs.
     Grid(GridTracks tracks, Children&&... children) : tracks_(std::move(tracks)) {
         (children_.push_back(make_spec(std::forward<Children>(children))), ...);
         cells_.resize(children_.size());
     }
 
     template <class Child>
+/// Append a child with explicit zero-based GridCell position and spans.
+/// Invalid placements are handled by retained grid layout validation.
     Grid&& cell(GridCell cell, Child&& child) && {
         append_cell(cell, make_spec(std::forward<Child>(child)));
         return std::move(*this);
     }
 
+/// Set both horizontal and vertical gap in logical pixels.
     Grid&& gap(float value) &&;
+/// Set horizontal gap independently.
     Grid&& column_gap(float value) &&;
+/// Set vertical gap independently.
     Grid&& row_gap(float value) &&;
+/// Consume tracks, cells and child Specs into retained layout.
     Spec spec() &&;
 
 private:

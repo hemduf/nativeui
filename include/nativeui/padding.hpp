@@ -7,6 +7,9 @@
 
 namespace ui {
 
+/// Uniform logical inset layout around one retained child.
+/// Parent measurement includes the inset; child placement receives the
+/// remaining content bounds.
 class PaddingComponent final : public Component {
 public:
     explicit PaddingComponent(float padding);
@@ -32,13 +35,16 @@ private:
     float padding_{};
 };
 
+/// Detached one-child padding builder, in logical UI units.
 class Padding {
 public:
     template <class Child>
+/// Own the child Spec and uniform padding value; no retained node mounts yet.
     Padding(float padding, Child&& child) : padding_(padding) {
         children_.push_back(make_spec(std::forward<Child>(child)));
     }
 
+/// Consume the child and padding value into retained layout.
     Spec spec() &&;
 
 private:

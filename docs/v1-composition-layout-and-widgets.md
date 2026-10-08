@@ -221,7 +221,7 @@ The stable container families include rows/columns, alignment, flex sizing, grid
 
 ### Public layout value, builder and scroll contracts
 
-The primary declarations behind `layout.hpp` are header-only and remain public even when their definitions live in `include/nativeui/detail/*.inc`.
+[`layout.hpp`](../include/nativeui/layout.hpp) aggregates the public builders in [`row.hpp`](../include/nativeui/row.hpp), [`column.hpp`](../include/nativeui/column.hpp), [`grid.hpp`](../include/nativeui/grid.hpp), [`scroll.hpp`](../include/nativeui/scroll.hpp), [`scroll_view.hpp`](../include/nativeui/scroll_view.hpp), [`clip.hpp`](../include/nativeui/clip.hpp), [`flex.hpp`](../include/nativeui/flex.hpp), [`spacer.hpp`](../include/nativeui/spacer.hpp), [`stack.hpp`](../include/nativeui/stack.hpp) and [`padding.hpp`](../include/nativeui/padding.hpp). Public builder templates live in these canonical headers, and non-template methods are compiled into the NativeUI library. Do not consume private `nativeui/detail/*.inc` implementation fragments.
 
 | API family | Contract |
 | --- | --- |
