@@ -9,7 +9,7 @@ struct TreeTestAccess {
     return tree.root_->component->semantics().text_value.value_or(std::string{});
   }
   static bool numeric_invalid(Tree &tree) {
-    return tree.root_->component->semantics().description.has_value();
+    return !tree.root_->component->semantics().description.empty();
   }
   static std::pair<Rect, Rect> input_and_stepper(Tree &tree) {
     return {tree.root_->children[0]->bounds,
