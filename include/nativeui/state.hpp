@@ -226,6 +226,8 @@ public:
         control_->invalidate_owner();
     }
 
+    // Borrowed reference: a successful commit may replace its backing storage
+    // for a fallible T. Use snapshot() when the value must outlive a write.
     [[nodiscard]] const T& get() const noexcept { return control_->committed_value(); }
 
     // A committed change advances this counter before observers run. Reading

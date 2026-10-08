@@ -243,7 +243,10 @@ struct NumberState : std::enable_shared_from_this<NumberState> {
       return;
     if (same_double(value, expected)) {
       // An edge step still normalizes an invalid draft, without a value write.
-      (void)set_draft(std::move(text));
+      if (set_draft(std::move(text))) {
+        accepted_number = value;
+        presentation_validity(false);
+      }
       return;
     }
     auto copy = source;

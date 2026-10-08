@@ -8,6 +8,9 @@ struct TreeTestAccess {
   static std::string numeric_draft(Tree &tree) {
     return tree.root_->component->semantics().text_value.value_or(std::string{});
   }
+  static bool numeric_invalid(Tree &tree) {
+    return tree.root_->component->semantics().description.has_value();
+  }
   static std::pair<Rect, Rect> input_and_stepper(Tree &tree) {
     return {tree.root_->children[0]->bounds,
             tree.root_->children[1]->bounds};
@@ -269,8 +272,33 @@ void throwing_invalidation_does_not_publish_speculative_step() {
   tree.deactivate_focus(platform);
 }
 
+void edge_step_normalizes_invalid_draft_without_changing_source() {
+  ui::State<double> value{100.0};
+  ui::Tree tree{ui::compile(ui::make_spec(
+      ui::NumberInput{"Quantity", value}.range(0, 100).step(1).precision(0)))};
+  test::MockPlatform platform;
+  tree.mount();
+  tree.layout({450, 82});
+  tree.activate_focus(platform);
+
+  ui::InputEvent select_all;
+  select_all.type = ui::InputType::Command;
+  select_all.command = ui::Command::SelectAll;
+  (void)tree.dispatch(select_all, platform);
+  (void)tree.dispatch(test::text("invalid"), platform);
+  NUI_CHECK(ui::TreeTestAccess::numeric_invalid(tree));
+  NUI_CHECK(value.get() == 100.0);
+
+  (void)tree.dispatch(test::key(ui::Key::Up), platform);
+  NUI_CHECK(value.get() == 100.0);
+  NUI_CHECK(ui::TreeTestAccess::numeric_draft(tree) == "100");
+  NUI_CHECK(!ui::TreeTestAccess::numeric_invalid(tree));
+  tree.deactivate_focus(platform);
+}
+
 void suite() {
   throwing_invalidation_does_not_publish_speculative_step();
+  edge_step_normalizes_invalid_draft_without_changing_source();
   stepper_aligns_with_the_numeric_field();
   stepper_follows_focused_field_geometry();
   stepper_pointer_controls_publish_the_shared_value();
