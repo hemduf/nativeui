@@ -1,4 +1,5 @@
 #include <nativeui/nativeui.hpp>
+#include "detail/native_view_fault_probe.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -18,6 +19,16 @@ int fail(std::string_view stage, std::string_view message) {
 bool same_size(ui::Size a, ui::Size b, float epsilon = 0.0001f) {
     return std::fabs(a.w - b.w) <= epsilon && std::fabs(a.h - b.h) <= epsilon;
 }
+
+
+class ConstructionFaultPlatform final : public ui::PlatformServices {
+public:
+    void set_text_input(bool, ui::Rect, float) override {}
+    void set_clipboard_text(std::string_view) override {}
+    void request_clipboard_text() override {}
+    bool accept_drop(std::string_view, ui::Rect) override { return false; }
+    void reject_drop(ui::Rect) override {}
+};
 
 } // namespace
 
@@ -46,6 +57,28 @@ int main() {
                            .size = {420.0f, 280.0f},
                            .resizable = true}};
         if (!parent.native_handle()) return fail(stage, "parent native handle is zero");
+
+        stage = "event-handler-registration-rollback";
+        ConstructionFaultPlatform fault_platform;
+        ui::UI fault_ui{ui::Spacer{20.0f}};
+        for (int attempt = 0; attempt != 3; ++attempt) {
+            const auto outcome = ui::detail::exercise_native_view_construction_fault(
+                fault_ui, fault_platform, parent.native_handle(), {100.0f, 80.0f},
+                ui::detail::NativeViewConstructionFaultStage::EventCallbackRegistrationFailure);
+            if (!outcome.injected_failure || outcome.unexpected_failure ||
+                outcome.unexpected_success || outcome.world_acquired != 1 ||
+                outcome.world_released != 1 || outcome.view_acquired != 1 ||
+                outcome.view_released != 1 || outcome.realize_succeeded != 0 ||
+                outcome.ime_acquired != 0 || outcome.invalidation_attached != 0) {
+                return fail(stage, "native registration fault left owned resources behind");
+            }
+        }
+        // A failed sibling construction must not invalidate the existing
+        // parent window or prevent the next normal native view construction.
+        if (!parent.valid() || !parent.native_handle()) {
+            return fail(stage, "independent parent was damaged by failed registration");
+        }
+
 
         ui::State<bool> child_enabled{false};
         ui::UI child_ui{

@@ -103,8 +103,15 @@ public:
         puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
         set_view_handle(view_, this, services_);
-        if (const auto status = set_view_event_func(view_, &ViewCore::event_thunk)) {
-            throw_pugl(status, "puglSetEventFunc failed");
+        // This seam simulates a failed native registration without changing
+        // process-global Pugl state or installing a dangling callback.
+        const bool reject_event_callback = fault_result &&
+            fault_stage == NativeViewConstructionFaultStage::EventCallbackRegistrationFailure;
+        const auto event_status = reject_event_callback
+            ? PUGL_FAILURE : set_view_event_func(view_, &ViewCore::event_thunk);
+        if (event_status != PUGL_SUCCESS) {
+            if (reject_event_callback) throw NativeViewConstructionFault{};
+            throw_pugl(event_status, "puglSetEventFunc failed");
         }
         puglRegisterDropType(view_, "text/plain");
         puglRegisterDropType(view_, "text/uri-list");

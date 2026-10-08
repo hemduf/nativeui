@@ -685,6 +685,7 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_sanitizers(nativeui_t096_scene_gpu_tests)
 
     add_executable(nativeui_smoke_embedded ${PROJECT_SOURCE_DIR}/tests/smoke_embedded.cpp)
+    target_include_directories(nativeui_smoke_embedded PRIVATE ${PROJECT_SOURCE_DIR}/src)
     _nativeui_attach_consumer_platform(
       TARGET nativeui_smoke_embedded
       CONSUMER_ID org.nativeui.test.smoke-embedded

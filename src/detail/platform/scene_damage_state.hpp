@@ -77,6 +77,7 @@ public:
     }
 
     [[nodiscard]] bool covers(Rect inner) const noexcept {
+        if (!valid_) return false;
         const Rect outer = rect_;
         const double outer_right = static_cast<double>(outer.x) + outer.w;
         const double outer_bottom = static_cast<double>(outer.y) + outer.h;

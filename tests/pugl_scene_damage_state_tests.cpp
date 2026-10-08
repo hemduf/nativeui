@@ -30,6 +30,8 @@ void invalid_damage_and_recovery() {
                               std::numeric_limits<float>::infinity(), 1.0f}));
     damage.clear();
     NUI_CHECK(!damage.valid());
+    NUI_CHECK(!damage.covers({}));
+    NUI_CHECK(!damage.covers({0.0f, 0.0f, 1.0f, 1.0f}));
     NUI_CHECK(damage.retain({3.0f, 4.0f, 5.0f, 6.0f}));
     NUI_CHECK(damage.covers({3.0f, 4.0f, 5.0f, 6.0f}));
 }
