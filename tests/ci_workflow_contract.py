@@ -97,6 +97,24 @@ def verify() -> None:
         "CI must qualify changes to shared workflow and cache configuration",
     )
     require("python3 tests/ci_workflow_contract.py" in ci, "Contract job is missing")
+    require(
+        "name: Linux Draft core smoke" in ci
+        and "if: github.event_name == 'pull_request' && github.event.pull_request.draft" in ci,
+        "Core quick feedback must run only for Draft PRs",
+    )
+    require(
+        "Total Tests: 5" in ci and "build-draft" in ci,
+        "Draft smoke must verify its selected test inventory",
+    )
+    for target in (
+        "nativeui_dispatcher_tests",
+        "nativeui_state_tests",
+        "nativeui_focus_tests",
+        "nativeui_widget_layout_extraction_tests",
+        "nativeui_window_control_state_tests",
+    ):
+        require(target in ci, f"Draft feedback is missing required {target}")
+
 
     scalar = read_workflow("scalar-source-validation.yml")
     trigger_block = scalar.split("\npermissions:", 1)[0]
