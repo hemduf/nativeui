@@ -52,4 +52,4 @@ jobs:
       - name: Build
         run: cmake --build build-smoke
       - name: Test unit suite
-        run: ctest --test-dir build-smoke --output-on-failure -L '^unit$'
+        run: ctest --test-dir build-smoke --parallel 2 --output-on-failure -L '^unit$'

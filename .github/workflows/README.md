@@ -18,4 +18,12 @@
 - The sccache action reports compilation/cache statistics as a post-run step. Compare both run wall time and cache hit rate over a cold/warm pair before making speedup claims.
 - Existing PRs benefit on their next qualification against the updated `main` after this change merges; already-running workflows cannot change retroactively.
 
+## Bounded CTest parallelism and timing reports
+
+- Canonical cross-platform CTest uses two execution slots. GPU/native-window cases reserve both slots through `PROCESSORS 2`, and additionally share `RESOURCE_LOCK native_display` for protection if the parallelism limit changes later.
+- Existing `RUN_SERIAL TRUE` protections for the Skia ICU runtime contract and macOS embedded keyboard fixtures remain intact. Sanitizer tests remain serial to avoid memory contention.
+- `tests/ctest_parallel_contract.cmake` inspects generated CTest JSON metadata after the native build, verifying every expected GPU/window test has the resource lock and processor reservation, and that required serial tests remain serial.
+- CTest writes short-lived JUnit XML artifacts on all native platforms and under sanitizers. The XML lets future CI comparisons identify per-test duration changes instead of claiming speculative improvements.
+- Main-branch compiler caches can be restored by PR builds on the same repository; the existing nightly cross-platform `ci.yml` schedule already refreshes those caches once the caching change reaches `main`. Observe the first build on a different PR as well as warmed reruns.
+
 Register tests and their labels in CMake. Workflows select test groups through CTest without naming individual tests.
