@@ -6,6 +6,7 @@ Current examples:
 
 | Ticket | Target | Demonstrates |
 |---|---|---|
+| #472 | `nativeui_example_cached_layer` | explicit subtree raster reuse, semantic State dependencies, cold/warm repaint and public headless validation |
 | T007 | `nativeui_example_t007_constraints` | min/preferred/max layout constraints |
 | T008 | `nativeui_example_t008_alignment` | Row cross-axis alignment and distribution |
 | T009 | `nativeui_example_t009_flex` | grow/shrink allocation |

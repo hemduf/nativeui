@@ -12,6 +12,7 @@ inline std::unique_ptr<Node> compile_node_with_policy(
     node->id = next_id++;
     node->parent = parent;
     node->retained_key = std::move(spec.retained_key);
+    node->cached_layer = std::move(spec.cached_layer);
     node->component = spec.factory();
     if (!node->component) throw std::invalid_argument("Component factory returned null");
     bind_compiled_ancestry(parent, *node->component);

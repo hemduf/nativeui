@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nativeui/component_base.hpp>
+#include <nativeui/detail/cached_layer_source.hpp>
 #include <nativeui/detail/dynamic_source.hpp>
 #include <nativeui/detail/focus_group.hpp>
 #include <nativeui/detail/interaction_observer.hpp>
@@ -35,6 +36,7 @@ inline std::unique_ptr<Node> compile_node(Spec spec, NodeId& next_id, Node* pare
 struct DynamicReconcileFaultAccess;
 struct DynamicFaultAccess;
 struct RasterCacheAccess;
+struct CachedLayerTestAccess;
 } // namespace detail
 
 class Dialog;
@@ -56,6 +58,7 @@ private:
     friend struct detail::DynamicFaultAccess;
     friend struct detail::DynamicReconcileFaultAccess;
     friend struct detail::RasterCacheAccess;
+    friend struct detail::CachedLayerTestAccess;
 #include <nativeui/detail/tree_theme_private.inc>
 #include <nativeui/detail/tree_overlay.inc>
 #include <nativeui/detail/tree_transient.inc>

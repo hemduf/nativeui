@@ -1,5 +1,7 @@
 #include <nativeui/headless.hpp>
 
+#include "detail/raster_cache_renderer.hpp"
+
 #include "include/core/SkCanvas.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
@@ -47,16 +49,28 @@ public:
     }
 
     void resize(Size logical_size, float scale_factor) {
+        if (rendering_) {
+            throw std::logic_error("HeadlessRenderer cannot resize during rendering");
+        }
         validate_size(logical_size, scale_factor);
         logical_size_ = logical_size;
         scale_factor_ = scale_factor;
         pixel_width_ = std::max(1, static_cast<int>(std::lround(logical_size.w * scale_factor)));
         pixel_height_ = std::max(1, static_cast<int>(std::lround(logical_size.h * scale_factor)));
+        resources_.clear();
         surface_.reset();
         pixels_.clear();
     }
 
     bool render(UI& ui) {
+        if (rendering_) {
+            throw std::logic_error("HeadlessRenderer cannot render recursively");
+        }
+        rendering_ = true;
+        struct RenderScope final {
+            bool& rendering;
+            ~RenderScope() noexcept { rendering = false; }
+        } render_scope{rendering_};
         if (!surface_) {
             const auto info = SkImageInfo::Make(
                 pixel_width_, pixel_height_, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
@@ -75,10 +89,19 @@ public:
         // Match the GPU/window renderer's framebuffer semantics. Frame clearing
         // is a renderer concern; Tree::paint() remains fully consumer/component-owned.
         canvas->clear(SK_ColorBLACK);
-        canvas->save();
-        canvas->scale(scale_factor_, scale_factor_);
-        ui.paint(*canvas, services_);
-        canvas->restore();
+        resources_.begin_frame();
+        struct FrameScope final {
+            detail::RenderResourceMaterializationContext& resources;
+            ~FrameScope() noexcept { resources.end_frame(); }
+        } frame_scope{resources_};
+        const detail::PainterPrivateHooks hooks{
+            .state = this,
+            .paint_raster_cache_boundary = &paint_cached_layer};
+        {
+            const SkAutoCanvasRestore restore{canvas, true};
+            canvas->scale(scale_factor_, scale_factor_);
+            ui.paint_with_resources(*canvas, services_, &hooks);
+        }
 
         SkPixmap pixmap;
         if (!surface_->peekPixels(&pixmap) || !pixmap.addr()) return false;
@@ -93,6 +116,25 @@ public:
                         packed_row_bytes);
         }
         return true;
+    }
+
+    static bool paint_cached_layer(
+        void* state,
+        const detail::RasterCachePaintRequest& request,
+        SkCanvas& destination,
+        void* callback_state,
+        detail::RasterCachePaintCallback paint_callback,
+        detail::RasterCacheValidateCallback validate_callback,
+        detail::RasterCacheCommitCallback commit_callback) {
+        auto& renderer = *static_cast<Impl*>(state);
+        const detail::RasterCacheBackend backend{
+            .device_scale = renderer.scale_factor_,
+            .create_surface = [](void*, const SkImageInfo& info) {
+                return SkSurfaces::Raster(info);
+            }};
+        return detail::paint_raster_cache_boundary(
+            renderer.resources_, backend, request, destination, callback_state,
+            paint_callback, validate_callback, commit_callback);
     }
 
     [[nodiscard]] Rgba8 pixel(int x, int y) const {
@@ -114,8 +156,10 @@ public:
     int pixel_width_{};
     int pixel_height_{};
     sk_sp<SkSurface> surface_;
+    detail::RenderResourceMaterializationContext resources_;
     HeadlessPlatformServices services_;
     std::vector<std::uint8_t> pixels_;
+    bool rendering_{};
 };
 
 HeadlessRenderer::HeadlessRenderer(Size logical_size, float scale_factor)

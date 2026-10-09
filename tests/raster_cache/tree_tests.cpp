@@ -15,7 +15,7 @@ struct TreeTestAccess {
         return tree.raster_cache_epochs_.size();
     }
     static detail::RasterCacheEpoch::Token lifetime(Tree& tree, NodeId id) {
-        return tree.raster_cache_epochs_.at(id).lifetime_token();
+        return tree.raster_cache_epochs_.at(id)->epoch.lifetime_token();
     }
     static Rect bounds(Tree& tree, NodeId id) {
         return tree.retained_invalidation_node(id)->bounds;
