@@ -15,10 +15,12 @@ set(_root "${CMAKE_CURRENT_BINARY_DIR}/t056-binary-data-contract")
 file(REMOVE_RECURSE "${_root}")
 file(MAKE_DIRECTORY "${_root}")
 
-set(_t056_generator_args)
-find_program(_t056_ninja NAMES ninja ninja-build)
-if(_t056_ninja)
-  list(APPEND _t056_generator_args -G Ninja)
+# Single-configuration generators choose the build type during configuration;
+# --config Release below only selects it for multi-configuration generators.
+set(_configure_args -DCMAKE_BUILD_TYPE=Release)
+find_program(_ninja NAMES ninja ninja-build)
+if(_ninja)
+  list(APPEND _configure_args -G Ninja)
 endif()
 
 function(_t056_write_fixture case body)
@@ -47,7 +49,7 @@ function(_t056_configure_case case expect_success body)
   set(_src "${_root}/${case}-src")
   set(_build "${_root}/${case}-build")
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" -S "${_src}" -B "${_build}" ${_t056_generator_args}
+    COMMAND "${CMAKE_COMMAND}" -S "${_src}" -B "${_build}" ${_configure_args}
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _stdout
     ERROR_VARIABLE _stderr
@@ -111,7 +113,7 @@ _t056_write_fixture(symlink_escape
 file(CREATE_LINK "${_root}/outside.bin" "${_root}/symlink_escape-src/link.bin" SYMBOLIC RESULT _link_result)
 if(_link_result STREQUAL "0")
   execute_process(
-    COMMAND "${CMAKE_COMMAND}" -S "${_root}/symlink_escape-src" -B "${_root}/symlink_escape-build" ${_t056_generator_args}
+    COMMAND "${CMAKE_COMMAND}" -S "${_root}/symlink_escape-src" -B "${_root}/symlink_escape-build" ${_configure_args}
     RESULT_VARIABLE _link_configure_result OUTPUT_VARIABLE _link_out ERROR_VARIABLE _link_err)
   if(_link_configure_result EQUAL 0)
     message(FATAL_ERROR "T056 symlink escape unexpectedly configured successfully")
@@ -153,6 +155,9 @@ _t056_configure_case(duplicate_final_id FALSE
 # A full build proves exact bytes (including NUL/high-bit/empty), deterministic
 # ordering, aliasing, Unicode IDs and target coexistence.
 set(_integration_body [=[
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(FATAL_ERROR "Binary-data integration must be configured as Release")
+endif()
 nativeui_add_binary_data(MyResources
   NAMESPACE myapp::resources
   SOURCES unicode.txt empty.bin t056_binary.bin alpha.txt
@@ -206,7 +211,7 @@ int main() {
 }
 ]=])
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -S "${_integration_src}" -B "${_integration_build}" ${_t056_generator_args}
+  COMMAND "${CMAKE_COMMAND}" -S "${_integration_src}" -B "${_integration_build}" ${_configure_args}
   RESULT_VARIABLE _configure_result OUTPUT_VARIABLE _configure_out ERROR_VARIABLE _configure_err)
 if(NOT _configure_result EQUAL 0)
   message(FATAL_ERROR "T056 integration configure failed\n${_configure_out}\n${_configure_err}")
@@ -250,7 +255,7 @@ endforeach()
 # Generated text is path/timestamp independent and byte-identical across clean builds.
 set(_second_build "${_root}/integration-build-2")
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -S "${_integration_src}" -B "${_second_build}" ${_t056_generator_args}
+  COMMAND "${CMAKE_COMMAND}" -S "${_integration_src}" -B "${_second_build}" ${_configure_args}
   RESULT_VARIABLE _second_configure OUTPUT_QUIET ERROR_VARIABLE _second_error)
 if(NOT _second_configure EQUAL 0)
   message(FATAL_ERROR "T056 reproducibility configure failed\n${_second_error}")
