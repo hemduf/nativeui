@@ -103,8 +103,8 @@ int self_test() {
 
     auto static_paints = std::make_shared<example::BoxObservation>();
     ui::UI static_scene{ui::CachedLayer{example::Box{
-        "Zero dependencies", {120.0f, 40.0f}, {240.0f, 80.0f},
-        {0.10f, 0.20f, 0.30f, 1.0f}, static_paints}}};
+        "Zero dependencies", {240.0f, 80.0f},
+        {0.10f, 0.20f, 0.30f, 1.0f}, {120.0f, 40.0f}, static_paints}}};
     if (!renderer.render(static_scene)) return example::fail("Static CachedLayer render failed");
     static_scene.invalidate();
     if (!renderer.render(static_scene) || static_paints->paints != 1) {

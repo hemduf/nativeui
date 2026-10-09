@@ -327,7 +327,9 @@ public:
   }
   std::optional<detail::OverlayComponentCommand>
   take_overlay_command() override {
-    return std::exchange(state_->pending, {});
+    auto command = std::move(state_->pending);
+    state_->pending.reset();
+    return command;
   }
   SemanticInfo semantics() const override {
     SemanticInfo info;
