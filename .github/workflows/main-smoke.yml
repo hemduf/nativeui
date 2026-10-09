@@ -19,7 +19,7 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
-  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+  CMAKE_BUILD_PARALLEL_LEVEL: '3'
 
 jobs:
   core-smoke:
@@ -28,6 +28,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
+
       - name: Restore dependency cache
         uses: actions/cache@v4
         with:
@@ -49,4 +52,4 @@ jobs:
       - name: Build
         run: cmake --build build-smoke
       - name: Test unit suite
-        run: ctest --test-dir build-smoke --output-on-failure -L '^unit$'
+        run: ctest --test-dir build-smoke --parallel 2 --output-on-failure -L '^unit$'

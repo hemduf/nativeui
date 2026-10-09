@@ -10,7 +10,8 @@ on:
       - 'src/**'
       - 'tests/**'
       - 'examples/**'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/**'
+      - '.github/actions/setup-cpp-cache/**'
   schedule:
     - cron: '17 2 * * *'
   workflow_dispatch:
@@ -24,9 +25,18 @@ concurrency:
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
-  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+  CMAKE_BUILD_PARALLEL_LEVEL: '3'
 
 jobs:
+  workflow-policy:
+    name: Shared CI workflow policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shared workflow contract
+        run: python3 tests/ci_workflow_contract.py
+
   build:
     name: ${{ matrix.name }}
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
@@ -34,9 +44,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS Intel
-            os: macos-15-intel
-            timeout: 180
           - name: macOS ARM64
             os: macos-15
           - name: Windows x64
@@ -50,6 +57,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
 
       - name: Restore dependency cache
         uses: actions/cache@v4
@@ -98,6 +108,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Validate CTest scheduling
+        run: cmake -DBUILD_DIR=build -P tests/ctest_parallel_contract.cmake
+
       - name: Install Windows software OpenGL
         if: runner.os == 'Windows'
         shell: pwsh
@@ -131,19 +144,38 @@ jobs:
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ctest --test-dir build --output-on-failure -C Release -LE '^package$'
+          ctest --test-dir build --parallel 2 --output-on-failure -C Release
+          -LE '^package$'
+          --output-junit "${{ github.workspace }}/build/ctest-results.xml"
 
       - name: Test macOS and Windows
         if: runner.os != 'Linux'
-        run: ctest --test-dir build --output-on-failure -C Release -LE '^package$'
+        run: >-
+          ctest --test-dir build --parallel 2 --output-on-failure -C Release
+          -LE '^package$'
+          --output-junit "${{ github.workspace }}/build/ctest-results.xml"
+
+      - name: Upload CTest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-${{ matrix.os }}-${{ github.run_attempt }}
+          path: build/ctest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   sanitizers:
     name: Linux ASan + UBSan
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
 
       - name: Restore dependency cache
         uses: actions/cache@v4
@@ -175,7 +207,18 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
+        run: >-
+          ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
+          --output-junit "${{ github.workspace }}/build-sanitize/ctest-results.xml"
+
+      - name: Upload sanitizer CTest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-sanitizers-${{ github.run_attempt }}
+          path: build-sanitize/ctest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   # T072 is Linux-only infrastructure and its contract suite lives in the
   # standalone tests/t072 project; this job is the only place where the real

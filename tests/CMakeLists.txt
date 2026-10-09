@@ -731,7 +731,8 @@ if(NATIVEUI_BUILD_TESTS)
       if(NATIVEUI_ENABLE_PLATFORM_SMOKE_TESTS)
         add_test(NAME nativeui_embedded_visibility_tests COMMAND nativeui_embedded_visibility_tests)
         set_tests_properties(nativeui_embedded_visibility_tests PROPERTIES
-          LABELS "integration;platform;macos;visibility" TIMEOUT 60)
+          LABELS "integration;platform;macos;visibility"
+          RESOURCE_LOCK native_display PROCESSORS 2 TIMEOUT 60)
       endif()
 
       add_executable(nativeui_smoke_macos_drop ${PROJECT_SOURCE_DIR}/tests/smoke_macos_drop.mm)
@@ -749,7 +750,7 @@ if(NATIVEUI_BUILD_TESTS)
       add_test(NAME nativeui_smoke_macos_drop COMMAND nativeui_smoke_macos_drop)
       set_tests_properties(nativeui_smoke_macos_drop PROPERTIES
         LABELS "integration;platform;macos;drop"
-        TIMEOUT 60
+        RESOURCE_LOCK native_display PROCESSORS 2 TIMEOUT 60
       )
 
       nativeui_compute_objc_runtime_prefix(
@@ -793,7 +794,7 @@ if(NATIVEUI_BUILD_TESTS)
         COMMAND nativeui_render_resource_gpu_tests)
       set_tests_properties(nativeui_smoke_standalone nativeui_smoke_embedded PROPERTIES
         LABELS "integration;platform;smoke"
-        TIMEOUT 60
+        RESOURCE_LOCK native_display PROCESSORS 2 TIMEOUT 60
       )
       set_tests_properties(nativeui_image_texture_gpu_reference_tests
         nativeui_t088_noise_gpu_reference_tests
@@ -805,7 +806,7 @@ if(NATIVEUI_BUILD_TESTS)
         nativeui_t095_scene_gpu_tests nativeui_t096_scene_gpu_tests
         nativeui_render_resource_gpu_tests PROPERTIES
         LABELS "integration;platform;gpu"
-        TIMEOUT 60
+        RESOURCE_LOCK native_display PROCESSORS 2 TIMEOUT 60
       )
     endif()
   endif()
