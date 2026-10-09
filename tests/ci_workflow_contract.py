@@ -98,6 +98,28 @@ def verify() -> None:
     )
     require("python3 tests/ci_workflow_contract.py" in ci, "Contract job is missing")
     require(
+        "ctest_parallel_contract.cmake" in ci,
+        "Configured CTest scheduling contract must run in full CI",
+    )
+    require(
+        ci.count("--parallel 2") == 2,
+        "Canonical Linux/macOS/Windows CTest must use two slots",
+    )
+    require(
+        "ctest --test-dir build-sanitize --output-on-failure" in ci,
+        "Memory-sensitive sanitizer suite must stay serial",
+    )
+    require(
+        "--output-junit" in ci and "Upload CTest report" in ci,
+        "CTest result artifacts must remain available for comparisons",
+    )
+    source = (ROOT / "tests" / "CMakeLists.txt").read_text(encoding="utf-8")
+    require(
+        source.count("RESOURCE_LOCK native_display PROCESSORS 2") >= 4,
+        "Native window and GPU tests must reserve both slots under one lock",
+    )
+
+    require(
         "name: Linux Draft core smoke" in ci
         and "if: github.event_name == 'pull_request' && github.event.pull_request.draft" in ci,
         "Core quick feedback must run only for Draft PRs",

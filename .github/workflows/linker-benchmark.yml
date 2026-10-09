@@ -1,0 +1,72 @@
+name: Linux Linker Benchmark
+
+# This benchmark is intentionally not part of the mandatory PR CI matrix.
+# Run it when the benchmark changes, or dispatch it manually after merging.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/linker-benchmark.yml'
+      - 'tests/linker_benchmark.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-source-cache
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
+jobs:
+  compare-linkers:
+    name: Linux x64 default linker vs mold
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify benchmark parser
+        run: python3 tests/linker_benchmark.py --self-test
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install Linux benchmark tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev mold
+          mold --version
+
+      - name: Configure ordinary headless test build
+        run: >-
+          cmake -S . -B build-linkers -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_FEATURE_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+
+      - name: Benchmark default linker and mold; test experimental binaries
+        run: python3 tests/linker_benchmark.py build-linkers linker-benchmark.json
+
+      - name: Upload reproducible relink timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-linker-benchmark-${{ github.run_attempt }}
+          path: linker-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 7

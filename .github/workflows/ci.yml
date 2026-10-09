@@ -161,6 +161,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Validate CTest scheduling
+        run: cmake -DBUILD_DIR=build -P tests/ctest_parallel_contract.cmake
+
       - name: Install Windows software OpenGL
         if: runner.os == 'Windows'
         shell: pwsh
@@ -194,11 +197,25 @@ jobs:
         run: >-
           xvfb-run -a
           -s "-screen 0 1280x1024x24 +extension GLX +render -noreset"
-          ctest --test-dir build --output-on-failure -C Release -LE '^package$'
+          ctest --test-dir build --parallel 2 --output-on-failure -C Release
+          -LE '^package$'
+          --output-junit "${{ github.workspace }}/build/ctest-results.xml"
 
       - name: Test macOS and Windows
         if: runner.os != 'Linux'
-        run: ctest --test-dir build --output-on-failure -C Release -LE '^package$'
+        run: >-
+          ctest --test-dir build --parallel 2 --output-on-failure -C Release
+          -LE '^package$'
+          --output-junit "${{ github.workspace }}/build/ctest-results.xml"
+
+      - name: Upload CTest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-${{ matrix.os }}-${{ github.run_attempt }}
+          path: build/ctest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   sanitizers:
     name: Linux ASan + UBSan
@@ -243,7 +260,18 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=1
-        run: ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
+        run: >-
+          ctest --test-dir build-sanitize --output-on-failure -L '^unit$'
+          --output-junit "${{ github.workspace }}/build-sanitize/ctest-results.xml"
+
+      - name: Upload sanitizer CTest report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-sanitizers-${{ github.run_attempt }}
+          path: build-sanitize/ctest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
   # T072 is Linux-only infrastructure and its contract suite lives in the
   # standalone tests/t072 project; this job is the only place where the real
