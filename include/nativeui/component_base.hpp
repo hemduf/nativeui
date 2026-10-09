@@ -24,6 +24,7 @@ namespace detail {
 class OverlayService;
 class OverlayCommandSource;
 struct ComponentContextAccess;
+struct CachedLayerSource;
 struct InputMutationAccess;
 struct DescendantSemanticDecoration {
     std::string target_key;
@@ -891,6 +892,9 @@ struct Node {
     std::string retained_key{};
     /// Last keys actually installed with these children; survives remount/rollback.
     std::optional<std::vector<std::string>> retained_dynamic_keys{};
+    // Paint-only construction metadata; component/layout/input identity stays
+    // unchanged. Runtime subscriptions and epochs belong to the mounted Tree.
+    std::shared_ptr<const detail::CachedLayerSource> cached_layer;
 };
 
 struct Spec {
@@ -902,6 +906,9 @@ struct Spec {
     std::function<std::vector<Spec>(Component&)> children_factory{};
     /// Application identity local to a descendant owner; independent of dynamic keys.
     std::string retained_key{};
+    /// Internal paint annotation used by CachedLayer. Contains no renderer or
+    /// backend handles and does not replace the component factory or children.
+    std::shared_ptr<const detail::CachedLayerSource> cached_layer{};
 };
 
 /// Attach an owned application key while preserving the child runtime identity.

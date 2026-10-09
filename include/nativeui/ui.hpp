@@ -26,6 +26,7 @@ namespace ui {
 
 class Dialog;
 class Toast;
+class HeadlessRenderer;
 namespace detail { class SkiaGlRenderer; }
 
 /// One retained NativeUI component tree.
@@ -417,6 +418,7 @@ public:
 private:
     friend class Dialog;
     friend class detail::SkiaGlRenderer;
+    friend class HeadlessRenderer;
 
     void paint_with_resources(
         SkCanvas& canvas,

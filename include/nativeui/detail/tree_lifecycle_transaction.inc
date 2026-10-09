@@ -328,6 +328,8 @@
         auto& progress = journal.back();
 
         progress.live_identity_started = retain_mount_identity(node);
+        if (node.cached_layer && !register_raster_cache_boundary(node.id))
+            throw std::logic_error("CachedLayer could not register its retained boundary");
         if (progress.live_identity_started && node.component->uses_retained_checkpoint())
             retained_checkpoint_nodes_.push_back(node.id);
 

@@ -13,6 +13,7 @@ bool Tree::try_paint_raster_cache_boundary(
     Rect inherited_clip) {
     const auto boundary = raster_cache_epochs_.find(node.id);
     if (boundary == raster_cache_epochs_.end() ||
+        boundary->second->inner ||
         !painter.private_hooks_ ||
         !painter.private_hooks_->paint_raster_cache_boundary ||
         raster_cache_has_nested_boundary(node)) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nativeui/cached_layer.hpp>
+
 #include <nativeui/geometry.hpp>
 #include <nativeui/constraints.hpp>
 #include <nativeui/invalidation.hpp>

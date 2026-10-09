@@ -15,6 +15,7 @@
     }
 
     void retire_retained_invalidation_generation() noexcept {
+        disconnect_raster_cache_dependencies();
         if (!retained_invalidation_lifetime_) return;
         retained_invalidation_lifetime_->tree = nullptr;
         retained_invalidation_lifetime_.reset();
@@ -189,9 +190,12 @@
 
     void refresh_retained_components() {
         if (lifecycle_transition_active() || dispatch_depth_ != 0 || syncing_availability_) return;
-        if (!retained_checkpoint_nodes_.empty()) {
+        if (!retained_checkpoint_nodes_.empty() || !raster_cache_epochs_.empty()) {
             const auto participants = retained_checkpoint_nodes_;
             LifecycleTransitionScope guard{*this, LifecycleTransition::Refresh, true};
+            // A throwing earlier State observer may skip our notification.
+            // Reconcile revisions at normal checkpoints without reading T.
+            refresh_raster_cache_dependencies();
             for (const auto id : participants) {
                 if (auto* node = retained_invalidation_node(id)) node->component->retained_checkpoint();
             }

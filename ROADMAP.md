@@ -326,9 +326,19 @@ The remaining v1 sequence is:
   records exact-head local, platform, sanitizer, performance and mandatory review
   evidence. T184 is Done via squash-merged PR #490 (commit `dd7cb071`);
   final PR CI passed 14/14 checks including Windows, macOS, Linux and ASan/UBSan,
-  with source review at Blocking 0 / Important 0. T185/#472 is now Ready
-  for the public `CachedLayer` and State dependency API. T186/#473 remains
-  blocked on T185's implementation and qualification, under T182/#469.
+  with source review at Blocking 0 / Important 0.
+
+- **T185 / #472:** the public `CachedLayer` and heterogeneous State dependency
+  API is in implementation and qualification. The builder annotates the original
+  retained node, preserving layout, input, focus and semantic behavior. Each
+  layer prepares independent, deduplicated subscriptions transactionally; weak
+  lifetime identities protect unmount/remount and State destruction. Revision
+  reconciliation covers skipped notifications after observer exceptions. The
+  public headless renderer shares the existing raster transaction, and the
+  dedicated `cached_layer` example includes deterministic `--self-test` coverage.
+  T186/#473 remains blocked until this implementation is reviewed, qualified and
+  merged under T182/#469; transforms/effects/nesting and final performance
+  qualification remain that ticket's work.
 
 ## Release policy
 

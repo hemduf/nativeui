@@ -29,7 +29,12 @@ public:
     HeadlessRenderer(HeadlessRenderer&&) noexcept;
     HeadlessRenderer& operator=(HeadlessRenderer&&) noexcept;
 
+    /// Replaces the output size and releases retained renderer resources.
+    /// Calling resize() from an active render callback throws std::logic_error.
     void resize(Size logical_size, float scale_factor = 1.0f);
+    /// Paint one frame, reusing eligible CachedLayer rasters in this renderer.
+    /// Recursive render() on the same renderer throws std::logic_error before
+    /// touching its active frame, even when the nested call targets another UI.
     [[nodiscard]] bool render(UI& ui);
 
     [[nodiscard]] Size logical_size() const noexcept;

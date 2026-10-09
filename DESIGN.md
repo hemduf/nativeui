@@ -331,8 +331,31 @@ retention. A cold-only canvas observer detects transforms even when component
 code restores them before returning, without changing the public Painter API.
 Only its source-private adapter is compiled without RTTI to match pinned Skia;
 the retained component runtime keeps its existing RTTI and exception behavior.
-T184 exposes no public cache component; T185 owns the public `CachedLayer` API
-and its public headless-renderer integration.
+The public `CachedLayer{child}.depends(stateA, stateB, ...)` builder annotates
+the child's `Spec`; compilation preserves its original component, children,
+retained key and node topology. Consequently constraints, Flex allocation,
+visibility, baseline, input, focus and semantic projection retain the same
+behavior as the unwrapped child. There is no extra layout/input wrapper.
+
+Declared dependencies are heterogeneous `State<T>` sources. Immutable recipes
+retain lifetime-safe `Binding<T>` handles and deduplicate by control-block
+identity within one declaration; they never hash or copy dependency values.
+Each mounted layer gets its own epoch and RAII subscriptions. All subscriptions
+are prepared before the boundary is published, and disconnected before its
+identity is retired on unmount or rollback. State destruction before or after
+mount is safe under the existing Binding contract.
+
+A dependency callback stales its layer and containing layers, then requests
+normal retained redraw without painting. Known descendant invalidation still
+stales every containing layer even if the dependency was omitted. Ordinary
+retained checkpoints reconcile source revisions as well: if an earlier State
+observer threw before a cache subscription's turn, the next checkpoint cannot
+reuse stale pixels. Renderer eligibility and publication also recheck revisions
+without reading values. This adds no scheduler or background work.
+
+Directly nested declarations retain ordered, independent boundaries even when
+they annotate the same node. Until the nesting qualification is complete, both
+same-node and ancestor/descendant nesting conservatively paint without reuse.
 
 ### 6.2 Headless renderer
 
@@ -343,6 +366,13 @@ auto surface = SkSurfaces::Raster(...);
 ```
 
 This keeps layout, widget and golden tests deterministic and executable without a display server, Pugl or OpenGL.
+
+`HeadlessRenderer` uses the same private raster-cache transaction as native
+views, with a renderer-owned resource budget and synchronous raster surfaces.
+Cold and dependency-stale frames rasterize the subtree; warm frames composite
+its cached pixels without repeating descendant paint callbacks. Explicit
+renderer resize retires that renderer's cached resources. No cache handle,
+manual eviction control or backend-specific type is added to the public API.
 
 ### 6.3 Future GPU path
 

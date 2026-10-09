@@ -49,6 +49,7 @@ concept StateValue = requires(const T& lhs, const T& rhs) {
 };
 
 struct StateReadAccess;
+struct StateDependencyAccess;
 
 } // namespace detail
 
@@ -490,6 +491,7 @@ public:
     }
 
 private:
+    friend struct detail::StateDependencyAccess;
     explicit Binding(std::shared_ptr<typename State<T>::Control> control) noexcept
         : control_(std::move(control)) {}
 
