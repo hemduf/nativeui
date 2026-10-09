@@ -11,6 +11,12 @@
 
 namespace {
 
+// Cocoa can defer the first configure/expose of an embedded native view.
+// Use an elapsed-time bound instead of assuming that a fixed number of
+// non-blocking event-pump calls gives the compositor time to present.
+constexpr auto kEmbeddedEventTimeout = std::chrono::seconds{3};
+constexpr double kEmbeddedPollSeconds = 0.005;
+
 std::optional<ui::detail::PlatformReadbackPixel> read_pixel(
     ui::Application& application,
     ui::StandaloneWindow& window,
@@ -34,13 +40,14 @@ std::optional<ui::detail::PlatformReadbackPixel> read_pixel(
     if (!ui::detail::PlatformTestAccess::request_gpu_readback(view, point)) {
         return std::nullopt;
     }
-    for (int attempt = 0; attempt < 64; ++attempt) {
-        (void)application.poll(0.0);
+    const auto deadline = std::chrono::steady_clock::now() + kEmbeddedEventTimeout;
+    do {
+        (void)application.poll(kEmbeddedPollSeconds);
         (void)view.poll();
         if (auto pixel = ui::detail::PlatformTestAccess::take_gpu_readback(view)) {
             return pixel;
         }
-    }
+    } while (!view.should_close() && std::chrono::steady_clock::now() < deadline);
     return std::nullopt;
 }
 
@@ -65,14 +72,15 @@ bool wait_for_failure(ui::Application& application,
 bool wait_for_failure(ui::Application& application,
                       ui::EmbeddedView& view,
                       std::uint64_t previous_failures) {
-    for (int attempt = 0; attempt < 64; ++attempt) {
-        (void)application.poll(0.0);
+    const auto deadline = std::chrono::steady_clock::now() + kEmbeddedEventTimeout;
+    do {
+        (void)application.poll(kEmbeddedPollSeconds);
         (void)view.poll();
         if (ui::detail::PlatformTestAccess::scene_diagnostics(view).failed_exposes >
             previous_failures) {
             return true;
         }
-    }
+    } while (!view.should_close() && std::chrono::steady_clock::now() < deadline);
     return false;
 }
 
@@ -405,13 +413,52 @@ int main(int argc, char** argv) {
     {
         ui::EmbeddedView child{child_ui, window.native_handle(), {48.0f, 32.0f}};
         if (!child.native_handle()) return fail("embedded child creation failed");
-        for (int attempt = 0; attempt < 32; ++attempt) {
-            (void)application.poll(0.0);
+
+        // Initial presentation is asynchronous on some macOS hosts. Require
+        // a completed retained paint and a valid, presented scene before
+        // checking the GPU pixel. A valid scene with the wrong color must
+        // still fail: this is not a retry-until-green assertion.
+        bool child_scene_ready = false;
+        const auto deadline = std::chrono::steady_clock::now() + kEmbeddedEventTimeout;
+        do {
+            (void)application.poll(kEmbeddedPollSeconds);
             (void)child.poll();
+            const auto scene = PlatformTestAccess::scene_diagnostics(child);
+            if (child_paints > 0 && scene.scene_valid &&
+                scene.scene_builds > 0 && scene.presentations > 0) {
+                child_scene_ready = true;
+                break;
+            }
+        } while (!child.should_close() && std::chrono::steady_clock::now() < deadline);
+
+        std::optional<ui::detail::PlatformReadbackPixel> child_pixel;
+        if (child_scene_ready) {
+            child_pixel = read_pixel(application, child, {16.0f, 12.0f});
         }
-        const auto child_pixel = read_pixel(application, child, {16.0f, 12.0f});
-        if (!child_pixel || child_pixel->g < 240 || child_paints == 0) {
-            return fail("embedded scene initial paint failed");
+        if (!child_scene_ready || !child_pixel || child_pixel->g < 240) {
+            const auto diagnostics = PlatformTestAccess::scene_diagnostics(child);
+            std::cerr << "T095 embedded initial scene: ready=" << child_scene_ready
+                      << ", paints=" << child_paints
+                      << ", valid=" << diagnostics.scene_valid
+                      << ", builds=" << diagnostics.scene_builds
+                      << ", presentations=" << diagnostics.presentations
+                      << ", failed_exposes=" << diagnostics.failed_exposes
+                      << ", full_repaint_required=" << diagnostics.full_repaint_required
+                      << ", present_pending=" << diagnostics.present_pending
+                      << ", closed=" << child.should_close()
+                      << ", pixel=";
+            if (child_pixel) {
+                std::cerr << '(' << static_cast<int>(child_pixel->r)
+                          << ',' << static_cast<int>(child_pixel->g)
+                          << ',' << static_cast<int>(child_pixel->b)
+                          << ',' << static_cast<int>(child_pixel->a) << ')';
+            } else {
+                std::cerr << "unavailable";
+            }
+            std::cerr << ", last_error='" << child.last_error() << "'\n";
+            if (!child_scene_ready) return fail("embedded scene not ready before timeout");
+            if (!child_pixel) return fail("embedded initial GPU readback unavailable");
+            return fail("embedded initial GPU pixel mismatch");
         }
         const auto child_before = PlatformTestAccess::scene_diagnostics(child);
         if (!PlatformTestAccess::inject_scene_fault(child,

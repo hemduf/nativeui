@@ -81,6 +81,9 @@ private:
 struct DispatcherTestAccess final {
     static void fail_next_post(const Dispatcher& dispatcher) noexcept;
     static void fail_next_timer(const Dispatcher& dispatcher) noexcept;
+    // Inject a checkpoint failure after N successful due-timer transfers.
+    static void fail_checkpoint_after_due_transfers(
+        const Dispatcher& dispatcher, std::size_t transfers) noexcept;
 };
 
 } // namespace ui::detail

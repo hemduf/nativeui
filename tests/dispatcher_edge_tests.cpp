@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -65,7 +66,71 @@ ui::AnimationInvalidationTarget noop_animation_target() {
     return ui::AnimationInvalidationTarget{[] {}, [] {}};
 }
 
+class CountingCheckpointWake final : public ui::detail::DispatcherWakeBackend {
+public:
+    void request_wake() noexcept override { ++wakes; }
+    std::atomic<std::size_t> wakes{};
+};
+
+void checkpoint_failure_preserves_due_timer_and_task_order() {
+    for (std::size_t transferred = 0; transferred <= 1; ++transferred) {
+        auto backend = std::make_shared<CountingCheckpointWake>();
+        auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
+        ui::detail::DispatcherOwner owner{backend, clock};
+        const auto dispatcher = owner.dispatcher();
+        std::vector<int> order;
+        NUI_CHECK(dispatcher.post([&] { order.push_back(0); }));
+        const auto first = dispatcher.schedule_after(0ms, [&] { order.push_back(1); });
+        const auto second = dispatcher.schedule_after(0ms, [&] { order.push_back(2); });
+        NUI_CHECK(first.valid() && second.valid());
+
+        const auto wakes_before = backend->wakes.load();
+        ui::detail::DispatcherTestAccess::fail_checkpoint_after_due_transfers(
+            dispatcher, transferred);
+        bool caught = false;
+        try {
+            (void)owner.checkpoint();
+        } catch (const std::bad_alloc&) {
+            caught = true;
+        }
+        NUI_CHECK(caught);
+        NUI_CHECK(order.empty());
+        NUI_CHECK(owner.pending_task_count() == transferred + 1);
+        NUI_CHECK(owner.active_timer_count() == 2 - transferred);
+        NUI_CHECK(backend->wakes.load() > wakes_before);
+        NUI_CHECK(owner.checkpoint() == 3);
+        NUI_CHECK((order == std::vector<int>{0, 1, 2}));
+        NUI_CHECK(owner.active_timer_count() == 0);
+        NUI_CHECK(owner.pending_task_count() == 0);
+    }
+}
+
+void large_due_timer_batch_is_bounded_and_ordered() {
+    ui::detail::DispatcherOwner owner;
+    const auto dispatcher = owner.dispatcher();
+    std::vector<std::size_t> seen;
+    constexpr auto count = 2 * ui::kDispatcherMaxTasksPerCheckpoint + 11;
+    seen.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        NUI_CHECK(dispatcher.schedule_after(0ms, [&, i] {
+            seen.push_back(i);
+        }).valid());
+    }
+
+    NUI_CHECK(owner.checkpoint() == ui::kDispatcherMaxTasksPerCheckpoint);
+    NUI_CHECK(owner.active_timer_count() == count - ui::kDispatcherMaxTasksPerCheckpoint);
+    NUI_CHECK(owner.next_delay().has_value());
+    NUI_CHECK(owner.next_delay()->count() == 0.0);
+    NUI_CHECK(owner.checkpoint() == ui::kDispatcherMaxTasksPerCheckpoint);
+    NUI_CHECK(owner.checkpoint() == 11);
+    NUI_CHECK(owner.active_timer_count() == 0);
+    NUI_CHECK(seen.size() == count);
+    for (std::size_t i = 0; i < count; ++i) NUI_CHECK(seen[i] == i);
+}
+
 void suite() {
+    checkpoint_failure_preserves_due_timer_and_task_order();
+    large_due_timer_batch_is_bounded_and_ordered();
     {
         auto clock = std::make_shared<ui::detail::ManualDispatcherClock>();
         ui::detail::DispatcherOwner owner{{}, clock};

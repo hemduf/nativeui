@@ -181,7 +181,10 @@ struct NumberState : std::enable_shared_from_this<NumberState> {
     const double current = source.get();
     if (!same_double(current, seen)) {
       auto text = format_number(effective(), precision);
-      ++generation;
+      const auto previous_seen = seen, previous_baseline = baseline;
+      const auto previous_accepted = accepted_number;
+      const bool previous_invalid = invalid;
+      const auto serial = ++generation;
       seen = current;
       baseline = effective();
       accepted_number =
@@ -189,7 +192,27 @@ struct NumberState : std::enable_shared_from_this<NumberState> {
               ? std::optional<double>{current}
               : std::optional<double>{};
       presentation_validity(!accepted_number);
-      set_draft(std::move(text));
+
+      // Preserve reentrant source-notification coalescing by marking 'seen'
+      // before replacing editor text. If replacement fails, restore the old
+      // marker so the next retained checkpoint retries the committed source.
+      // A newer nested generation must never be rolled back by this older one.
+      const auto restore_unpublished = [&] {
+        if (generation != serial) return;
+        seen = previous_seen;
+        baseline = previous_baseline;
+        accepted_number = previous_accepted;
+        presentation_validity(previous_invalid);
+      };
+      try {
+        if (!set_draft(std::move(text))) {
+          restore_unpublished();
+          return;
+        }
+      } catch (...) {
+        restore_unpublished();
+        throw;
+      }
       if (invalidate)
         invalidate();
     }
@@ -229,21 +252,28 @@ struct NumberState : std::enable_shared_from_this<NumberState> {
   void step_to(double value, std::function<bool()> guard = {}) {
     if (!can_write())
       return;
+    // Validate the future display before any publication. An invalidator can
+    // throw, retire the editor, or synchronously change the backing value.
+    // Do not stage the draft or accepted_number ahead of that boundary:
+    // source observers/retained checkpoints perform authoritative reconciliation.
     auto text = format_number(value, precision);
     const double expected = source.get();
     const auto serial = ++generation;
-    accepted_number = value;
-    presentation_validity(false);
-    if (!set_draft(std::move(text)))
-      return;
     if (invalidate)
       invalidate();
-    if (can_write() && generation == serial &&
-        same_double(source.get(), expected) && (!guard || guard())) {
-      seen = value;
-      auto copy = source;
-      copy.set(value);
+    if (!can_write() || generation != serial ||
+        !same_double(source.get(), expected) || (guard && !guard()))
+      return;
+    if (same_double(value, expected)) {
+      // An edge step still normalizes an invalid draft, without a value write.
+      if (set_draft(std::move(text))) {
+        accepted_number = value;
+        presentation_validity(false);
+      }
+      return;
     }
+    auto copy = source;
+    copy.set(value);
   }
   std::optional<EventResult> input(const InputEvent &event,
                                    InputContext &context,

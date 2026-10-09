@@ -6,6 +6,8 @@
 #include <deque>
 #include <mutex>
 #include <new>
+#include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -86,6 +88,7 @@ struct DispatcherState final {
     bool wake_pending{};
     bool fail_next_post_for_testing{};
     bool fail_next_timer_for_testing{};
+    std::optional<std::size_t> fail_checkpoint_after_due_transfers_for_testing;
 };
 
 namespace {
@@ -202,7 +205,7 @@ std::size_t DispatcherOwner::checkpoint() {
     std::size_t work_count = 0;
     bool should_wake = false;
 
-    {
+    try {
         std::lock_guard lock{state->mutex};
         if (state->closing) return 0;
         state->wake_pending = false;
@@ -210,67 +213,90 @@ std::size_t DispatcherOwner::checkpoint() {
         struct DueTimer final {
             DispatcherTimePoint due;
             std::uint64_t sequence;
-            std::uint64_t id;
+            std::size_t index;
         };
+        // Indices stay valid until all due timers are processed. This removes
+        // repeated O(n) timer searches, without erasing during iteration.
         std::vector<DueTimer> due;
-        due.reserve(state->timers.size());
-        for (const auto& timer : state->timers) {
-            if (timer.due <= now) due.push_back({timer.due, timer.sequence, timer.id});
+        for (std::size_t index = 0; index < state->timers.size(); ++index) {
+            const auto& timer = state->timers[index];
+            if (timer.due <= now) due.push_back({timer.due, timer.sequence, index});
         }
         std::sort(due.begin(), due.end(), [](const DueTimer& left, const DueTimer& right) {
             if (left.due != right.due) return left.due < right.due;
             return left.sequence < right.sequence;
         });
 
-        bool timer_blocked_by_full_queue = false;
-        for (const auto& candidate : due) {
-            if (state->tasks.size() >= kDispatcherMaxPendingTasks ||
-                state->next_task_sequence == 0) {
-                timer_blocked_by_full_queue = true;
-                break;
-            }
+        // A retired timer always has a queued callback holding its shared
+        // callable, so pruning cannot destroy the final user capture under lock.
+        static_assert(std::is_nothrow_move_assignable_v<TimerEntry>);
+        const auto prune_queued_one_shots = [&] {
+            std::erase_if(state->timers, [](const TimerEntry& timer) {
+                return timer.id == 0;
+            });
+        };
 
-            const auto it = std::find_if(state->timers.begin(), state->timers.end(),
-                                         [&](const TimerEntry& timer) {
-                                             return timer.id == candidate.id;
-                                         });
-            if (it == state->timers.end() || it->due > now) continue;
-
-            const auto callback = it->callback;
-            Dispatcher::Callback queued_callback = [callback] { (*callback)(); };
-            const bool enqueued = enqueue_task_locked(*state, queued_callback);
-            if (!enqueued) {
-                timer_blocked_by_full_queue = true;
-                break;
-            }
-            if (it->repeating) {
-                if (!can_add(now, it->interval)) {
-                    state->timers.erase(it);
-                } else {
-                    it->due = now + it->interval;
+        bool timer_blocked = false;
+        std::size_t transferred = 0;
+        try {
+            for (const auto& candidate : due) {
+                if (transferred >= kDispatcherMaxTasksPerCheckpoint ||
+                    state->tasks.size() >= kDispatcherMaxPendingTasks ||
+                    state->next_task_sequence == 0) {
+                    timer_blocked = true;
+                    break;
                 }
-            } else {
-                // One-shot becomes inactive immediately after successful queue
-                // insertion and before its callback can execute. The queued
-                // wrapper owns the callable until this firing completes.
-                state->timers.erase(it);
+                if (state->fail_checkpoint_after_due_transfers_for_testing &&
+                    transferred == *state->fail_checkpoint_after_due_transfers_for_testing) {
+                    state->fail_checkpoint_after_due_transfers_for_testing.reset();
+                    throw std::bad_alloc{};
+                }
+
+                auto& timer = state->timers[candidate.index];
+                const auto callback = timer.callback;
+                Dispatcher::Callback queued_callback = [callback] { (*callback)(); };
+                if (!enqueue_task_locked(*state, queued_callback)) {
+                    timer_blocked = true;
+                    break;
+                }
+                if (timer.repeating && can_add(now, timer.interval)) {
+                    timer.due = now + timer.interval;
+                } else {
+                    // Do not replay accepted one-shots after a later failure.
+                    timer.id = 0;
+                }
+                ++transferred;
             }
+        } catch (...) {
+            prune_queued_one_shots();
+            throw;
         }
+        prune_queued_one_shots();
 
-        // Freeze only how much work this checkpoint may begin. Leave every
-        // unstarted accepted task in the primary deque so an exception never
-        // needs a recovery insertion that could itself allocate or fail. A task
-        // is removed immediately before its invocation, making that begun task
-        // consumed while preserving all later work in FIFO order.
+        // Freeze how many callbacks this pass may start. Unstarted tasks
+        // remain in their original FIFO queue, including after exceptions.
         work_count = std::min(state->tasks.size(), kDispatcherMaxTasksPerCheckpoint);
-
-        // Work beyond this checkpoint's bounded budget (or a due timer that
-        // could not be queued because the queue is full) already needs another
-        // owner/event-loop checkpoint independently of callback outcomes.
-        if (state->tasks.size() > work_count || timer_blocked_by_full_queue) {
+        if (state->tasks.size() > work_count || timer_blocked) {
             state->wake_pending = true;
             should_wake = true;
         }
+    } catch (...) {
+        // An allocation failure after wake_pending is cleared could strand an
+        // already accepted task: posting into a nonempty deque does not wake.
+        // Re-arm the native checkpoint, never run a fallback synchronously.
+        bool recover_wake = false;
+        {
+            std::lock_guard lock{state->mutex};
+            if (!state->closing &&
+                (!state->tasks.empty() ||
+                 std::any_of(state->timers.begin(), state->timers.end(),
+                             [now](const TimerEntry& timer) { return timer.due <= now; }))) {
+                state->wake_pending = true;
+                recover_wake = true;
+            }
+        }
+        if (recover_wake) request_dispatcher_wake(state);
+        throw;
     }
 
     if (should_wake) request_dispatcher_wake(state);
@@ -383,6 +409,14 @@ void DispatcherTestAccess::fail_next_timer(const Dispatcher& dispatcher) noexcep
     if (!state) return;
     std::lock_guard lock{state->mutex};
     if (!state->closing) state->fail_next_timer_for_testing = true;
+}
+
+void DispatcherTestAccess::fail_checkpoint_after_due_transfers(
+    const Dispatcher& dispatcher, std::size_t transfers) noexcept {
+    const auto state = dispatcher.state_.lock();
+    if (!state) return;
+    std::lock_guard lock{state->mutex};
+    if (!state->closing) state->fail_checkpoint_after_due_transfers_for_testing = transfers;
 }
 
 } // namespace ui::detail

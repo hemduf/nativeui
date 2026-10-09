@@ -3,6 +3,7 @@
 #include <nativeui/component_state.hpp>
 
 #include <concepts>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -45,7 +46,118 @@ struct CopyTrackedCallback {
     std::shared_ptr<int> copies;
 };
 
+// Faults belong to this test-owned value; no process-global fault switches.
+struct FallibleStateValue {
+    struct Faults {
+        bool reject_assignment{};
+        int moves_until_throw{-1};
+        int moves_until_retire{-1};
+        std::function<void()> retire_owner;
+        int assignment_calls{};
+    };
+
+    int number{};
+    std::shared_ptr<Faults> faults;
+
+    FallibleStateValue(int value, std::shared_ptr<Faults> state)
+        : number(value), faults(std::move(state)) {}
+    FallibleStateValue(const FallibleStateValue&) = default;
+    FallibleStateValue(FallibleStateValue&& other)
+        : number(other.number), faults(other.faults) {
+        if (faults && faults->moves_until_throw >= 0 &&
+            faults->moves_until_throw-- == 0) {
+            throw std::runtime_error("injected move construction failure");
+        }
+        if (faults && faults->moves_until_retire >= 0 &&
+            faults->moves_until_retire-- == 0) {
+            auto retire = std::move(faults->retire_owner);
+            if (retire) retire();
+        }
+    }
+    FallibleStateValue& operator=(const FallibleStateValue&) = default;
+    FallibleStateValue& operator=(FallibleStateValue&& other) {
+        number = other.number;
+        faults = other.faults;
+        if (faults) {
+            ++faults->assignment_calls;
+            if (faults->reject_assignment) {
+                throw std::runtime_error("injected partial move assignment");
+            }
+        }
+        return *this;
+    }
+    friend bool operator==(const FallibleStateValue&,
+                           const FallibleStateValue&) = default;
+};
+
+void fallible_value_commit_is_transactional() {
+    auto faults = std::make_shared<FallibleStateValue::Faults>();
+    ui::State<FallibleStateValue> state{FallibleStateValue{1, faults}};
+    auto binding = state.binding();
+    std::vector<int> observations;
+    auto observer = state.observe([&](const FallibleStateValue& current) {
+        observations.push_back(current.number);
+    });
+
+    // This value's move assignment mutates before throwing. The staged
+    // publication path must never invoke it on the old committed value.
+    faults->reject_assignment = true;
+    state.set(FallibleStateValue{2, faults});
+    NUI_CHECK(state.get().number == 2 && binding.get().number == 2);
+    NUI_CHECK(state.revision() == 1 && binding.revision() == 1);
+    NUI_CHECK(faults->assignment_calls == 0);
+    NUI_CHECK((observations == std::vector<int>{2}));
+
+    // Fail the replacement constructor after the three staging moves.
+    faults->moves_until_throw = 3;
+    bool caught = false;
+    try {
+        state.set(FallibleStateValue{3, faults});
+    } catch (const std::runtime_error&) {
+        caught = true;
+    }
+    NUI_CHECK(caught);
+    NUI_CHECK(state.get().number == 2 && binding.get().number == 2);
+    NUI_CHECK(state.revision() == 1 && observations.size() == 1);
+    NUI_CHECK(observer.active());
+
+    faults->moves_until_throw = -1;
+    state.set(FallibleStateValue{4, faults});
+    NUI_CHECK(state.get().number == 4);
+    NUI_CHECK(state.revision() == 2);
+    NUI_CHECK((observations == std::vector<int>{2, 4}));
+    NUI_CHECK(faults->assignment_calls == 0);
+}
+
+void retirement_during_staged_commit_does_not_publish() {
+    auto faults = std::make_shared<FallibleStateValue::Faults>();
+    auto owner = std::make_unique<ui::State<FallibleStateValue>>(
+        FallibleStateValue{10, faults});
+    auto binding = owner->binding();
+    std::size_t notifications{};
+    auto observer = owner->observe([&](const FallibleStateValue&) {
+        ++notifications;
+    });
+
+    // The fourth move constructs the staged replacement after the initial
+    // parameter, pending-value and prepared-value moves. It destroys the
+    // source owner synchronously, without deleting the retained control.
+    faults->moves_until_retire = 3;
+    faults->retire_owner = [&] { owner.reset(); };
+    auto* const borrowed_owner = owner.get();
+    borrowed_owner->set(FallibleStateValue{11, faults});
+
+    NUI_CHECK(!owner);
+    NUI_CHECK(!binding.valid());
+    NUI_CHECK(binding.get().number == 10);
+    NUI_CHECK(binding.revision() == 0);
+    NUI_CHECK(!observer.active());
+    NUI_CHECK(notifications == 0);
+}
+
 void suite() {
+    fallible_value_commit_is_transactional();
+    retirement_during_staged_commit_does_not_publish();
     ui::State<int> state{1};
     int observed = 0;
     int callback_count = 0;

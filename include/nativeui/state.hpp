@@ -31,6 +31,9 @@ namespace ui {
 // start on the next pass, observers removed before their turn are skipped, and
 // recursive writes are coalesced to the latest value for the next pass.
 //
+// Nothrow move-assignable values commit in place. Other values use a staged
+// owned replacement so a throwing move constructor/assignment cannot corrupt
+// the currently published value or desynchronize its revision.
 // Observer exceptions terminate the current notification transaction. The pass
 // value is already committed, callbacks that have not started remain registered
 // but are not invoked for the failed pass, and any recursive pending write is
@@ -70,8 +73,57 @@ class State {
     };
 
     struct Control {
+        // Preserve allocation-free in-place updates for nothrow move-assignable
+        // values. For other T, construct a replacement before publishing by
+        // noexcept pointer swap, so a throwing assignment cannot corrupt the
+        // committed value or its revision.
+        using ValueStorage = std::conditional_t<
+            std::is_nothrow_move_assignable_v<T>, T, std::unique_ptr<T>>;
+
+        static ValueStorage prepare_initial(T&& initial) {
+            if constexpr (std::is_nothrow_move_assignable_v<T>) {
+                return std::move(initial);
+            } else {
+                return std::make_unique<T>(std::move(initial));
+            }
+        }
+
         explicit Control(T initial)
-            : value(std::move(initial)) {}
+            : value(prepare_initial(std::move(initial))) {}
+
+        [[nodiscard]] T& committed_value() noexcept {
+            if constexpr (std::is_nothrow_move_assignable_v<T>) {
+                return value;
+            } else {
+                return *value;
+            }
+        }
+
+        [[nodiscard]] const T& committed_value() const noexcept {
+            if constexpr (std::is_nothrow_move_assignable_v<T>) {
+                return value;
+            } else {
+                return *value;
+            }
+        }
+
+        // A missing optional means the owner was retired reentrantly while T
+        // was preparing its replacement. An engaged null pointer means the
+        // nothrow in-place path committed without displaced storage.
+        [[nodiscard]] std::optional<std::unique_ptr<T>> commit_value(T&& prepared) {
+            if constexpr (std::is_nothrow_move_assignable_v<T>) {
+                value = std::move(prepared);
+                return std::unique_ptr<T>{};
+            } else {
+                auto replacement = std::make_unique<T>(std::move(prepared));
+                // User-controlled move construction may synchronously destroy
+                // State. Do not commit or advance its revision after teardown.
+                if (!owner_alive) return std::nullopt;
+                value.swap(replacement);
+                // Retire displaced storage only after the revision advances.
+                return replacement;
+            }
+        }
 
         [[nodiscard]] bool has_listener(std::size_t id) const noexcept {
             for (const auto& listener : listeners) {
@@ -112,7 +164,7 @@ class State {
             cleanup_needed = false;
         }
 
-        T value;
+        ValueStorage value;
         std::uint64_t revision{};
         std::vector<std::unique_ptr<Listener>> listeners;
         std::optional<T> pending_value;
@@ -179,7 +231,9 @@ public:
         control_->invalidate_owner();
     }
 
-    [[nodiscard]] const T& get() const noexcept { return control_->value; }
+    // Borrowed reference: a successful commit may replace its backing storage
+    // for a fallible T. Use snapshot() when the value must outlive a write.
+    [[nodiscard]] const T& get() const noexcept { return control_->committed_value(); }
 
     // A committed change advances this counter before observers run. Reading
     // it does not compare/copy T or call user code; discarded recursive writes
@@ -219,7 +273,7 @@ private:
         if (!control->owner_alive) return;
 
         if (control->read_copy) {
-            const bool unchanged = value == control->value;
+            const bool unchanged = value == control->committed_value();
             if (!control->owner_alive) return;
             auto prepared = unchanged ? std::unique_ptr<T>{}
                                       : std::make_unique<T>(std::move(value));
@@ -234,7 +288,7 @@ private:
             // Recursive writes never mutate the value visible to the current
             // pass. The latest write wins for the next pass; writing the current
             // value cancels an earlier pending write.
-            const bool unchanged = value == control->value;
+            const bool unchanged = value == control->committed_value();
             if (!control->owner_alive) return;
             control->copied_intent = false;
             control->copied_pending_value.reset();
@@ -249,7 +303,7 @@ private:
             return;
         }
 
-        const bool unchanged = value == control->value;
+        const bool unchanged = value == control->committed_value();
         if (!control->owner_alive || unchanged) return;
 
         control->pending_value = std::move(value);
@@ -279,7 +333,7 @@ private:
                     control->pending_value.reset();
                 }
                 T& next_value = *prepared_value;
-                const bool unchanged = next_value == control->value;
+                const bool unchanged = next_value == control->committed_value();
                 if (!control->owner_alive) break;
                 if (unchanged) continue;
                 if (condition && !condition()) continue;
@@ -288,8 +342,10 @@ private:
                 if (control->revision == std::numeric_limits<std::uint64_t>::max()) {
                     throw std::overflow_error("NativeUI State revision exhausted");
                 }
-                control->value = std::move(next_value);
+                auto displaced = control->commit_value(std::move(next_value));
+                if (!displaced) break;
                 ++control->revision;
+                displaced->reset();
 
                 // Heap-stable listener slots avoid copying callback objects on
                 // each set(). Capturing the pass size prevents observers added
@@ -300,7 +356,7 @@ private:
                      ++index) {
                     Listener* listener = control->listeners[index].get();
                     if (!listener || !listener->active || !listener->callback) continue;
-                    listener->callback(control->value);
+                    listener->callback(control->committed_value());
                 }
             }
         } catch (...) {
@@ -332,7 +388,7 @@ private:
         frame.previous = control->read_copy;
         control->read_copy = &frame;
         try {
-            Result result = std::invoke(reader, std::as_const(control->value));
+            Result result = std::invoke(reader, std::as_const(control->committed_value()));
             control->read_copy = frame.previous;
             if (control->owner_alive && frame.intent) {
                 if (frame.previous) {
@@ -409,7 +465,7 @@ public:
     }
 
     [[nodiscard]] const T& get() const noexcept {
-        return control_->value;
+        return control_->committed_value();
     }
 
     // An expired binding retains the revision of its last committed value.
