@@ -37,6 +37,59 @@ jobs:
       - name: Check shared workflow contract
         run: python3 tests/ci_workflow_contract.py
 
+  draft-core-smoke:
+    name: Linux Draft core smoke
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler cache
+        uses: ./.github/actions/setup-cpp-cache
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+          restore-keys: nativeui-cpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install Core build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libfontconfig1-dev
+
+      - name: Configure Core-only draft build
+        run: >-
+          cmake -S . -B build-draft -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DNATIVEUI_BUILD_PLATFORM=OFF
+          -DNATIVEUI_BUILD_EXAMPLES=OFF
+          -DNATIVEUI_BUILD_TESTS=ON
+          -DNATIVEUI_SKIA_CONFIG=Release
+
+      - name: Build representative Core regression targets
+        run: >-
+          cmake --build build-draft --target
+          nativeui_dispatcher_tests
+          nativeui_state_tests
+          nativeui_focus_tests
+          nativeui_widget_layout_extraction_tests
+          nativeui_window_control_state_tests
+
+      - name: Verify and run all targeted regressions
+        shell: bash
+        run: |
+          pattern='^(nativeui_dispatcher_tests|nativeui_state_tests|nativeui_focus_tests|nativeui_widget_layout_extraction_tests|nativeui_window_control_state_tests)$'
+          inventory="$(ctest --test-dir build-draft -N -R "$pattern")"
+          printf '%s\n' "$inventory"
+          if ! grep -Eq '^Total Tests: 5$' <<< "$inventory"; then
+            echo "Expected exactly five registered Core regression tests" >&2
+            exit 1
+          fi
+          ctest --test-dir build-draft --output-on-failure -R "$pattern"
+
   build:
     name: ${{ matrix.name }}
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft

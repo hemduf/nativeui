@@ -1,6 +1,6 @@
 # Workflow ownership
 
-- `ci.yml` is the **single broad pull-request qualification**: four OS/architecture builds and CTest suites, Linux ASan/UBSan, and Linux D-Bus contracts. The complete matrix is deferred on Draft PRs and starts when a PR is ready for review; the lightweight workflow-policy job also runs on Draft PRs.
+- `ci.yml` is the **single broad pull-request qualification**: four OS/architecture builds and CTest suites, Linux ASan/UBSan, and Linux D-Bus contracts. The complete matrix is deferred on Draft PRs and starts when a PR is ready for review; a lightweight policy check and an actual Linux Core smoke build/test run on Draft PRs (the full matrix still waits for Ready).
 - macOS ARM64 remains qualified. No macOS Intel runner is scheduled in any CI workflow; this does not claim that Intel binaries stop working, only that Intel CI coverage is intentionally retired.
 - `scalar-source-validation.yml` retains exact-head feature-branch and manual qualification, but does **not** automatically repeat a full build matrix for every unrelated PR. The generic CI matrix already exercises ScalarSource in its ordinary CTest selection.
 - `pugl-integration.yml` qualifies focused Pugl/native-view lifecycle changes on macOS PRs.
@@ -8,6 +8,12 @@
 - `main-smoke.yml` runs the Core unit suite after a merge to `main`.
 - `package-contract.yml` builds installable packages and exercises installed-package consumers on relevant pull requests and on `main`.
 - `wasm.yml` validates the WebAssembly build and browser integration.
+
+## Draft PR feedback
+
+- Draft PRs compile real NativeUI Core and a representative set of dispatcher, state, focus, layout and window-control regression executables on Linux. The workflow fails if any target is missing from CTest's selected inventory, preventing accidental empty smoke runs.
+- The `draft-core-smoke` job is **exclusive to Draft PRs**; marking a PR ready for review uses the original comprehensive platform/sanitizer/DBus qualification instead. The lightweight Draft feedback does not waive or replace any merge-required check.
+- The quick build reuses pinned CPM dependencies and the same shared compiler cache as the canonical workflow, with an ordinary cold-build fallback.
 
 ## Shared C/C++ compiler cache
 
