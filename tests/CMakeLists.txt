@@ -212,6 +212,12 @@ if(NATIVEUI_BUILD_TESTS)
   target_include_directories(nativeui_t175_pugl_button_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   nativeui_add_core_test(nativeui_pugl_scroll_translation_tests ${PROJECT_SOURCE_DIR}/tests/pugl_scroll_translation_tests.cpp)
   target_include_directories(nativeui_pugl_scroll_translation_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  nativeui_add_core_test(nativeui_pugl_view_input_state_tests ${PROJECT_SOURCE_DIR}/tests/pugl_view_input_state_tests.cpp)
+  target_include_directories(nativeui_pugl_view_input_state_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  nativeui_add_core_test(nativeui_view_text_input_state_tests ${PROJECT_SOURCE_DIR}/tests/view_text_input_state_tests.cpp)
+  target_include_directories(nativeui_view_text_input_state_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+  nativeui_add_core_test(nativeui_pugl_scene_damage_state_tests ${PROJECT_SOURCE_DIR}/tests/pugl_scene_damage_state_tests.cpp)
+  target_include_directories(nativeui_pugl_scene_damage_state_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   nativeui_add_core_test(nativeui_magnify_input_tests ${PROJECT_SOURCE_DIR}/tests/magnify_input_tests.cpp)
   nativeui_add_core_test(nativeui_magnify_integration_tests ${PROJECT_SOURCE_DIR}/tests/magnify_integration_tests.cpp)
   nativeui_add_core_test(nativeui_pointer_capture_tests ${PROJECT_SOURCE_DIR}/tests/pointer_capture_tests.cpp)
@@ -569,6 +575,12 @@ if(NATIVEUI_BUILD_TESTS)
   )
 
   if(NATIVEUI_BUILD_PLATFORM)
+    nativeui_add_core_test(nativeui_pugl_key_translation_tests
+      ${PROJECT_SOURCE_DIR}/tests/pugl_key_translation_tests.cpp)
+    target_include_directories(nativeui_pugl_key_translation_tests PRIVATE
+      ${PROJECT_SOURCE_DIR}/src
+      ${NATIVEUI_PUGL_SOURCE_DIR}/include
+    )
     nativeui_add_core_test(nativeui_pugl_pointer_tests ${PROJECT_SOURCE_DIR}/tests/pugl_pointer_tests.cpp)
     target_include_directories(nativeui_pugl_pointer_tests PRIVATE
       ${PROJECT_SOURCE_DIR}/src
@@ -695,6 +707,7 @@ if(NATIVEUI_BUILD_TESTS)
     nativeui_enable_sanitizers(nativeui_t096_scene_gpu_tests)
 
     add_executable(nativeui_smoke_embedded ${PROJECT_SOURCE_DIR}/tests/smoke_embedded.cpp)
+    target_include_directories(nativeui_smoke_embedded PRIVATE ${PROJECT_SOURCE_DIR}/src)
     _nativeui_attach_consumer_platform(
       TARGET nativeui_smoke_embedded
       CONSUMER_ID org.nativeui.test.smoke-embedded

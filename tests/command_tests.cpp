@@ -119,9 +119,9 @@ void suite() {
         NUI_CHECK(ui::detail::translate_ascii_key('Q', true) == ui::Key::Quit);
         NUI_CHECK(ui::detail::translate_ascii_key('q', true) == ui::Key::Quit);
         NUI_CHECK(ui::detail::translate_ascii_key(' ', false) == ui::Key::Space);
-        NUI_CHECK(ui::detail::translate_ascii_key('0', false) == ui::Key::None);
-        NUI_CHECK(ui::detail::translate_ascii_key('@', false) == ui::Key::None);
-        NUI_CHECK(ui::detail::translate_ascii_key('[', false) == ui::Key::None);
+        NUI_CHECK(ui::detail::translate_ascii_key('0', false) == ui::Key::Digit0);
+        NUI_CHECK(ui::detail::translate_ascii_key('@', false) == ui::Key::At);
+        NUI_CHECK(ui::detail::translate_ascii_key('[', false) == ui::Key::LeftBracket);
         NUI_CHECK(ui::detail::translate_ascii_key(0x100U, false) == ui::Key::None);
     }
 

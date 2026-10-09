@@ -1,46 +1,17 @@
-enum class NativeViewConstructionFaultStage : std::uint8_t {
-    AfterViewCreation,
-    AfterRealize,
-    AfterImeCreate,
-    AfterSizeConstraints,
-    AfterInitialResize,
-    AfterShow,
-    AfterInvalidationCallback,
-};
+#include "view_core.hpp"
 
-struct NativeViewConstructionFaultResult {
-    bool injected_failure{};
-    bool unexpected_failure{};
-    bool unexpected_success{};
-    std::uint32_t world_acquired{};
-    std::uint32_t world_released{};
-    std::uint32_t view_acquired{};
-    std::uint32_t view_released{};
-    std::uint32_t realize_succeeded{};
-    std::uint32_t unrealize_released{};
-    std::uint32_t ime_acquired{};
-    std::uint32_t ime_released{};
-    std::uint32_t size_constraints_applied{};
-    std::uint32_t initial_resize_completed{};
-    std::uint32_t show_completed{};
-    std::uint32_t invalidation_attached{};
-    std::uint32_t invalidation_cleared{};
-};
+namespace ui::detail {
 
-class NativeViewConstructionFault final {};
-
-class ViewCore {
-public:
-    ViewCore(UI& ui,
-             PlatformServices& services,
+ViewCore::ViewCore(UI& ui,
+             ViewPlatformServices& services,
              PuglWorldType world_type,
              WindowDesc desc,
              NativeParentHandle parent,
-             PuglWorld* shared_world = nullptr,
-             std::function<void()> close_callback = {},
-             NativeViewConstructionFaultStage fault_stage = NativeViewConstructionFaultStage::AfterViewCreation,
-             NativeViewConstructionFaultResult* fault_result = nullptr,
-             bool initially_visible = true)
+             PuglWorld* shared_world,
+             std::function<void()> close_callback,
+             NativeViewConstructionFaultStage fault_stage,
+             NativeViewConstructionFaultResult* fault_result,
+             bool initially_visible)
         : ui_(ui),
           services_(services),
           geometry_(validated_initial_size(desc)),
@@ -117,8 +88,19 @@ public:
         puglSetViewHint(view_, PUGL_SAMPLES, 0);
         puglSetViewHint(view_, PUGL_ACCEPT_DROP, PUGL_TRUE);
         puglSetBackend(view_, puglGlBackend());
-        puglSetHandle(view_, this);
-        puglSetEventFunc(view_, &ViewCore::event_thunk);
+        // The constructor parameter retains the platform-specific capture
+        // service type; services_ is the generic UI-facing base reference.
+        set_view_handle(view_, this, services);
+        // This seam simulates a failed native registration without changing
+        // process-global Pugl state or installing a dangling callback.
+        const bool reject_event_callback = fault_result &&
+            fault_stage == NativeViewConstructionFaultStage::EventCallbackRegistrationFailure;
+        const auto event_status = reject_event_callback
+            ? PUGL_FAILURE : set_view_event_func(view_, &ViewCore::event_thunk);
+        if (event_status != PUGL_SUCCESS) {
+            if (reject_event_callback) throw NativeViewConstructionFault{};
+            throw_pugl(event_status, "puglSetEventFunc failed");
+        }
         puglRegisterDropType(view_, "text/plain");
         puglRegisterDropType(view_, "text/uri-list");
 
@@ -161,7 +143,7 @@ public:
         maybe_inject(NativeViewConstructionFaultStage::AfterInitialResize);
 
         if (initially_visible) {
-            if (const auto status = puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
+            if (const auto status = show_pugl_view(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE)) {
                 throw_pugl(status, "puglShow failed");
             }
             visibility_.set_visible(true);
@@ -174,7 +156,7 @@ public:
         // so no redundant whole-view redraw request is needed here.
         construction_cleanup.invalidation_attached = true;
         ui_.set_invalidation_callback([this](Rect rect) {
-            if (ui_.layout_dirty()) preferred_measure_dirty_ = true;
+            if (ui_.layout_dirty()) preferred_size_.mark_dirty();
             if (renderer_.invalidate_from_ui(rect)) request_redraw(rect);
         });
         if (fault_result) ++fault_result->invalidation_attached;
@@ -182,15 +164,13 @@ public:
         construction_cleanup.release();
     }
 
-    ~ViewCore() noexcept {
+
+ViewCore::~ViewCore() noexcept {
         (void)close_native_view();
         release_owned_world_noexcept();
     }
 
-    ViewCore(const ViewCore&) = delete;
-    ViewCore& operator=(const ViewCore&) = delete;
-
-    bool poll(double timeout) {
+bool ViewCore::poll(double timeout) {
         if (!world_ || should_close_) return false;
         const auto status = puglUpdate(world_, timeout);
         if (status && status != PUGL_SUCCESS) {
@@ -202,23 +182,30 @@ public:
         return !should_close_;
     }
 
-    void request_close() { (void)close_native_view(); }
-    [[nodiscard]] bool should_close() const noexcept { return should_close_; }
-    [[nodiscard]] bool native_view_open() const noexcept { return view_ != nullptr && !should_close_; }
-    [[nodiscard]] Size size() const noexcept { return geometry_.logical_size(); }
-    [[nodiscard]] float scale_factor() const noexcept { return geometry_.last_valid_scale(); }
-    [[nodiscard]] NativeViewHandle native_handle() const noexcept {
+void ViewCore::request_close() { (void)close_native_view(); }
+
+bool ViewCore::should_close() const noexcept { return should_close_; }
+
+bool ViewCore::native_view_open() const noexcept { return view_ != nullptr && !should_close_; }
+
+Size ViewCore::size() const noexcept { return geometry_.logical_size(); }
+
+float ViewCore::scale_factor() const noexcept { return geometry_.last_valid_scale(); }
+
+NativeViewHandle ViewCore::native_handle() const noexcept {
         return view_ ? static_cast<NativeViewHandle>(puglGetNativeView(view_)) : 0;
     }
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    bool inject_scene_fault(detail::SceneFaultStage stage) noexcept {
+bool ViewCore::inject_scene_fault(detail::SceneFaultStage stage) noexcept {
         if (!view_) return false;
         renderer_.inject_fault(stage);
         return true;
     }
+#endif
 
-    [[nodiscard]] detail::SceneDiagnostics scene_diagnostics() const noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+detail::SceneDiagnostics ViewCore::scene_diagnostics() const noexcept {
         auto result = renderer_.diagnostics();
         result.failed_exposes = failed_scene_exposes_;
         result.deferred_redraw_attempts = deferred_redraw_attempts_;
@@ -226,37 +213,47 @@ public:
         result.redraw_requests_during_render = redraw_requests_during_render_;
         return result;
     }
+#endif
 
-    bool request_context_recreation() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::request_context_recreation() noexcept {
         if (!view_) return false;
         recreate_renderer_on_expose_ = true;
         const auto logical = geometry_.logical_size();
         request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
+#endif
 
-    bool override_scene_scale(std::optional<float> scale) noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::override_scene_scale(std::optional<float> scale) noexcept {
         if (!view_) return false;
         scene_scale_override_ = scale;
         const auto logical = geometry_.logical_size();
         request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
+#endif
 
-    bool reject_next_deferred_redraw() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::reject_next_deferred_redraw() noexcept {
         if (!view_) return false;
         reject_deferred_redraw_once_ = true;
         return true;
     }
+#endif
 
-    bool request_expose() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::request_expose() noexcept {
         if (!view_) return false;
         const auto logical = geometry_.logical_size();
         request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
+#endif
 
-    [[nodiscard]] bool request_gpu_readback(Point logical_point) noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::request_gpu_readback(Point logical_point) noexcept {
         if (!view_ ||
             !std::isfinite(logical_point.x) ||
             !std::isfinite(logical_point.y)) {
@@ -272,13 +269,17 @@ public:
         request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
+#endif
 
-    [[nodiscard]] std::optional<PlatformReadbackPixel>
-    take_gpu_readback() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+std::optional<PlatformReadbackPixel>
+    ViewCore::take_gpu_readback() noexcept {
         return renderer_.take_readback();
     }
+#endif
 
-    [[nodiscard]] bool request_gpu_readback_region(int x,
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::request_gpu_readback_region(int x,
                                                    int y,
                                                    int width,
                                                    int height) noexcept {
@@ -288,33 +289,38 @@ public:
         request_redraw(Rect{0.0f, 0.0f, logical.w, logical.h});
         return true;
     }
+#endif
 
-    [[nodiscard]] std::optional<PlatformReadbackRegion>
-    take_gpu_readback_region() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+std::optional<PlatformReadbackRegion>
+    ViewCore::take_gpu_readback_region() noexcept {
         return renderer_.take_readback_region();
     }
+#endif
 
-    [[nodiscard]] bool suppress_platform_focus(bool suppressed) noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool ViewCore::suppress_platform_focus(bool suppressed) noexcept {
         if (!view_) return false;
         suppress_platform_focus_ = suppressed;
         return true;
     }
 #endif
-    [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
-    bool set_title(std::string_view title) {
+const std::string& ViewCore::last_error() const noexcept { return last_error_; }
+
+bool ViewCore::set_title(std::string_view title) {
         if (!native_view_open()) return false;
         const std::string owned{title};
         return puglSetViewString(view_, PUGL_WINDOW_TITLE, owned.c_str()) == PUGL_SUCCESS;
     }
 
-    bool show() {
+bool ViewCore::show() {
         if (!native_view_open()) return false;
         if (visibility_.visible()) return true;
 
         const auto generation = visibility_.begin_show();
         const auto status =
-            puglShow(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
+            show_pugl_view(view_, embedded_ ? PUGL_SHOW_PASSIVE : PUGL_SHOW_RAISE);
         if (status != PUGL_SUCCESS) {
             visibility_.rollback_show(generation);
             return false;
@@ -334,11 +340,11 @@ public:
         return true;
     }
 
-    [[nodiscard]] bool visible() const noexcept {
+bool ViewCore::visible() const noexcept {
         return native_view_open() && visibility_.visible();
     }
 
-    bool hide() {
+bool ViewCore::hide() {
         if (!native_view_open()) return false;
         if (!visibility_.visible()) return true;
 
@@ -376,7 +382,7 @@ public:
         return true;
     }
 
-    bool set_size(Size logical) {
+bool ViewCore::set_size(Size logical) {
         if (!native_view_open()) return false;
         const auto clamped = size_constraints_.clamp(logical);
         if (!clamped) return false;
@@ -392,15 +398,15 @@ public:
             });
     }
 
-    bool set_min_size(std::optional<Size> logical) {
+bool ViewCore::set_min_size(std::optional<Size> logical) {
         return update_size_constraints(logical, size_constraints_.max_size());
     }
 
-    bool set_max_size(std::optional<Size> logical) {
+bool ViewCore::set_max_size(std::optional<Size> logical) {
         return update_size_constraints(size_constraints_.min_size(), logical);
     }
 
-    bool close_native_view() noexcept {
+bool ViewCore::close_native_view() noexcept {
         if (!view_) {
             should_close_ = true;
             visibility_.set_visible(false);
@@ -426,9 +432,9 @@ public:
                     "NativeUI component deactivation failed");
         best_effort([this] { set_text_input(false, {}, 0.0f); },
                     "NativeUI text-input teardown failed");
-        best_effort([this] { preferred_size_callback_ = {}; },
+        best_effort([this] { preferred_size_.clear_callback(); },
                     "NativeUI preferred-size callback teardown failed");
-        best_effort([this] { preferred_size_state_.reset(); },
+        best_effort([this] { preferred_size_.reset_state(); },
                     "NativeUI preferred-size state teardown failed");
         best_effort([this] { ui_.clear_invalidation_callback(); },
                     "NativeUI invalidation callback teardown failed");
@@ -443,21 +449,18 @@ public:
         // If Pugl could not enter the context, PUGL_UNREALIZE did not reach
         // the renderer. Abandon remaining Skia objects after native teardown.
         renderer_.abandon();
-        puglFreeView(view_);
+        free_view(view_);
         view_ = nullptr;
         visibility_.set_visible(false);
         should_close_ = true;
         return true;
     }
 
-    void set_preferred_size_callback(PreferredSizeCallback callback) {
-        preferred_size_callback_ = std::move(callback);
-        preferred_size_state_.reset();
-        preferred_measure_dirty_ = static_cast<bool>(preferred_size_callback_);
-        flush_preferred_size_notification();
-    }
+void ViewCore::set_preferred_size_callback(PreferredSizeCallback callback) {
+    preferred_size_.set_callback(std::move(callback), ui_);
+}
 
-    void request_redraw(Rect logical_rect) {
+void ViewCore::request_redraw(Rect logical_rect) {
         if (!view_ || logical_rect.empty()) return;
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         if (renderer_.rendering()) ++redraw_requests_during_render_;
@@ -474,49 +477,28 @@ public:
                                 static_cast<unsigned>(physical.h));
     }
 
-    void set_text_input(bool active, Rect logical_area, float logical_cursor_offset) {
-        if (!view_ || !ime_bridge_) return;
+void ViewCore::set_text_input(bool active, Rect logical_area, float logical_cursor_offset) {
+    if (!view_ || !ime_bridge_) return;
+    const auto change = text_input_.update(
+        active, logical_area, logical_cursor_offset, geometry_.last_valid_scale());
+    if (!change) return;
 
-        const float scale = geometry_.last_valid_scale();
-        if (!detail::text_input_boundary_needs_update(
-                text_input_active_,
-                text_input_physical_area_,
-                text_input_physical_cursor_offset_,
-                active,
-                logical_area,
-                logical_cursor_offset,
-                scale)) {
-            return;
+    if (change->active_changed) {
+        if (change->active) {
+            (void)puglStartTimer(view_, kCaretTimerId, kCaretBlinkSeconds);
+        } else {
+            (void)puglStopTimer(view_, kCaretTimerId);
         }
-
-        const bool active_changed = active != text_input_active_;
-        text_input_active_ = active;
-        text_input_logical_area_ = active ? logical_area : Rect{};
-        text_input_logical_cursor_offset_ = active ? logical_cursor_offset : 0.0f;
-
-        const auto scaled = detail::scale_text_input_geometry(
-            text_input_logical_area_, text_input_logical_cursor_offset_, scale);
-        text_input_physical_area_ = scaled.first;
-        text_input_physical_cursor_offset_ = scaled.second;
-
-        if (active_changed) {
-            if (active) {
-                (void)puglStartTimer(view_, kCaretTimerId, kCaretBlinkSeconds);
-            } else {
-                (void)puglStopTimer(view_, kCaretTimerId);
-            }
-        }
-
-        nativeuiImeUpdate(ime_bridge_,
-                          active,
-                          text_input_physical_area_.x,
-                          text_input_physical_area_.y,
-                          text_input_physical_area_.w,
-                          text_input_physical_area_.h,
-                          text_input_physical_cursor_offset_);
     }
+    nativeuiImeUpdate(ime_bridge_, change->active,
+                      change->physical_area.x,
+                      change->physical_area.y,
+                      change->physical_area.w,
+                      change->physical_area.h,
+                      change->physical_cursor_offset);
+}
 
-    void set_clipboard_text(std::string_view text) {
+void ViewCore::set_clipboard_text(std::string_view text) {
         if (!view_) return;
 
         // Pugl's macOS backend maps the canonical text/plain MIME type to
@@ -529,68 +511,20 @@ public:
                          text.size());
     }
 
-    void request_clipboard_text() {
+void ViewCore::request_clipboard_text() {
         if (view_) puglPaste(view_);
     }
 
-    bool accept_drop(std::string_view type, Rect logical_region) {
-        if (!view_ || !active_drop_offer_ || active_drop_offer_->clipboard != PUGL_CLIPBOARD_DRAG) {
-            return false;
-        }
+bool ViewCore::accept_drop(std::string_view type, Rect logical_region) {
+    return drop_offer_.accept(
+        view_, type, logical_region, geometry_.last_valid_scale());
+}
 
-        const auto count = puglGetNumClipboardTypes(view_, PUGL_CLIPBOARD_DRAG);
-        for (uint32_t i = 0; i < count; ++i) {
-            const char* offered = puglGetClipboardType(view_, PUGL_CLIPBOARD_DRAG, i);
-            if (!offered || type != offered) continue;
+void ViewCore::reject_drop(Rect logical_region) {
+    drop_offer_.reject(view_, logical_region, geometry_.last_valid_scale());
+}
 
-            const auto physical = detail::logical_to_physical_covering_rect(
-                logical_region, geometry_.last_valid_scale());
-            const auto status = puglAcceptOffer(
-                view_, active_drop_offer_, i, PUGL_DATA_ACTION_COPY,
-                static_cast<int>(physical.x),
-                static_cast<int>(physical.y),
-                static_cast<unsigned>(std::max(1.0f, physical.w)),
-                static_cast<unsigned>(std::max(1.0f, physical.h)));
-            drop_offer_decided_ = status == PUGL_SUCCESS;
-            return drop_offer_decided_;
-        }
-        return false;
-    }
-
-    void reject_drop(Rect logical_region) {
-        if (!view_ || !active_drop_offer_ || active_drop_offer_->clipboard != PUGL_CLIPBOARD_DRAG) return;
-        const auto physical = detail::logical_to_physical_covering_rect(
-            logical_region, geometry_.last_valid_scale());
-        (void)puglRejectOffer(view_, active_drop_offer_,
-                              static_cast<int>(physical.x),
-                              static_cast<int>(physical.y),
-                              static_cast<unsigned>(std::max(1.0f, physical.w)),
-                              static_cast<unsigned>(std::max(1.0f, physical.h)));
-        drop_offer_decided_ = true;
-    }
-
-private:
-    struct ConstructionCleanup {
-        explicit ConstructionCleanup(ViewCore& owner,
-                                     NativeViewConstructionFaultResult* fault_result) noexcept
-            : owner_(&owner), fault_result(fault_result) {}
-        ~ConstructionCleanup() noexcept {
-            if (armed_) owner_->cleanup_partial_construction_noexcept(*this);
-        }
-        void release() noexcept { armed_ = false; }
-
-        ViewCore* owner_{};
-        NativeViewConstructionFaultResult* fault_result{};
-        bool armed_{true};
-        bool world_acquired{};
-        bool view_acquired{};
-        bool realized{};
-        bool ime_acquired{};
-        bool retained_started{};
-        bool invalidation_attached{};
-    };
-
-    [[nodiscard]] static Size validated_initial_size(const WindowDesc& desc) {
+Size ViewCore::validated_initial_size(const WindowDesc& desc) {
         detail::WindowSizeConstraints constraints;
         if (!constraints.update(desc.min_size, desc.max_size)) {
             throw std::invalid_argument("NativeUI window min/max size constraints are invalid");
@@ -602,7 +536,7 @@ private:
         return *clamped;
     }
 
-    [[nodiscard]] bool apply_size_constraints() {
+bool ViewCore::apply_size_constraints() {
         if (!view_) return false;
         const float scale = geometry_.last_valid_scale();
 
@@ -623,7 +557,7 @@ private:
         return max_status == PUGL_SUCCESS;
     }
 
-    [[nodiscard]] bool update_size_constraints(std::optional<Size> min_size,
+bool ViewCore::update_size_constraints(std::optional<Size> min_size,
                                                std::optional<Size> max_size) {
         if (!native_view_open()) return false;
         const auto previous = size_constraints_;
@@ -643,14 +577,14 @@ private:
         return set_size(*clamped);
     }
 
-    void record_scale_observation(bool accepted) {
+void ViewCore::record_scale_observation(bool accepted) {
         if (!accepted) {
             last_error_ = "NativeUI ignored invalid platform scale factor";
             scene_error_active_ = false;
         }
     }
 
-    void record_scene_error(const char* message) noexcept {
+void ViewCore::record_scene_error(const char* message) noexcept {
         try {
             last_error_ = message ? message : "NativeUI scene rendering failed";
             scene_error_active_ = true;
@@ -659,30 +593,19 @@ private:
         }
     }
 
-    void clear_scene_error() noexcept {
+void ViewCore::clear_scene_error() noexcept {
         if (!scene_error_active_) return;
         last_error_.clear();
         scene_error_active_ = false;
     }
 
-    void queue_preferred_size() {
-        if (!preferred_size_callback_) return;
-        preferred_size_state_.queue(ui_.measure().preferred);
-    }
 
-    void flush_preferred_size_notification() {
-        if (!preferred_size_callback_) return;
-        if (preferred_measure_dirty_) {
-            preferred_measure_dirty_ = false;
-            queue_preferred_size();
-        }
-        (void)preferred_size_state_.dispatch_once([this](Size preferred) {
-            auto callback = preferred_size_callback_;
-            if (callback) callback(preferred);
-        });
-    }
 
-    void remember_teardown_error(const char* message) noexcept {
+void ViewCore::flush_preferred_size_notification() {
+    preferred_size_.flush(ui_);
+}
+
+void ViewCore::remember_teardown_error(const char* message) noexcept {
         if (!last_error_.empty()) return;
         try {
             last_error_ = message ? message : "NativeUI teardown failed";
@@ -692,14 +615,14 @@ private:
         }
     }
 
-    void release_owned_world_noexcept() noexcept {
+void ViewCore::release_owned_world_noexcept() noexcept {
         if (world_ && owns_world_) {
             puglFreeWorld(world_);
         }
         world_ = nullptr;
     }
 
-    void cleanup_partial_construction_noexcept(ConstructionCleanup& cleanup) noexcept {
+void ViewCore::cleanup_partial_construction_noexcept(ConstructionCleanup& cleanup) noexcept {
         const auto best_effort = [](auto&& step) noexcept {
             try {
                 step();
@@ -735,7 +658,7 @@ private:
                 cleanup.realized = false;
                 if (cleanup.fault_result) ++cleanup.fault_result->unrealize_released;
             }
-            puglFreeView(view_);
+            free_view(view_);
             view_ = nullptr;
             cleanup.view_acquired = false;
             if (cleanup.fault_result) ++cleanup.fault_result->view_released;
@@ -751,7 +674,7 @@ private:
         }
     }
 
-    static void magnify_thunk(void* user_data, float magnification,
+void ViewCore::magnify_thunk(void* user_data, float magnification,
                               double x, double y, PuglMods mods) noexcept {
         auto* self = static_cast<ViewCore*>(user_data);
         if (!self) return;
@@ -773,7 +696,7 @@ private:
         }
     }
 
-    static void ime_event_thunk(void* user_data,
+void ViewCore::ime_event_thunk(void* user_data,
                                 NativeUIImeEventType type,
                                 const char* utf8,
                                 size_t utf8_size,
@@ -800,7 +723,7 @@ private:
         }
     }
 
-    void consume_failed_native_key(const PuglEvent* event) noexcept {
+void ViewCore::consume_failed_native_key(const PuglEvent* event) noexcept {
 #if defined(__APPLE__)
         // A component may mutate local state before throwing. Treat failed
         // keyboard/text dispatch as consumed, rather than invoking a DAW
@@ -814,8 +737,8 @@ private:
 #endif
     }
 
-    static PuglStatus event_thunk(PuglView* view, const PuglEvent* event) noexcept {
-        auto* self = static_cast<ViewCore*>(puglGetHandle(view));
+PuglStatus ViewCore::event_thunk(PuglView* view, const PuglEvent* event) noexcept {
+        auto* self = static_cast<ViewCore*>(get_view_handle(view));
         if (!self) return PUGL_BAD_PARAMETER;
         try {
             return self->on_event(event);
@@ -832,9 +755,4 @@ private:
         }
     }
 
-    PuglStatus on_event(const PuglEvent* event) {
-        switch (event->type) {
-        case PUGL_REALIZE:
-            record_scale_observation(
-                geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
-            return PUGL_SUCCESS;
+} // namespace ui::detail

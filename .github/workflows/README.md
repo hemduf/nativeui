@@ -6,7 +6,7 @@
 - `pugl-integration.yml` qualifies focused Pugl/native-view lifecycle changes on macOS PRs.
 - `advanced-rendering-docs-validation.yml` compiles focused rendering documentation contracts on relevant changes.
 - `main-smoke.yml` runs the Core unit suite after a merge to `main`.
-- `package-contract.yml` builds installable packages and exercises installed-package consumers.
+- `package-contract.yml` builds installable packages and exercises installed-package consumers on relevant pull requests and on `main`.
 - `wasm.yml` validates the WebAssembly build and browser integration.
 
 ## Shared C/C++ compiler cache

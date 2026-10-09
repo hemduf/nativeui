@@ -1,6 +1,18 @@
 name: Package Contracts
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/package-contract.yml'
+      - '.github/actions/setup-cpp-cache/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'examples/features/**'
+      - '*.md'
   push:
     branches: [main]
     paths:

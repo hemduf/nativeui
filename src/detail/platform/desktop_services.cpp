@@ -1,3 +1,18 @@
+
+
+// Platform desktop services factories for standalone and embedded views.
+#include "standalone_window.hpp"
+#include "embedded_view.hpp"
+#if defined(__APPLE__)
+#  include "../macos_desktop_services.hpp"
+#elif defined(_WIN32)
+#  include "../windows_desktop_services.hpp"
+#elif defined(__linux__)
+#  include "../linux_desktop_services.hpp"
+#endif
+
+namespace ui {
+
 EmbeddedView::EmbeddedView(
     UI& ui,
     NativeParentHandle parent,
@@ -38,3 +53,5 @@ DesktopServices& EmbeddedView::desktop_services() {
     }
     return *desktop_services_;
 }
+
+} // namespace ui

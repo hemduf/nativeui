@@ -1,60 +1,12 @@
-#include <nativeui/nativeui.hpp>
+#include "gl_renderer.hpp"
+#include "platform_common.hpp"
 #include <nativeui/detail/raster_cache_access.hpp>
-
-#include "view_geometry.hpp"
-#include "scene_extent.hpp"
-
-#include <pugl/gl.h>
-#include <pugl/pugl.h>
-
-#include "include/core/SkColorSpace.h"
-#include "include/core/SkImage.h"
-#include "include/core/SkPaint.h"
-#include "include/core/SkSurface.h"
-#include "include/gpu/GpuTypes.h"
-#include "include/gpu/ganesh/GrBackendSurface.h"
-#include "include/gpu/ganesh/GrDirectContext.h"
-#include "include/gpu/ganesh/SkSurfaceGanesh.h"
-#include "include/gpu/ganesh/gl/GrGLAssembleInterface.h"
-#include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
-#include "include/gpu/ganesh/gl/GrGLDirectContext.h"
-#include "include/gpu/ganesh/gl/GrGLInterface.h"
-
-#include "painter_private_hooks.hpp"
-#include "render_resource_materialization.hpp"
-#include "raster_cache_renderer.hpp"
-#if defined(__EMSCRIPTEN__)
-#  include "include/gpu/ganesh/gl/GrGLMakeWebGLInterface.h"
-#endif
-
-#if defined(_WIN32)
-#  include <windows.h>
-#endif
-
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstdint>
-#include <cstring>
-#include <exception>
-#include <functional>
-#include <limits>
-#include <new>
-#include <optional>
-#include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <utility>
+#include "../raster_cache_renderer.hpp"
 
 namespace ui {
 
-
 namespace {
 
-constexpr uintptr_t kCaretTimerId = 0x4E554943u; // "NUIC"
-constexpr double kCaretBlinkSeconds = 0.5;
-constexpr double kMultiClickSeconds = 0.35;
-constexpr float kMultiClickDistance = 5.0f;
 constexpr GrGLenum kGlRgba8 = 0x8058u;
 constexpr GrGLenum kGlFramebuffer = 0x8D40u;
 
@@ -227,14 +179,6 @@ private:
         paint_callback, validate_callback, commit_callback);
 }
 
-PuglSpan to_pugl_span(float physical) {
-    return static_cast<PuglSpan>(detail::physical_to_pugl_view_span(physical));
-}
-
-[[noreturn]] void throw_pugl(PuglStatus status, const char* what) {
-    throw std::runtime_error(std::string(what) + ": " + puglStrerror(status));
-}
-
 sk_sp<const GrGLInterface> make_skia_gl_interface() {
 #if defined(__EMSCRIPTEN__)
     // Skia's WebGL interface binds the emscripten_gl* entry points of the
@@ -263,11 +207,7 @@ sk_sp<const GrGLInterface> make_skia_gl_interface() {
 
 namespace detail {
 
-class SkiaGlRenderer {
-public:
-    // PUGL_UNREALIZE enters the owning GL context before calling us. Release
-    // GPU objects there; if entering the context failed, abandon instead.
-    void reset() noexcept {
+void SkiaGlRenderer::reset() noexcept {
         if (context_ && context_->abandoned()) {
             abandon();
             return;
@@ -286,7 +226,7 @@ public:
         clear_identity();
     }
 
-    void abandon() noexcept {
+void SkiaGlRenderer::abandon() noexcept {
         // Confirmed context loss: abandon first so releasing cached Skia handles
         // cannot attempt stale backend work, then discard this view's cache.
         if (context_) context_->abandonContext();
@@ -302,13 +242,13 @@ public:
         clear_identity();
     }
 
-    void invalidate() noexcept {
+void SkiaGlRenderer::invalidate() noexcept {
         full_repaint_required_ = true;
         present_pending_ = true;
     }
 
-    [[nodiscard]] bool invalidate_from_ui(Rect rect) noexcept {
-        if (!retain_pending_damage(rect)) full_repaint_required_ = true;
+bool SkiaGlRenderer::invalidate_from_ui(Rect rect) noexcept {
+        if (!pending_damage_.retain(rect)) full_repaint_required_ = true;
         present_pending_ = true;
         if (rendering_ && scene_frame_captured_) {
             deferred_redraw_pending_ = true;
@@ -317,96 +257,18 @@ public:
         return true;
     }
 
-    [[nodiscard]] bool rendering() const noexcept { return rendering_; }
+bool SkiaGlRenderer::rendering() const noexcept { return rendering_; }
 
-    void invalidate_content() noexcept {
+void SkiaGlRenderer::invalidate_content() noexcept {
         scene_valid_ = false;
         invalidate();
     }
 
-    [[nodiscard]] bool take_deferred_redraw() noexcept {
+bool SkiaGlRenderer::take_deferred_redraw() noexcept {
         return std::exchange(deferred_redraw_pending_, false);
     }
 
-private:
-    [[nodiscard]] bool retain_pending_damage(Rect rect) noexcept {
-        if (!std::isfinite(rect.x) || !std::isfinite(rect.y) ||
-            !std::isfinite(rect.w) || !std::isfinite(rect.h) ||
-            !(rect.w > 0.0f) || !(rect.h > 0.0f)) {
-            return false;
-        }
-        const double right = static_cast<double>(rect.x) + rect.w;
-        const double bottom = static_cast<double>(rect.y) + rect.h;
-        if (!std::isfinite(right) || !std::isfinite(bottom)) return false;
-
-        if (!pending_damage_valid_) {
-            pending_damage_ = rect;
-            pending_damage_valid_ = true;
-            return true;
-        }
-
-        const double left_union = (std::min)(
-            static_cast<double>(pending_damage_.x), static_cast<double>(rect.x));
-        const double top_union = (std::min)(
-            static_cast<double>(pending_damage_.y), static_cast<double>(rect.y));
-        const double right_union = (std::max)(
-            static_cast<double>(pending_damage_.x) + pending_damage_.w, right);
-        const double bottom_union = (std::max)(
-            static_cast<double>(pending_damage_.y) + pending_damage_.h, bottom);
-        constexpr double max_float =
-            static_cast<double>(std::numeric_limits<float>::max());
-        if (left_union < -max_float || top_union < -max_float ||
-            right_union > max_float || bottom_union > max_float ||
-            right_union - left_union > max_float ||
-            bottom_union - top_union > max_float) {
-            return false;
-        }
-        const auto lower = [](double value) noexcept {
-            float result = static_cast<float>(value);
-            if (static_cast<double>(result) > value) {
-                result = std::nextafter(result,
-                                        -std::numeric_limits<float>::infinity());
-            }
-            return result;
-        };
-        const auto upper = [](double value) noexcept {
-            float result = static_cast<float>(value);
-            if (static_cast<double>(result) < value) {
-                result = std::nextafter(result,
-                                        std::numeric_limits<float>::infinity());
-            }
-            return result;
-        };
-        const float x = lower(left_union);
-        const float y = lower(top_union);
-        const float right_edge = upper(right_union);
-        const float bottom_edge = upper(bottom_union);
-        const double width_extent = static_cast<double>(right_edge) - x;
-        const double height_extent = static_cast<double>(bottom_edge) - y;
-        if (width_extent > max_float || height_extent > max_float) return false;
-        const float width = upper(width_extent);
-        const float height = upper(height_extent);
-        if (!std::isfinite(x) || !std::isfinite(y) ||
-            !std::isfinite(width) || !std::isfinite(height)) {
-            return false;
-        }
-        pending_damage_ = Rect{x, y, width, height};
-        return true;
-    }
-
-    [[nodiscard]] static bool covers(Rect outer, Rect inner) noexcept {
-        const double outer_right = static_cast<double>(outer.x) + outer.w;
-        const double outer_bottom = static_cast<double>(outer.y) + outer.h;
-        const double inner_right = static_cast<double>(inner.x) + inner.w;
-        const double inner_bottom = static_cast<double>(inner.y) + inner.h;
-        return std::isfinite(outer_right) && std::isfinite(outer_bottom) &&
-               std::isfinite(inner_right) && std::isfinite(inner_bottom) &&
-               outer.x <= inner.x && outer.y <= inner.y &&
-               outer_right >= inner_right && outer_bottom >= inner_bottom;
-    }
-
-
-    void clear_identity() noexcept {
+void SkiaGlRenderer::clear_identity() noexcept {
         width_ = height_ = 0;
         scene_scale_ = 0.0f;
         bind_framebuffer_ = nullptr;
@@ -418,8 +280,7 @@ private:
         rendering_ = false;
         deferred_redraw_pending_ = false;
         scene_frame_captured_ = false;
-        pending_damage_ = {};
-        pending_damage_valid_ = false;
+        pending_damage_.clear();
         scene_uses_effects_ = false;
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
         readback_pending_ = false;
@@ -429,19 +290,30 @@ private:
 #endif
     }
 
-public:
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    [[nodiscard]] static bool register_root_raster_cache_boundary(UI& ui) {
-        return RasterCacheAccess::register_root(ui.tree_);
-    }
+bool SkiaGlRenderer::register_root_raster_cache_boundary(UI& ui) {
+    return RasterCacheAccess::register_root(ui.tree_);
+}
 
-    [[nodiscard]] static bool invalidate_root_raster_cache_boundary(UI& ui) {
-        return RasterCacheAccess::invalidate_root(ui.tree_);
-    }
+bool SkiaGlRenderer::invalidate_root_raster_cache_boundary(UI& ui) {
+    return RasterCacheAccess::invalidate_root(ui.tree_);
+}
 
-    void inject_fault(SceneFaultStage stage) noexcept { fault_stage_ = stage; }
+bool PlatformTestAccess::register_root_raster_cache_boundary(UI& ui) {
+    return SkiaGlRenderer::register_root_raster_cache_boundary(ui);
+}
 
-    [[nodiscard]] SceneDiagnostics diagnostics() const noexcept {
+bool PlatformTestAccess::invalidate_root_raster_cache_boundary(UI& ui) {
+    return SkiaGlRenderer::invalidate_root_raster_cache_boundary(ui);
+}
+#endif
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+void SkiaGlRenderer::inject_fault(SceneFaultStage stage) noexcept { fault_stage_ = stage; }
+#endif
+
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+SceneDiagnostics SkiaGlRenderer::diagnostics() const noexcept {
         return SceneDiagnostics{
             .scene_allocations = scene_allocations_,
             .raster_cache_hits = raster_cache_hits_,
@@ -470,26 +342,27 @@ public:
             .present_pending = present_pending_,
         };
     }
+#endif
 
-    void request_readback(int x, int y) noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+void SkiaGlRenderer::request_readback(int x, int y) noexcept {
         readback_x_ = x;
         readback_y_ = y;
         readback_pending_ = true;
         readback_result_.reset();
     }
+#endif
 
-    [[nodiscard]] std::optional<PlatformReadbackPixel> take_readback() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+std::optional<PlatformReadbackPixel> SkiaGlRenderer::take_readback() noexcept {
         auto result = readback_result_;
         readback_result_.reset();
         return result;
     }
+#endif
 
-    // Test-only bounded physical-pixel readback for whole-surface scene
-    // oracles. Bounded so a test cannot request an unbounded staging buffer.
-    static constexpr std::uint64_t kMaxReadbackRegionPixels =
-        4u * 1024u * 1024u;
-
-    [[nodiscard]] bool request_readback_region(int x,
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+bool SkiaGlRenderer::request_readback_region(int x,
                                                int y,
                                                int width,
                                                int height) noexcept {
@@ -506,16 +379,18 @@ public:
         readback_region_pending_ = true;
         return true;
     }
+#endif
 
-    [[nodiscard]] std::optional<PlatformReadbackRegion>
-    take_readback_region() noexcept {
+#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
+std::optional<PlatformReadbackRegion>
+    SkiaGlRenderer::take_readback_region() noexcept {
         auto result = std::move(readback_region_result_);
         readback_region_result_.reset();
         return result;
     }
 #endif
 
-    bool render(UI& ui,
+bool SkiaGlRenderer::render(UI& ui,
                 PlatformServices& services,
                 Size physical_size,
                 float scale_factor) {
@@ -694,7 +569,7 @@ public:
             scene_uses_effects_ = true; // conservative for the legacy paths
             full_repaint_required_ = ui.dirty();
             deferred_redraw_pending_ |= full_repaint_required_;
-            if (!full_repaint_required_) clear_pending_damage();
+            if (!full_repaint_required_) pending_damage_.clear();
             remember_scene_update(SkIRect::MakeWH(physical_width, physical_height), false);
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
             ++scene_builds_;
@@ -722,13 +597,13 @@ public:
             if (!full_update) {
                 if (!ui.scene_paint_transaction_has_damage(transaction) ||
                     !ui.scene_paint_transaction_damage_valid(transaction) ||
-                    !pending_damage_valid_ ||
-                    !covers(pending_damage_,
+                    !pending_damage_.valid() ||
+                    !pending_damage_.covers(
                             ui.scene_paint_transaction_damage(transaction))) {
                     full_update = true;
                 } else {
                     damage = ::ui::detail::map_device_damage(
-                        pending_damage_,
+                        pending_damage_.rect(),
                         scale_factor, physical_width, physical_height);
                     if (!damage || damage->covers_scene) full_update = true;
                 }
@@ -835,7 +710,7 @@ public:
                                                : scene_uses_effects_ || used_effects;
             full_repaint_required_ = ui.dirty();
             deferred_redraw_pending_ |= full_repaint_required_;
-            if (!full_repaint_required_) clear_pending_damage();
+            if (!full_repaint_required_) pending_damage_.clear();
             const auto updated = full_update
                 ? SkIRect::MakeWH(physical_width, physical_height)
                 : partial_clip;
@@ -844,7 +719,7 @@ public:
             ++scene_builds_;
 #endif
         } else if (!ui.dirty()) {
-            clear_pending_damage();
+            pending_damage_.clear();
         }
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
@@ -985,13 +860,7 @@ public:
         return true;
     }
 
-private:
-    void clear_pending_damage() noexcept {
-        pending_damage_ = {};
-        pending_damage_valid_ = false;
-    }
-
-    void remember_scene_update(const SkIRect& update, bool partial) noexcept {
+void SkiaGlRenderer::remember_scene_update(const SkIRect& update, bool partial) noexcept {
         last_update_x_ = update.left();
         last_update_y_ = update.top();
         last_update_width_ = update.width();
@@ -1004,101 +873,12 @@ private:
     }
 
 #if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    bool fail_at(SceneFaultStage stage) noexcept {
+bool SkiaGlRenderer::fail_at(SceneFaultStage stage) noexcept {
         if (fault_stage_ != stage) return false;
         fault_stage_ = SceneFaultStage::None;
         return true;
     }
 #endif
-    sk_sp<const GrGLInterface> interface_;
-    sk_sp<GrDirectContext> context_;
-    RenderResourceMaterializationContext render_resources_;
-    GrGLBindFramebufferFn* bind_framebuffer_{};
-    sk_sp<SkSurface> scene_;
-    sk_sp<SkImage> snapshot_;
-    sk_sp<SkSurface> presentation_; // borrowed Pugl framebuffer, never owned
-    int width_{};
-    int height_{};
-    float scene_scale_{};
-    Rect pending_damage_{};
-    bool pending_damage_valid_{};
-    bool scene_uses_effects_{};
-    bool scene_frame_captured_{};
-    int last_update_x_{};
-    int last_update_y_{};
-    int last_update_width_{};
-    int last_update_height_{};
-    GLint presentation_framebuffer_{};
-    GLint presentation_samples_{};
-    GLint presentation_stencil_bits_{};
-    bool scene_valid_{};
-    bool full_repaint_required_{true};
-    bool present_pending_{true};
-    bool rendering_{};
-    bool deferred_redraw_pending_{};
-#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    SceneFaultStage fault_stage_{SceneFaultStage::None};
-    std::uint64_t scene_allocations_{};
-    std::uint64_t raster_cache_hits_{};
-    std::uint64_t raster_cache_updates_{};
-    std::uint64_t scene_builds_{};
-    std::uint64_t partial_scene_updates_{};
-    std::uint64_t presentations_{};
-    std::uint64_t render_resource_cache_clears_{};
-    int readback_x_{};
-    int readback_y_{};
-    bool readback_pending_{};
-    std::optional<PlatformReadbackPixel> readback_result_;
-    int readback_region_x_{};
-    int readback_region_y_{};
-    int readback_region_width_{};
-    int readback_region_height_{};
-    bool readback_region_pending_{};
-    std::optional<PlatformReadbackRegion> readback_region_result_;
-#endif
-};
 
 } // namespace detail
-
-namespace {
-
-[[nodiscard]] bool platform_primary_modifier(PuglMods mods) noexcept {
-#if defined(__APPLE__)
-    return (mods & PUGL_MOD_SUPER) != 0;
-#else
-    return (mods & PUGL_MOD_CTRL) != 0;
-#endif
-}
-
-Key translate_key(uint32_t key, PuglMods mods) {
-    const bool primary = platform_primary_modifier(mods);
-    switch (key) {
-    case PUGL_KEY_LEFT: return Key::Left;
-    case PUGL_KEY_RIGHT: return Key::Right;
-    case PUGL_KEY_UP: return Key::Up;
-    case PUGL_KEY_DOWN: return Key::Down;
-    case PUGL_KEY_F2: return Key::F2;
-    case PUGL_KEY_PAGE_UP: return Key::PageUp;
-    case PUGL_KEY_PAGE_DOWN: return Key::PageDown;
-    case PUGL_KEY_F3: return Key::F3;
-    case PUGL_KEY_MENU: return Key::Menu;
-    case PUGL_KEY_F10: return Key::F10;
-    case PUGL_KEY_HOME: return Key::Home;
-    case PUGL_KEY_END: return Key::End;
-    case PUGL_KEY_BACKSPACE: return Key::Backspace;
-    case PUGL_KEY_DELETE: return Key::Delete;
-    case PUGL_KEY_ENTER: return Key::Enter;
-    case PUGL_KEY_ESCAPE: return Key::Escape;
-    default: break;
-    }
-
-    return detail::translate_ascii_key(key, primary);
-}
-
-void apply_modifiers(InputEvent& out, PuglMods state) {
-    out.shift = (state & PUGL_MOD_SHIFT) != 0;
-    out.ctrl = (state & PUGL_MOD_CTRL) != 0;
-    out.alt = (state & PUGL_MOD_ALT) != 0;
-    out.gui = (state & PUGL_MOD_SUPER) != 0;
-    out.primary = platform_primary_modifier(state);
-}
+} // namespace ui

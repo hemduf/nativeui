@@ -1,4 +1,20 @@
 
+// Full native event dispatch is no longer split across a class definition.
+#include "view_core.hpp"
+#include "../pugl_button_translation.hpp"
+#include "../pugl_pointer_translation.hpp"
+#include "../pugl_scroll_translation.hpp"
+
+namespace ui::detail {
+
+PuglStatus ViewCore::on_event(const PuglEvent* event) {
+        switch (event->type) {
+        case PUGL_REALIZE:
+            record_scale_observation(
+                geometry_.observe_scale(static_cast<float>(puglGetScaleFactor(view_))));
+            return PUGL_SUCCESS;
+
+
         case PUGL_UNREALIZE:
             renderer_.reset();
             return PUGL_SUCCESS;
@@ -31,7 +47,7 @@
 #else
             ui_.refresh_focus(services_);
 #endif
-            preferred_measure_dirty_ = true;
+            preferred_size_.mark_dirty();
             flush_preferred_size_notification();
             return PUGL_SUCCESS;
         }
@@ -116,7 +132,7 @@
             if (suppress_platform_focus_) return PUGL_SUCCESS;
 #endif
             if (suppress_embedded_focus_cleanup_) return PUGL_SUCCESS;
-            clear_raw_pointer_positions();
+            pointer_positions_.clear();
             ui_.deactivate(services_);
             set_text_input(false, {}, 0.0f);
             return PUGL_SUCCESS;
@@ -182,7 +198,7 @@
             input.pointer = detail::translate_pugl_pointer_contact(
                 event->pointer, geometry_.last_valid_scale());
             apply_modifiers(input, event->pointer.state);
-            update_raw_pointer_position(input);
+            pointer_positions_.update(input);
             (void)ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }
@@ -218,16 +234,9 @@
             apply_modifiers(input, event->button.state);
 
             if (input.type == InputType::PointerDown) {
-                const double now = puglGetTime(world_);
-                const float dx = input.position.x - last_click_position_.x;
-                const float dy = input.position.y - last_click_position_.y;
-                const bool close_in_time = now - last_click_time_ <= kMultiClickSeconds;
-                const bool close_in_space = std::sqrt(dx * dx + dy * dy) <= kMultiClickDistance;
-                click_count_ = close_in_time && close_in_space ? std::min(3, click_count_ + 1) : 1;
-                last_click_time_ = now;
-                last_click_position_ = input.position;
+                (void)click_sequence_.record(puglGetTime(world_), input.position);
             }
-            input.clicks = input.type == InputType::ContextMenu ? 1 : click_count_;
+            input.clicks = input.type == InputType::ContextMenu ? 1 : click_sequence_.count();
             ui_.dispatch(input, services_);
             return PUGL_SUCCESS;
         }
@@ -307,9 +316,9 @@
                 }
 
                 detail::ScopedBorrowState offer_borrow{
-                    active_drop_offer_, drop_offer_decided_, &event->offer};
+                    drop_offer_.offer_slot(), drop_offer_.decision_slot(), &event->offer};
                 (void)ui_.dispatch(input, services_);
-                if (!drop_offer_decided_) {
+                if (!drop_offer_.offer_decided()) {
                     (void)puglRejectOffer(view_,
                                           &event->offer,
                                           0,
@@ -373,106 +382,9 @@
         }
     }
 
-    struct RawPointerPosition {
-        PointerId id{};
-        Point position{};
-    };
-
-    void update_raw_pointer_position(InputEvent& event) noexcept {
-        std::size_t index = raw_pointer_position_count_;
-        for (std::size_t i = 0; i < raw_pointer_position_count_; ++i) {
-            if (raw_pointer_positions_[i].id == event.pointer.id) {
-                index = i;
-                break;
-            }
-        }
-
-        const bool terminal =
-            event.type == InputType::PointerUp ||
-            event.type == InputType::PointerCancel;
-
-        if (index != raw_pointer_position_count_) {
-            if (event.type != InputType::PointerDown) {
-                event.delta = {
-                    event.position.x - raw_pointer_positions_[index].position.x,
-                    event.position.y - raw_pointer_positions_[index].position.y};
-            }
-
-            if (terminal) {
-                --raw_pointer_position_count_;
-                if (index != raw_pointer_position_count_) {
-                    raw_pointer_positions_[index] =
-                        raw_pointer_positions_[raw_pointer_position_count_];
-                }
-                raw_pointer_positions_[raw_pointer_position_count_] = {};
-            } else {
-                raw_pointer_positions_[index].position = event.position;
-            }
-            return;
-        }
-
-        if (!terminal && raw_pointer_position_count_ < raw_pointer_positions_.size()) {
-            raw_pointer_positions_[raw_pointer_position_count_++] = {
-                event.pointer.id, event.position};
-        }
-    }
-
-    void clear_raw_pointer_positions() noexcept {
-        for (std::size_t i = 0; i < raw_pointer_position_count_; ++i) {
-            raw_pointer_positions_[i] = {};
-        }
-        raw_pointer_position_count_ = 0U;
-    }
-
-    UI& ui_;
-    PlatformServices& services_;
-    PuglWorld* world_{};
-    bool owns_world_{};
-    PuglView* view_{};
-    NativeUIImeBridge* ime_bridge_{};
-    SkiaGlRenderer renderer_;
-    detail::ViewGeometryState geometry_;
-    detail::WindowSizeConstraints size_constraints_;
-    detail::PreferredSizeState preferred_size_state_;
-    PreferredSizeCallback preferred_size_callback_;
-    bool preferred_measure_dirty_{};
-    bool should_close_{};
-    detail::WindowVisibilityState visibility_;
-    bool embedded_{};
-    bool suppress_embedded_focus_cleanup_{};
-    bool deferred_scene_redraw_{};
-#if defined(NATIVEUI_ENABLE_PLATFORM_TEST_SEAMS)
-    std::uint64_t failed_scene_exposes_{};
-    std::uint64_t deferred_redraw_attempts_{};
-    std::uint64_t deferred_redraw_rejections_{};
-    std::uint64_t redraw_requests_during_render_{};
-    bool recreate_renderer_on_expose_{};
-    std::optional<float> scene_scale_override_;
-    bool reject_deferred_redraw_once_{};
-    bool suppress_platform_focus_{};
-#endif
-    bool text_input_active_{};
-    Rect text_input_logical_area_{};
-    float text_input_logical_cursor_offset_{};
-    Rect text_input_physical_area_{};
-    float text_input_physical_cursor_offset_{};
-    bool have_pointer_position_{};
-    Point last_pointer_position_{};
-    std::array<RawPointerPosition, 16U> raw_pointer_positions_{};
-    std::size_t raw_pointer_position_count_{};
-    double last_click_time_{-1000.0};
-    Point last_click_position_{};
-    int click_count_{};
-    const PuglDataOfferEvent* active_drop_offer_{};
-    bool drop_offer_decided_{};
-    std::string last_error_;
-    bool scene_error_active_{};
-    std::function<void()> close_callback_;
-};
-
 NativeViewConstructionFaultResult exercise_native_view_construction_fault(
     UI& ui,
-    PlatformServices& services,
+    ViewPlatformServices& services,
     NativeParentHandle parent,
     Size size,
     NativeViewConstructionFaultStage stage) noexcept {
@@ -483,7 +395,7 @@ NativeViewConstructionFaultResult exercise_native_view_construction_fault(
             services,
             PUGL_MODULE,
             WindowDesc{
-                .title = "NativeUI T130 construction fault probe",
+                .title = "NativeUI construction fault probe",
                 .size = size,
                 .resizable = true,
             },
@@ -501,4 +413,5 @@ NativeViewConstructionFaultResult exercise_native_view_construction_fault(
     return result;
 }
 
-} // namespace
+
+} // namespace ui::detail

@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 #include "../src/detail/view_geometry.hpp"
+#include "../src/detail/platform/preferred_size_notifier.hpp"
 
 #include <cmath>
 #include <limits>
@@ -255,6 +256,70 @@ void test_two_view_scale_isolation() {
     NUI_CHECK(same(b.logical_size(), {100.0f, 50.0f}));
 }
 
+struct PreferredMeasureProbeState {
+    int measurements{};
+    bool throw_on_measure{};
+};
+
+class PreferredMeasureProbe final : public ui::Component {
+public:
+    explicit PreferredMeasureProbe(std::shared_ptr<PreferredMeasureProbeState> state)
+        : state_(std::move(state)) {}
+
+    [[nodiscard]] ui::Size measure(
+        const std::vector<ui::ChildMetrics>&) const override {
+        ++state_->measurements;
+        if (state_->throw_on_measure) {
+            throw std::runtime_error("injected preferred-size measurement failure");
+        }
+        return {140.0f, 70.0f};
+    }
+
+    void paint(ui::PaintContext&) const override {}
+
+private:
+    std::shared_ptr<PreferredMeasureProbeState> state_;
+};
+
+void test_preferred_size_notification_recovers_after_measure_throw() {
+    const auto state = std::make_shared<PreferredMeasureProbeState>();
+    ui::UI tree{ui::Spec{[state] {
+        return std::make_unique<PreferredMeasureProbe>(state);
+    }, {}}};
+    ui::detail::PreferredSizeNotifier notifier;
+    int notifications{};
+
+    state->throw_on_measure = true;
+    bool caught{};
+    try {
+        notifier.set_callback([&](ui::Size) { ++notifications; }, tree);
+    } catch (const std::runtime_error&) {
+        caught = true;
+    }
+    NUI_CHECK(caught);
+    NUI_CHECK(notifications == 0);
+
+    const int attempts = state->measurements;
+    state->throw_on_measure = false;
+    notifier.flush(tree);
+    NUI_CHECK(state->measurements > attempts);
+    NUI_CHECK(notifications == 1);
+
+    notifier.flush(tree);
+    NUI_CHECK(notifications == 1);
+
+    // A failure in one view must not suppress another view's notification.
+    const auto other = std::make_shared<PreferredMeasureProbeState>();
+    ui::UI independent{ui::Spec{[other] {
+        return std::make_unique<PreferredMeasureProbe>(other);
+    }, {}}};
+    ui::detail::PreferredSizeNotifier sibling;
+    int sibling_notifications{};
+    sibling.set_callback([&](ui::Size) { ++sibling_notifications; }, independent);
+    NUI_CHECK(sibling_notifications == 1);
+    NUI_CHECK(notifications == 1);
+}
+
 void test_preferred_size_epsilon_coalescing_and_reentrancy() {
     ui::detail::PreferredSizeState preferred;
     std::vector<ui::Size> notifications;
@@ -328,6 +393,7 @@ void suite() {
     test_configure_snapshot_dispatches_exactly_one_layout();
     test_fractional_dirty_and_pointer_conversion();
     test_two_view_scale_isolation();
+    test_preferred_size_notification_recovers_after_measure_throw();
     test_preferred_size_epsilon_coalescing_and_reentrancy();
     test_preferred_dispatch_survives_owner_teardown();
     test_pugl_view_span_rounding_and_limit();

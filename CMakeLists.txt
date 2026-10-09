@@ -274,6 +274,16 @@ if(NATIVEUI_BUILD_PLATFORM)
 
   add_library(nativeui STATIC
     src/pugl_skia.cpp
+    src/detail/platform/input_translation.cpp
+    src/detail/platform/gl_renderer.cpp
+    src/detail/platform/view_core.cpp
+    src/detail/platform/view_events.cpp
+    src/detail/platform/drop_offer_state.cpp
+    src/detail/platform/dispatcher_backend.cpp
+    src/detail/platform/application.cpp
+    src/detail/platform/standalone_window.cpp
+    src/detail/platform/embedded_view.cpp
+    src/detail/platform/desktop_services.cpp
   )
   add_library(NativeUI::NativeUI ALIAS nativeui)
   set_target_properties(nativeui PROPERTIES POSITION_INDEPENDENT_CODE ON)

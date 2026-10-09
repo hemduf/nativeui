@@ -8,6 +8,9 @@ namespace ui::detail {
 
 enum class NativeViewConstructionFaultStage : std::uint8_t {
     AfterViewCreation,
+    // Synthetic failure after installing the Pugl user handle and before
+    // publishing the native event callback. Exercises constructor rollback.
+    EventCallbackRegistrationFailure,
     AfterRealize,
     AfterImeCreate,
     AfterSizeConstraints,

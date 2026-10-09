@@ -234,6 +234,23 @@ A second platform backend should be introduced only if a real second implementat
 
 ---
 
+### Source-private Pugl/Skia implementation modules
+
+The Pugl/Skia platform implementation is split into cohesive source-private
+C++ translation units, compiled with an identical source manifest for both
+source-tree and installed-package consumers. Complete internal modules under `src/detail/platform/` own Skia/GL
+rendering, event translation and dispatch, explicit native platform adapters,
+view lifecycle with instance-owned text-input, preferred-size and drop-offer
+collaborators, dispatcher/application ownership, standalone and embedded views,
+and desktop services. View input trackers have bounded, per-instance state.
+Native handles and event callbacks use explicit functions instead of preprocessor
+rebinding of Pugl APIs or `PlatformServices`.
+
+These types are source-private and are not part of the public API. The Pugl
+Objective-C bridge remains compiled separately for each final consumer, with
+consumer-specific runtime naming. Native resources and scene state remain
+owned by the associated application or view instance.
+
 ## 6. Rendering: Skia
 
 NativeUI uses Skia as the rendering engine and the pinned `hemduf/skia-builder` fork of `olilarkin/skia-builder` as the binary distribution source.
@@ -672,6 +689,15 @@ Its drawing callback receives local coordinates through `CanvasContext2D`. Its i
 Reusable standard controls should eventually become first-class components rather than permanent Canvas-only implementations.
 
 ---
+
+### Keyboard symbol coverage
+
+The pinned Pugl symbolic key enumeration (F1-F12, navigation, modifier side,
+lock and all keypad variants) and all printable ASCII keys map to individual
+NativeUI `Key` values. Existing `Key` numeric values are unchanged.
+Pugl provides unshifted, layout-relative codes for shortcuts; actual Unicode
+text and IME composition are handled separately. Primary+Q preserves the
+existing standalone close shortcut.
 
 ## 14. Event mapping from Pugl
 
