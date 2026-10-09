@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Compare Linux executable relinks with the default linker and mold.
 
-A baseline build creates all object files. A timestamp-only library update then
-forces a linker-only baseline pass; switching CMake's executable linker flag
-forces the experimental pass without changing any compiler inputs.
+A baseline build creates all object files. Reconfiguring the executable
+link flags forces every executable to relink with the system linker and then
+mold, without changing any compiler inputs.
 """
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,23 +16,33 @@ import subprocess
 import sys
 import time
 
-LINK_STEP = re.compile(r"^\[\d+/\d+\] Linking (?:CXX|C) executable", re.MULTILINE)
+LINK_STEP = re.compile(
+    r"^\[\d+/\d+\] Linking (?:CXX|C) executable (.+)$", re.MULTILINE
+)
 COMPILE_STEP = re.compile(
     r"^\[\d+/\d+\] Building (?:CXX|C|OBJC|OBJCXX) object", re.MULTILINE
 )
 
 
-def classify(log: str) -> dict[str, int]:
+def classify(log: str) -> dict[str, int | str]:
+    targets = sorted(LINK_STEP.findall(log))
     return {
-        "executable_links": len(LINK_STEP.findall(log)),
+        "executable_links": len(targets),
+        "executable_targets_sha256": hashlib.sha256(
+            "\n".join(targets).encode("utf-8")
+        ).hexdigest(),
         "compile_steps": len(COMPILE_STEP.findall(log)),
     }
 
 
-def comparable(reference: dict[str, int], candidate: dict[str, int]) -> bool:
+def comparable(
+    reference: dict[str, int | str], candidate: dict[str, int | str]
+) -> bool:
     return (
         reference["executable_links"] > 0
         and reference["executable_links"] == candidate["executable_links"]
+        and reference["executable_targets_sha256"]
+        == candidate["executable_targets_sha256"]
         and reference["compile_steps"] == 0
         and candidate["compile_steps"] == 0
     )
@@ -70,12 +81,15 @@ def self_test() -> None:
             "[4/4] Linking CXX static library libnativeui_core.a",
         ]
     )
-    assert classify(sample) == {"executable_links": 2, "compile_steps": 1}
-    valid = {"executable_links": 2, "compile_steps": 0}
+    parsed = classify(sample)
+    assert parsed["executable_links"] == 2
+    assert parsed["compile_steps"] == 1
+    valid = {**parsed, "compile_steps": 0}
     assert comparable(valid, valid)
-    assert not comparable(valid, {"executable_links": 1, "compile_steps": 0})
-    assert not comparable(valid, {"executable_links": 2, "compile_steps": 1})
-    assert not comparable({"executable_links": 0, "compile_steps": 0}, valid)
+    assert not comparable(valid, {**valid, "executable_links": 1})
+    assert not comparable(valid, {**valid, "compile_steps": 1})
+    assert not comparable(valid, {**valid, "executable_targets_sha256": "0" * 64})
+    assert not comparable({**valid, "executable_links": 0}, valid)
     print("Linker benchmark classification contract: PASS")
 
 
@@ -92,18 +106,26 @@ def benchmark(build: Path, output: Path) -> None:
             f"Expected a single nativeui_core archive, found {len(archives)}"
         )
 
-    # Only the archive timestamp changes; previously built object files remain
-    # byte-for-byte unchanged. All executables depending on Core must relink.
-    archives[0].touch()
+    # Force every executable to relink, including ones that do not depend on
+    # libnativeui_core.a. The common build-id flag is kept for both passes.
     serialized = dict(os.environ, CMAKE_BUILD_PARALLEL_LEVEL="1")
+    baseline_reconfigure_seconds, _ = run(
+        [
+            "cmake",
+            "-S",
+            ".",
+            "-B",
+            str(build),
+            "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=sha1",
+        ]
+    )
     baseline_seconds, baseline_output = run(
         ["cmake", "--build", str(build)], env=serialized
     )
     baseline = classify(baseline_output)
 
-    # Reconfigure only the executable linker flag on the *same* object tree.
-    # This compares fresh relink passes rather than a cold compile against a
-    # warm link. Recompiled objects invalidate the comparison.
+    # Change only the linker's identity on the same object tree and reject
+    # differing target sets or any additional C/C++ object compilation.
     reconfigure_seconds, _ = run(
         [
             "cmake",
@@ -111,7 +133,7 @@ def benchmark(build: Path, output: Path) -> None:
             ".",
             "-B",
             str(build),
-            "-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold",
+            "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=sha1 -fuse-ld=mold",
         ]
     )
     mold_seconds, mold_output = run(
@@ -123,6 +145,7 @@ def benchmark(build: Path, output: Path) -> None:
     results = {
         "comparable": valid,
         "initial_build_seconds": round(initial_seconds, 3),
+        "baseline_reconfigure_seconds": round(baseline_reconfigure_seconds, 3),
         "mold_reconfigure_seconds": round(reconfigure_seconds, 3),
         "default": {"seconds": round(baseline_seconds, 3), **baseline},
         "mold": {"seconds": round(mold_seconds, 3), **mold_stats},
@@ -156,7 +179,7 @@ def benchmark(build: Path, output: Path) -> None:
 
     if not valid:
         raise RuntimeError(
-            "Relink passes differed in executable count or recompiled objects; "
+            "Relink passes differed in executable identity/count or recompiled objects; "
             "no performance conclusion is valid"
         )
 

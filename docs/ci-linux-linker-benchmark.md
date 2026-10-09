@@ -13,15 +13,15 @@ run on normal feature PR updates.
 The benchmark:
 
 1. Configures and builds a fixed Release CMake/Ninja test tree once.
-2. Changes only the modification timestamp of the already compiled
-   `libnativeui_core.a` to trigger a fresh baseline relink.
-3. Times that relink with a single Ninja build slot, recording how many
-   executable links and unexpected C/C++ compilations occurred.
-4. Reconfigures the *same build tree* with
-   `CMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold`, then times its relink with the
-   same single build slot.
-5. Refuses a numerical comparison if linker invocation counts differ, no
-   executables were linked, or either relink recompiled object files.
+2. Reconfigures the same build tree with the common
+   `CMAKE_EXE_LINKER_FLAGS=-Wl,--build-id=sha1` option, forcing every
+   executable to relink using the original system linker.
+3. Times this pass with one Ninja build slot and records executable identity,
+   link count, and any unexpected C/C++ compilation.
+4. Changes only the executable linker selection by using
+   `-Wl,--build-id=sha1 -fuse-ld=mold` and repeats the relink.
+5. Refuses comparison if target identities/counts differ, no executables
+   were linked, or either pass recompiled object files.
 6. Runs the normal headless unit CTest suite on the mold-linked binaries.
 
 The JSON timing artifact and GitHub step summary record the evidence.
