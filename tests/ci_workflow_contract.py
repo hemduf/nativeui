@@ -39,7 +39,7 @@ def verify() -> None:
         require(required in cache_action, f"Missing compiler cache setting: {required}")
 
     expected_steps = {
-        "ci.yml": 2,
+        "ci.yml": 3,
         "scalar-source-validation.yml": 2,
         "main-smoke.yml": 1,
         "pugl-integration.yml": 1,
